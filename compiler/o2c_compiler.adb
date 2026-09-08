@@ -371,13 +371,28 @@ package body O2c_Compiler is
                      return R;
                   else
                      if UTypes (U).Elem = T_Char then
-                        --  whole ARRAY OF CHAR value (string variable)
-                        if Cur.Kind = Lex.Tok_LBracket then
-                           raise O2c_Error with "string indexing not in M6";
+                        --  ARRAY OF CHAR: either the whole string value or
+                        --  a single CHAR element s[i] (Ada index i + 1).
+                        if Cur.Kind /= Lex.Tok_LBracket then
+                           R.Text := To_Unbounded_String (Nm);
+                           R.Typ := T_Str;
+                           R.CStr := True;
+                           return R;
                         end if;
-                        R.Text := To_Unbounded_String (Nm);
-                        R.Typ := T_Str;
-                        R.CStr := True;
+                        Next;      --  past '['
+                        declare
+                           Ix : Expr_Rec := Parse_Expr;
+                        begin
+                           if Ix.Typ /= T_Int then
+                              raise O2c_Error
+                                with "string index must be INTEGER";
+                           end if;
+                           R.Text := To_Unbounded_String (Nm) & " ("
+                             & Ix.Text & " + 1)";
+                           R.Typ := T_Char;
+                        end;
+                        Expect (Lex.Tok_RBracket, "']'");
+                        Next;
                         return R;
                      end if;
                      Expect (Lex.Tok_LBracket, "'[' to index an array");
@@ -1181,14 +1196,34 @@ package body O2c_Compiler is
                   Next;
                   Expect (Lex.Tok_Assign, "':='");
                   Next;
-                  V := Parse_Expr;
-                  if V.Typ /= UTypes (Syms (Idx).UT).Elem then
-                     raise O2c_Error with "element type mismatch assigning "
-                       & Head (1 .. H_Len);
+                  if UTypes (Syms (Idx).UT).Elem = T_Char then
+                     --  string element: CHAR, Ada index i + 1
+                     if Cur.Kind = Lex.Tok_String and then Cur.Len = 1 then
+                        Append_Body ("      " & Head (1 .. H_Len) & " ("
+                                     & To_String (Ix.Text) & " + 1) := '"
+                                     & Cur.Text (1 .. 1) & "';");
+                        Next;
+                     else
+                        V := Parse_Expr;
+                        if V.Typ /= T_Char then
+                           raise O2c_Error with "string elements are CHAR"
+                             & " (assign a character to "
+                             & Head (1 .. H_Len) & ")";
+                        end if;
+                        Append_Body ("      " & Head (1 .. H_Len) & " ("
+                                     & To_String (Ix.Text) & " + 1) := "
+                                     & To_String (V.Text) & ";");
+                     end if;
+                  else
+                     V := Parse_Expr;
+                     if V.Typ /= UTypes (Syms (Idx).UT).Elem then
+                        raise O2c_Error with "element type mismatch assigning "
+                          & Head (1 .. H_Len);
+                     end if;
+                     Append_Body ("      " & Head (1 .. H_Len) & " ("
+                                  & To_String (Ix.Text) & ") := "
+                                  & To_String (V.Text) & ";");
                   end if;
-                  Append_Body ("      " & Head (1 .. H_Len) & " ("
-                               & To_String (Ix.Text) & ") := "
-                               & To_String (V.Text) & ";");
                end;
             elsif Cur.Kind = Lex.Tok_Dot and then Idx /= 0
               and then Syms (Idx).Kind = S_Var

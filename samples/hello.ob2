@@ -67,10 +67,11 @@ begin
   Out.Int(q.b, 0);
   Out.Ln
   msg := "hi";
+  msg[0] := "H";
   Out.String(msg);
   Out.Ln;
-  ch := "!";
-  if ch = "!" then
+  ch := msg[0];
+  if ch = "H" then
     Out.Int(7, 0);
     Out.Ln
   end

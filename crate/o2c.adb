@@ -76,10 +76,11 @@ procedure O2c is
     "  Out.Int(q.b, 0);" & ASCII.LF &
     "  Out.Ln" & ASCII.LF &
     "  msg := ""hi"";" & ASCII.LF &
+    "  msg[0] := ""H"";" & ASCII.LF &
     "  Out.String(msg);" & ASCII.LF &
     "  Out.Ln;" & ASCII.LF &
-    "  ch := ""!"";" & ASCII.LF &
-    "  if ch = ""!"" then" & ASCII.LF &
+    "  ch := msg[0];" & ASCII.LF &
+    "  if ch = ""H"" then" & ASCII.LF &
     "    Out.Int(7, 0);" & ASCII.LF &
     "    Out.Ln" & ASCII.LF &
     "  end" & ASCII.LF &
