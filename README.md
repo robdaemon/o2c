@@ -18,7 +18,8 @@ Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN, module-level), nested `procedure`s with value and
 `VAR` (by-reference) parameters, full expressions with Oberon
 precedence (`+ - * DIV MOD & OR ~ = # < <= > >=`, parens), typed
-assignment, and call statements — `Out.String`, `Out.Int`, `Out.Ln`,
+assignment, control flow (`IF/ELSIF/ELSE`, `WHILE/DO`, `REPEAT/UNTIL`,
+`FOR/TO/BY`), and call statements — `Out.String`, `Out.Int`, `Out.Ln`,
 and local-procedure calls. Errors are reported with line/column.
 
 **Deviation from the Oberon-2 spec (project decision): keywords and

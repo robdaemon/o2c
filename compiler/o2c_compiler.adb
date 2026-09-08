@@ -140,7 +140,8 @@ package body O2c_Compiler is
 
    --  forward specs
    function Parse_Expr return Expr_Rec;
-   procedure Statement_Seq;
+   procedure Statement_Seq (Stop_On_Else : Boolean := False;
+                              Stop_On_Until : Boolean := False);
    procedure Decl_Const;
    procedure Decl_Var;
    procedure Decl_Procedure;
@@ -532,31 +533,218 @@ package body O2c_Compiler is
 
    --  statements ---------------------------------------------------
 
-   procedure Statement_Seq is
+   function At_Stop (Stop_Else, Stop_Until : Boolean) return Boolean is
+     (Cur.Kind = Lex.Tok_End or else Cur.Kind = Lex.Tok_EOF
+      or else (Stop_Else and then
+               (Cur.Kind = Lex.Tok_Elsif or else Cur.Kind = Lex.Tok_Else))
+      or else (Stop_Until and then Cur.Kind = Lex.Tok_Until));
+
+   procedure Parse_If is
+      Cond : Expr_Rec;
+      Branch : Boolean := True;      --  True: emit "if", later "elsif"
+   begin
+      loop
+         Next;                       --  consume IF / ELSIF
+         Cond := Parse_Expr;
+         if Cond.Typ /= T_Bool then
+            raise O2c_Error with "IF/ELSIF condition must be BOOLEAN (line "
+              & Natural'Image (Cur.Line) & ")";
+         end if;
+         Expect (Lex.Tok_Then, "'THEN'");
+         Next;
+         Append_Body ("      " & (if Branch then "if " else "elsif ")
+                      & To_String (Cond.Text) & " then");
+         Branch := False;
+         declare
+            Before : constant Natural := Length (Body_Buf);
+         begin
+            Statement_Seq (Stop_On_Else => True);
+            if Length (Body_Buf) = Before then
+               Append_Body ("         null;");
+            end if;
+         end;
+         if Cur.Kind = Lex.Tok_Elsif then
+            null;                    --  loop consumes the ELSIF
+         elsif Cur.Kind = Lex.Tok_Else then
+            Append_Body ("      else");
+            Next;                    --  past ELSE
+            declare
+               Before : constant Natural := Length (Body_Buf);
+            begin
+               Statement_Seq;        --  until END
+               if Length (Body_Buf) = Before then
+                  Append_Body ("         null;");
+               end if;
+            end;
+            exit;
+         else
+            exit;                    --  END closes the IF
+         end if;
+      end loop;
+      Expect (Lex.Tok_End, "'END' closing the IF");
+      Next;
+      Append_Body ("      end if;");
+   end Parse_If;
+
+   procedure Parse_While is
+      Cond : Expr_Rec;
+   begin
+      Next;                          --  WHILE
+      Cond := Parse_Expr;
+      if Cond.Typ /= T_Bool then
+         raise O2c_Error with "WHILE condition must be BOOLEAN (line "
+           & Natural'Image (Cur.Line) & ")";
+      end if;
+      Expect (Lex.Tok_Do, "'DO'");
+      Next;
+      Append_Body ("      while " & To_String (Cond.Text) & " loop");
+      declare
+         Before : constant Natural := Length (Body_Buf);
+      begin
+         Statement_Seq;              --  until END
+         if Length (Body_Buf) = Before then
+            Append_Body ("         null;");
+         end if;
+      end;
+      Expect (Lex.Tok_End, "'END' closing the WHILE");
+      Next;
+      Append_Body ("      end loop;");
+   end Parse_While;
+
+   procedure Parse_Repeat is
+      Cond : Expr_Rec;
+   begin
+      Next;                          --  REPEAT
+      Append_Body ("      loop");
+      declare
+         Before : constant Natural := Length (Body_Buf);
+      begin
+         Statement_Seq (Stop_On_Until => True);
+         if Length (Body_Buf) = Before then
+            Append_Body ("         null;");
+         end if;
+      end;
+      Expect (Lex.Tok_Until, "'UNTIL'");
+      Next;
+      Cond := Parse_Expr;
+      if Cond.Typ /= T_Bool then
+         raise O2c_Error with "UNTIL condition must be BOOLEAN (line "
+           & Natural'Image (Cur.Line) & ")";
+      end if;
+      Append_Body ("      exit when " & To_String (Cond.Text) & ";");
+      Append_Body ("      end loop;");
+   end Parse_Repeat;
+
+   procedure Parse_For is
+      V_Name : String (1 .. 64);
+      V_Len  : Natural;
+      Idx    : Natural;
+      Lo, Hi : Expr_Rec;
+      By_Text : Unbounded_String;
+      Asc    : Boolean;
+   begin
+      Next;                          --  FOR
+      V_Len := Cur.Len;
+      V_Name (1 .. V_Len) := Cur.Text (1 .. V_Len);
+      Idx := Find (V_Name (1 .. V_Len));
+      if Idx = 0 or else Syms (Idx).Kind /= S_Var
+        or else Syms (Idx).Typ /= T_Int
+      then
+         raise O2c_Error with "FOR needs an INTEGER variable ('"
+           & V_Name (1 .. V_Len) & "')";
+      end if;
+      Next;
+      Expect (Lex.Tok_Assign, "':=' in a FOR header");
+      Next;
+      Lo := Parse_Expr;
+      if Lo.Typ /= T_Int then
+         raise O2c_Error with "FOR bounds must be INTEGER";
+      end if;
+      Expect (Lex.Tok_To, "'TO'");
+      Next;
+      Hi := Parse_Expr;
+      if Hi.Typ /= T_Int then
+         raise O2c_Error with "FOR bounds must be INTEGER";
+      end if;
+      By_Text := To_Unbounded_String ("1");
+      if Cur.Kind = Lex.Tok_By then
+         Next;
+         declare
+            B : Expr_Rec := Parse_Expr;
+            T : constant String := To_String (B.Text);
+            All_Digits : Boolean := True;
+         begin
+            if B.Typ /= T_Int then
+               raise O2c_Error with "FOR BY must be an integer constant";
+            end if;
+            for I in T'Range loop
+               if I /= T'First or else T (I) /= '-' then
+                  if T (I) not in '0' .. '9' then
+                     All_Digits := False;
+                  end if;
+               end if;
+            end loop;
+            if not All_Digits then
+               raise O2c_Error with "FOR BY must be an integer constant (M3)";
+            end if;
+            By_Text := B.Text;
+         end;
+      end if;
+      Expect (Lex.Tok_Do, "'DO'");
+      Next;
+      Asc := To_String (By_Text) (1) /= '-';
+      Append_Body ("      " & V_Name (1 .. V_Len) & " := "
+                   & To_String (Lo.Text) & ";");
+      Append_Body ("      while " & V_Name (1 .. V_Len) & " "
+                   & (if Asc then "<=" else ">=") & " "
+                   & To_String (Hi.Text) & " loop");
+      declare
+         Before : constant Natural := Length (Body_Buf);
+      begin
+         Statement_Seq;              --  until END
+         if Length (Body_Buf) = Before then
+            Append_Body ("         null;");
+         end if;
+      end;
+      Expect (Lex.Tok_End, "'END' closing the FOR");
+      Next;
+      Append_Body ("      " & V_Name (1 .. V_Len) & " := "
+                   & V_Name (1 .. V_Len) & " + " & To_String (By_Text) & ";");
+      Append_Body ("      end loop;");
+   end Parse_For;
+
+   procedure Statement_Seq (Stop_On_Else : Boolean := False;
+                            Stop_On_Until : Boolean := False) is
       Head : String (1 .. 64);
       H_Len : Natural := 0;
       Idx  : Natural;
    begin
       loop
-         exit when Cur.Kind = Lex.Tok_End or else Cur.Kind = Lex.Tok_EOF;
+         exit when At_Stop (Stop_On_Else, Stop_On_Until);
 
-         if Cur.Kind = Lex.Tok_Ident then
+         if Cur.Kind = Lex.Tok_If then
+            Parse_If;
+         elsif Cur.Kind = Lex.Tok_While then
+            Parse_While;
+         elsif Cur.Kind = Lex.Tok_Repeat then
+            Parse_Repeat;
+         elsif Cur.Kind = Lex.Tok_For then
+            Parse_For;
+         elsif Cur.Kind = Lex.Tok_Ident then
             H_Len := Cur.Len;
             Head (1 .. H_Len) := Cur.Text (1 .. H_Len);
             Idx := Find (Head (1 .. H_Len));
             Next;
-
             if Cur.Kind = Lex.Tok_Dot then
                --  Out.String / Out.Int / Out.Ln
                Next;
                Expect (Lex.Tok_Ident, "a member name after '.'");
                declare
-                  M_Len : constant Natural := Cur.Len;
-                  Member : constant String := Cur.Text (1 .. M_Len);
+                  Member : constant String := Cur.Text (1 .. Cur.Len);
                   M : Unbounded_String;
                begin
                   if Head (1 .. H_Len) /= "Out" then
-                     raise O2c_Error with "M2 calls only module Out (found '"
+                     raise O2c_Error with "M3 calls only module Out (found '"
                        & Head (1 .. H_Len) & "." & Member & "')";
                   end if;
                   Next;
@@ -587,7 +775,7 @@ package body O2c_Compiler is
                            Used_Int := True;
                         end;
                      end if;
-                     if Cur.Kind = Lex.Tok_Comma then   --  optional width
+                     if Cur.Kind = Lex.Tok_Comma then
                         Next;
                         declare
                            W : Expr_Rec := Parse_Expr;
@@ -607,12 +795,11 @@ package body O2c_Compiler is
                                      & ");");
                      end if;
                   else
-                     raise O2c_Error with "M2 supports Out.String/Out.Int/"
+                     raise O2c_Error with "M3 supports Out.String/Out.Int/"
                        & "Out.Ln only (found Out." & Member & ")";
                   end if;
                end;
             elsif Cur.Kind = Lex.Tok_LParen then
-               --  local procedure call with arguments
                if Idx = 0 or else Syms (Idx).Kind /= S_Proc then
                   raise O2c_Error with "'" & Head (1 .. H_Len)
                     & "' is not a declared procedure (line "
@@ -635,8 +822,9 @@ package body O2c_Compiler is
                      begin
                         Args (N_A) := A.Text;
                         if Syms (Idx).P (N_A).Typ /= A.Typ then
-                           raise O2c_Error with "argument " & Natural'Image (N_A)
-                             & " of " & Head (1 .. H_Len) & " has the wrong type";
+                           raise O2c_Error with "argument "
+                             & Natural'Image (N_A) & " of "
+                             & Head (1 .. H_Len) & " has the wrong type";
                         end if;
                      end;
                      exit when Cur.Kind /= Lex.Tok_Comma;
@@ -644,8 +832,8 @@ package body O2c_Compiler is
                   end loop;
                   if N_A /= Syms (Idx).Params then
                      raise O2c_Error with Head (1 .. H_Len) & " expects "
-                       & Natural'Image (Syms (Idx).Params) & " argument(s), got "
-                       & Natural'Image (N_A);
+                       & Natural'Image (Syms (Idx).Params)
+                       & " argument(s), got " & Natural'Image (N_A);
                   end if;
                   Expect (Lex.Tok_RParen, "')'");
                   Next;
@@ -660,7 +848,6 @@ package body O2c_Compiler is
                   Append_Body ("      " & To_String (Call));
                end;
             elsif Cur.Kind = Lex.Tok_Assign then
-               --  assignment
                if Idx = 0 or else Syms (Idx).Kind /= S_Var then
                   raise O2c_Error with "'" & Head (1 .. H_Len)
                     & "' is not a variable (line " & Natural'Image (Cur.Line)
@@ -681,7 +868,6 @@ package body O2c_Compiler is
                raise O2c_Error with "unsupported ':' after identifier (line "
                  & Natural'Image (Cur.Line) & ")";
             else
-               --  no-argument local procedure call
                if Idx = 0 or else Syms (Idx).Kind /= S_Proc
                  or else Syms (Idx).Params /= 0
                then
@@ -691,11 +877,8 @@ package body O2c_Compiler is
                end if;
                Append_Body ("      " & Head (1 .. H_Len) & ";");
             end if;
-         elsif Cur.Kind = Lex.Tok_Begin then
-            --  no nested BEGIN/END blocks in the M2 subset
-            raise O2c_Error with "nested BEGIN not in the M2 subset";
          else
-            raise O2c_Error with "M2 statement expected at line "
+            raise O2c_Error with "M3 statement expected at line "
               & Natural'Image (Cur.Line);
          end if;
 

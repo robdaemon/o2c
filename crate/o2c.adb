@@ -12,27 +12,44 @@ with O2c_Compiler;
 --  value and a VAR parameter.
 procedure O2c is
 
-   Sample : constant String :=
-     "module Hello;" & ASCII.LF &
-     "import Out;" & ASCII.LF &
-     ASCII.LF &
-     "var n: integer;" & ASCII.LF &
-     ASCII.LF &
-     "const Greeting = ""hello from Oberon-2"";" & ASCII.LF &
-     ASCII.LF &
-     "procedure CountTo(k: integer; var total: integer);" & ASCII.LF &
-     "begin" & ASCII.LF &
-     "  total := k * 2;" & ASCII.LF &
-     "  Out.Int(total, 0);" & ASCII.LF &
-     "  Out.Ln" & ASCII.LF &
-     "end CountTo;" & ASCII.LF &
-     ASCII.LF &
-     "begin" & ASCII.LF &
-     "  n := 0;" & ASCII.LF &
-     "  Out.String(Greeting);" & ASCII.LF &
-     "  Out.Ln;" & ASCII.LF &
-     "  CountTo(21, n)" & ASCII.LF &
-     "end Hello.";
+  Sample : constant String :=
+    "module Hello;" & ASCII.LF &
+    "import Out;" & ASCII.LF &
+    ASCII.LF &
+    "var n: integer;" & ASCII.LF &
+    ASCII.LF &
+    "const Greeting = ""hello from Oberon-2"";" & ASCII.LF &
+    ASCII.LF &
+    "procedure CountTo(k: integer; var total: integer);" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  total := 0;" & ASCII.LF &
+    "  while total < k * 2 do" & ASCII.LF &
+    "    total := total + 1" & ASCII.LF &
+    "  end;" & ASCII.LF &
+    "  if total = k * 2 then" & ASCII.LF &
+    "    Out.Int(total, 0);" & ASCII.LF &
+    "    Out.Ln" & ASCII.LF &
+    "  else" & ASCII.LF &
+    "    Out.Int(0, 0);" & ASCII.LF &
+    "    Out.Ln" & ASCII.LF &
+    "  end" & ASCII.LF &
+    "end CountTo;" & ASCII.LF &
+    ASCII.LF &
+    "begin" & ASCII.LF &
+    "  n := 0;" & ASCII.LF &
+    "  repeat" & ASCII.LF &
+    "    n := n + 1;" & ASCII.LF &
+    "    Out.Int(n, 0)" & ASCII.LF &
+    "  until n = 3;" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  Out.String(Greeting);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  for n := 4 to 5 do" & ASCII.LF &
+    "    Out.Int(n, 0)" & ASCII.LF &
+    "  end;" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  CountTo(21, n)" & ASCII.LF &
+    "end Hello.";
 
 
    procedure Emit_Line (Line : String) is

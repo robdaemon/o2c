@@ -7,14 +7,31 @@ const Greeting = "hello from Oberon-2";
 
 procedure CountTo(k: integer; var total: integer);
 begin
-  total := k * 2;
-  Out.Int(total, 0);
-  Out.Ln
+  total := 0;
+  while total < k * 2 do
+    total := total + 1
+  end;
+  if total = k * 2 then
+    Out.Int(total, 0);
+    Out.Ln
+  else
+    Out.Int(0, 0);
+    Out.Ln
+  end
 end CountTo;
 
 begin
   n := 0;
+  repeat
+    n := n + 1;
+    Out.Int(n, 0)
+  until n = 3;
+  Out.Ln;
   Out.String(Greeting);
+  Out.Ln;
+  for n := 4 to 5 do
+    Out.Int(n, 0)
+  end;
   Out.Ln;
   CountTo(21, n)
 end Hello.
