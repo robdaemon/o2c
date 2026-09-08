@@ -19,7 +19,9 @@ procedure O2c is
     "var n: integer;" & ASCII.LF &
     "type Vector = ARRAY 4 OF integer;" & ASCII.LF &
     "type Pair = RECORD a, b: integer END;" & ASCII.LF &
+    "type Line = ARRAY 8 OF char;" & ASCII.LF &
     "var v: Vector; p: Pair; q: Pair; i: integer;" & ASCII.LF &
+    "var msg: Line; ch: char;" & ASCII.LF &
     ASCII.LF &
     "const Greeting = ""hello from Oberon-2"";" & ASCII.LF &
     ASCII.LF &
@@ -73,6 +75,14 @@ procedure O2c is
     "  q := p;" & ASCII.LF &
     "  Out.Int(q.b, 0);" & ASCII.LF &
     "  Out.Ln" & ASCII.LF &
+    "  msg := ""hi"";" & ASCII.LF &
+    "  Out.String(msg);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  ch := ""!"";" & ASCII.LF &
+    "  if ch = ""!"" then" & ASCII.LF &
+    "    Out.Int(7, 0);" & ASCII.LF &
+    "    Out.Ln" & ASCII.LF &
+    "  end" & ASCII.LF &
     "  CountTo(21, n)" & ASCII.LF &
     "end Hello.";
 

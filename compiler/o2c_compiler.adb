@@ -8,11 +8,12 @@ package body O2c_Compiler is
 
    package Lex renames O2c_Lexer;
 
-   type EType is (T_Int, T_Bool, T_Str);
+   type EType is (T_Int, T_Bool, T_Str, T_Char);
 
    type Expr_Rec is record
-      Text : Unbounded_String;
-      Typ  : EType := T_Int;
+      Text  : Unbounded_String;
+      Typ   : EType := T_Int;
+      CStr  : Boolean := False;   --  whole ARRAY OF CHAR variable value
    end record;
 
    Max_Fields : constant := 32;
@@ -74,6 +75,7 @@ package body O2c_Compiler is
    Cur_Ret_Type : EType := T_Int;
    Ctrl_Depth   : Natural := 0;    --  open IF/WHILE/REPEAT/FOR nesting
    Func_Return_Ok : Boolean := False;
+   Used_CStr : Boolean := False;
 
    procedure Append_Decl (S : String) is
    begin
@@ -154,6 +156,7 @@ package body O2c_Compiler is
          when T_Int  => return "Integer";
          when T_Bool => return "Boolean";
          when T_Str  => return "String";
+         when T_Char => return "Character";
       end case;
    end Ada_Type;
 
@@ -180,9 +183,26 @@ package body O2c_Compiler is
       return True;
    end Eq_No_Case;
 
+   function Builtin_Type_Of (Name : String) return EType is
+   begin
+      if Eq_No_Case (Name, "INTEGER") then
+         return T_Int;
+      elsif Eq_No_Case (Name, "BOOLEAN") then
+         return T_Bool;
+      elsif Eq_No_Case (Name, "CHAR") then
+         return T_Char;
+      end if;
+      return T_Str;               --  sentinel: not a builtin scalar
+   end Builtin_Type_Of;
+
    function Scalar_Init (T : EType) return String is
    begin
-      return (if T = T_Int then "0" else "False");
+      if T = T_Int then
+         return "0";
+      elsif T = T_Char then
+         return "ASCII.NUL";
+      end if;
+      return "False";
    end Scalar_Init;
 
    function Ada_String_Literal (S : String) return String is
@@ -350,6 +370,16 @@ package body O2c_Compiler is
                      Next;
                      return R;
                   else
+                     if UTypes (U).Elem = T_Char then
+                        --  whole ARRAY OF CHAR value (string variable)
+                        if Cur.Kind = Lex.Tok_LBracket then
+                           raise O2c_Error with "string indexing not in M6";
+                        end if;
+                        R.Text := To_Unbounded_String (Nm);
+                        R.Typ := T_Str;
+                        R.CStr := True;
+                        return R;
+                     end if;
                      Expect (Lex.Tok_LBracket, "'[' to index an array");
                      Next;
                      declare
@@ -480,6 +510,10 @@ package body O2c_Compiler is
         or else Cur.Kind = Lex.Tok_GT or else Cur.Kind = Lex.Tok_GE
       then
          declare
+            Ordering : constant Boolean := Cur.Kind = Lex.Tok_LT
+              or else Cur.Kind = Lex.Tok_LE
+              or else Cur.Kind = Lex.Tok_GT
+              or else Cur.Kind = Lex.Tok_GE;
             Op : constant String :=
               (case Cur.Kind is
                  when Lex.Tok_Equal => " = ",
@@ -493,8 +527,38 @@ package body O2c_Compiler is
             declare
                X : Expr_Rec := Parse_Simple;
             begin
-               if R.Typ /= T_Int or else X.Typ /= T_Int then
-                  raise O2c_Error with "comparisons need INTEGER operands";
+               if Ordering then
+                  if R.Typ /= T_Int or else X.Typ /= T_Int then
+                     raise O2c_Error with "ordering comparisons need INTEGER"
+                       & " operands";
+                  end if;
+               else
+                  declare
+                     procedure Char_Coerce (E : in out Expr_Rec;
+                                            Other : EType) is
+                        T : constant String := To_String (E.Text);
+                     begin
+                        if E.Typ = T_Str and then Other = T_Char
+                          and then T'Length = 3
+                          and then T (T'First) = '"'
+                          and then T (T'Last) = '"'
+                        then
+                           E.Typ := T_Char;
+                           E.Text := To_Unbounded_String
+                             ("'" & T (T'First + 1) & "'");
+                        end if;
+                     end Char_Coerce;
+                  begin
+                     Char_Coerce (R, X.Typ);
+                     Char_Coerce (X, R.Typ);
+                     if R.Typ /= X.Typ
+                       or else (R.Typ /= T_Int and then R.Typ /= T_Bool
+                                and then R.Typ /= T_Char)
+                     then
+                        raise O2c_Error with "'='/'#' operands must match"
+                          & " (INTEGER, BOOLEAN or CHAR)";
+                     end if;
+                  end;
                end if;
                R.Text := "(" & R.Text & Op & X.Text & ")";
                R.Typ := T_Bool;
@@ -553,11 +617,8 @@ package body O2c_Compiler is
             declare
                T : constant String := Cur.Text (1 .. Cur.Len);
             begin
-               if Eq_No_Case (T, "INTEGER") then
-                  Typ := T_Int;
-               elsif Eq_No_Case (T, "BOOLEAN") then
-                  Typ := T_Bool;
-               else
+               Typ := Builtin_Type_Of (T);
+               if Typ = T_Str then
                   UT := Find_UT (T);
                   if UT = 0 then
                      raise O2c_Error with "unknown type '" & T
@@ -643,19 +704,21 @@ package body O2c_Compiler is
          if Cur.Kind /= Lex.Tok_Ident then
             raise O2c_Error with "an element type expected";
          end if;
-         if Eq_No_Case (Cur.Text (1 .. Cur.Len), "INTEGER") then
-            UTypes (UTI).Elem := T_Int;
-         elsif Eq_No_Case (Cur.Text (1 .. Cur.Len), "BOOLEAN") then
-            UTypes (UTI).Elem := T_Bool;
-         else
-            raise O2c_Error with "M5 array element types: INTEGER/BOOLEAN"
+         UTypes (UTI).Elem := Builtin_Type_Of (Cur.Text (1 .. Cur.Len));
+         if UTypes (UTI).Elem = T_Str then
+            raise O2c_Error with "array element types: INTEGER/BOOLEAN/CHAR"
               & " only ('" & Cur.Text (1 .. Cur.Len) & "')";
          end if;
          Next;
          UTypes (UTI).Is_Rec := False;
-         Append_Decl ("   type " & Name & " is array (0 .. "
-                      & Integer'Image (UTypes (UTI).Arr_Len - 1)
-                      & ") of " & Ada_Type (UTypes (UTI).Elem) & ";");
+         if UTypes (UTI).Elem = T_Char then
+            Append_Decl ("   subtype " & Name & " is String (1 .. "
+                         & Integer'Image (UTypes (UTI).Arr_Len) & ");");
+         else
+            Append_Decl ("   type " & Name & " is array (0 .. "
+                         & Integer'Image (UTypes (UTI).Arr_Len - 1)
+                         & ") of " & Ada_Type (UTypes (UTI).Elem) & ";");
+         end if;
       elsif Cur.Kind = Lex.Tok_Record then
          Next;
          loop
@@ -680,12 +743,9 @@ package body O2c_Compiler is
                if Cur.Kind /= Lex.Tok_Ident then
                   raise O2c_Error with "a field type expected";
                end if;
-               if Eq_No_Case (Cur.Text (1 .. Cur.Len), "INTEGER") then
-                  FT := T_Int;
-               elsif Eq_No_Case (Cur.Text (1 .. Cur.Len), "BOOLEAN") then
-                  FT := T_Bool;
-               else
-                  raise O2c_Error with "M5 field types: INTEGER/BOOLEAN only";
+               FT := Builtin_Type_Of (Cur.Text (1 .. Cur.Len));
+               if FT = T_Str then
+                  raise O2c_Error with "field types: INTEGER/BOOLEAN/CHAR only";
                end if;
                Next;
                if Cur.Kind = Lex.Tok_Semi then
@@ -752,13 +812,10 @@ package body O2c_Compiler is
                   raise O2c_Error with "a type name expected (line "
                     & Natural'Image (Cur.Line) & ")";
                end if;
-               if Eq_No_Case (Cur.Text (1 .. Cur.Len), "INTEGER") then
-                  PTyp (N_Par) := T_Int;
-               elsif Eq_No_Case (Cur.Text (1 .. Cur.Len), "BOOLEAN") then
-                  PTyp (N_Par) := T_Bool;
-               else
-                  raise O2c_Error with "M2 parameter types: INTEGER/BOOLEAN"
-                    & " only ('" & Cur.Text (1 .. Cur.Len) & "')";
+               PTyp (N_Par) := Builtin_Type_Of (Cur.Text (1 .. Cur.Len));
+               if PTyp (N_Par) = T_Str then
+                  raise O2c_Error with "parameter types: INTEGER/BOOLEAN/"
+                    & "CHAR only ('" & Cur.Text (1 .. Cur.Len) & "')";
                end if;
                Next;
                PRef (N_Par) := By_Ref;
@@ -780,12 +837,9 @@ package body O2c_Compiler is
             raise O2c_Error with "a return type name expected (line "
               & Natural'Image (Cur.Line) & ")";
          end if;
-         if Eq_No_Case (Cur.Text (1 .. Cur.Len), "INTEGER") then
-            Ret_Typ := T_Int;
-         elsif Eq_No_Case (Cur.Text (1 .. Cur.Len), "BOOLEAN") then
-            Ret_Typ := T_Bool;
-         else
-            raise O2c_Error with "M4 return types: INTEGER/BOOLEAN only ('"
+         Ret_Typ := Builtin_Type_Of (Cur.Text (1 .. Cur.Len));
+         if Ret_Typ = T_Str then
+            raise O2c_Error with "return types: INTEGER/BOOLEAN/CHAR only ('"
               & Cur.Text (1 .. Cur.Len) & "')";
          end if;
          Next;
@@ -1178,26 +1232,53 @@ package body O2c_Compiler is
               and then Syms (Idx).Kind = S_Var
               and then Syms (Idx).UT /= 0
             then
-               --  whole record/array copy: b := a  (same user type)
+               --  whole record/array copy b := a, or string literal into
+               --  an ARRAY OF CHAR variable (padded with NULs)
                declare
-                  R  : Natural;
+                  U  : constant Natural := Syms (Idx).UT;
+                  N  : constant Integer := UTypes (U).Arr_Len;
                begin
                   Next;             --  past ':='
-                  if Cur.Kind /= Lex.Tok_Ident then
-                     raise O2c_Error with "whole-value copy needs a variable"
-                       & " of the same type";
-                  end if;
-                  R := Find (Cur.Text (1 .. Cur.Len));
-                  if R = 0 or else Syms (R).Kind /= S_Var
-                    or else Syms (R).UT /= Syms (Idx).UT
+                  if UTypes (U).Elem = T_Char
+                    and then Cur.Kind = Lex.Tok_String
                   then
-                     raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
-                       & "' is not a same-typed variable (copy of "
-                       & Head (1 .. H_Len) & ")";
+                     if Cur.Len > N then
+                        raise O2c_Error with "string literal too long for "
+                          & Head (1 .. H_Len) & " (" & Integer'Image (Cur.Len)
+                          & " > " & Integer'Image (N) & ")";
+                     end if;
+                     if Cur.Len = N then
+                        Append_Body ("      " & Head (1 .. H_Len) & " := "
+                                     & Ada_String_Literal (Cur.Text (1 .. Cur.Len))
+                                     & ";");
+                     else
+                        Append_Body ("      " & Head (1 .. H_Len) & " := "
+                                     & Ada_String_Literal (Cur.Text (1 .. Cur.Len))
+                                     & " & String'(1 .. "
+                                     & Integer'Image (N - Cur.Len)
+                                     & " => ASCII.NUL);");
+                     end if;
+                     Next;
+                  else
+                     if Cur.Kind /= Lex.Tok_Ident then
+                        raise O2c_Error with "whole-value copy needs a"
+                          & " variable of the same type";
+                     end if;
+                     declare
+                        R : Natural := Find (Cur.Text (1 .. Cur.Len));
+                     begin
+                        if R = 0 or else Syms (R).Kind /= S_Var
+                          or else Syms (R).UT /= Syms (Idx).UT
+                        then
+                           raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
+                             & "' is not a same-typed variable (copy of "
+                             & Head (1 .. H_Len) & ")";
+                        end if;
+                        Append_Body ("      " & Head (1 .. H_Len) & " := "
+                                     & Cur.Text (1 .. Cur.Len) & ";");
+                        Next;
+                     end;
                   end if;
-                  Append_Body ("      " & Head (1 .. H_Len) & " := "
-                               & Cur.Text (1 .. Cur.Len) & ";");
-                  Next;
                end;
             elsif Cur.Kind = Lex.Tok_Dot then
                --  Out.String / Out.Int / Out.Ln
@@ -1206,6 +1287,7 @@ package body O2c_Compiler is
                declare
                   Member : constant String := Cur.Text (1 .. Cur.Len);
                   M : Unbounded_String;
+                  CArg : Boolean := False;
                begin
                   if Head (1 .. H_Len) /= "Out" then
                      raise O2c_Error with "M3 calls only module Out (found '"
@@ -1226,6 +1308,7 @@ package body O2c_Compiler is
                                 with "Out.String needs a string argument";
                            end if;
                            M := A.Text;
+                           CArg := A.CStr;
                         end;
                      else
                         declare
@@ -1252,8 +1335,14 @@ package body O2c_Compiler is
                      Expect (Lex.Tok_RParen, "')'");
                      Next;
                      if Member = "String" then
-                        Append_Body ("      Aegir_User.Console.Put ("
-                                     & To_String (M) & ");");
+                        if CArg then
+                           Used_CStr := True;
+                           Append_Body ("      O2c_Put_CStr (" & To_String (M)
+                                        & ");");
+                        else
+                           Append_Body ("      Aegir_User.Console.Put ("
+                                        & To_String (M) & ");");
+                        end if;
                      else
                         Append_Body ("      O2c_Put_Int (" & To_String (M)
                                      & ");");
@@ -1318,16 +1407,24 @@ package body O2c_Compiler is
                     & ")";
                end if;
                Next;
-               declare
-                  V : Expr_Rec := Parse_Expr;
-               begin
-                  if Syms (Idx).Typ /= V.Typ or else V.Typ = T_Str then
-                     raise O2c_Error with "type mismatch assigning "
-                       & Head (1 .. H_Len);
-                  end if;
-                  Append_Body ("      " & Head (1 .. H_Len) & " := "
-                               & To_String (V.Text) & ";");
-               end;
+               if Syms (Idx).Typ = T_Char
+                 and then Cur.Kind = Lex.Tok_String and then Cur.Len = 1
+               then
+                  Append_Body ("      " & Head (1 .. H_Len) & " := '"
+                               & Cur.Text (1 .. 1) & "';");
+                  Next;
+               else
+                  declare
+                     V : Expr_Rec := Parse_Expr;
+                  begin
+                     if Syms (Idx).Typ /= V.Typ or else V.Typ = T_Str then
+                        raise O2c_Error with "type mismatch assigning "
+                          & Head (1 .. H_Len);
+                     end if;
+                     Append_Body ("      " & Head (1 .. H_Len) & " := "
+                                  & To_String (V.Text) & ";");
+                  end;
+               end if;
             elsif Cur.Kind = Lex.Tok_Colon then
                raise O2c_Error with "unsupported ':' after identifier (line "
                  & Natural'Image (Cur.Line) & ")";
@@ -1457,6 +1554,19 @@ package body O2c_Compiler is
            & "         Aegir_User.Console.Put (Img);" & ASCII.LF
            & "      end if;" & ASCII.LF
            & "   end O2c_Put_Int;" & ASCII.LF;
+      end if;
+      if Used_CStr then
+         S := S & "   procedure O2c_Put_CStr (S : String) is" & ASCII.LF
+           & "   begin" & ASCII.LF
+           & "      for I in S'Range loop" & ASCII.LF
+           & "         if S (I) = ASCII.NUL then" & ASCII.LF
+           & "            Aegir_User.Console.Put (S (S'First .. I - 1));"
+           & ASCII.LF
+           & "            return;" & ASCII.LF
+           & "         end if;" & ASCII.LF
+           & "      end loop;" & ASCII.LF
+           & "      Aegir_User.Console.Put (S);" & ASCII.LF
+           & "   end O2c_Put_CStr;" & ASCII.LF;
       end if;
       S := S & To_String (Decl_Buf);
       S := S & "begin" & ASCII.LF;

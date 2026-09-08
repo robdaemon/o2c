@@ -3,9 +3,11 @@ import Out;
 
 type Vector = ARRAY 4 OF integer;
 type Pair = RECORD a, b: integer END;
+type Line = ARRAY 8 OF char;
 
 var n: integer;
 var v: Vector; p: Pair; q: Pair; i: integer;
+var msg: Line; ch: char;
 
 const Greeting = "hello from Oberon-2";
 
@@ -64,5 +66,13 @@ begin
   q := p;
   Out.Int(q.b, 0);
   Out.Ln
+  msg := "hi";
+  Out.String(msg);
+  Out.Ln;
+  ch := "!";
+  if ch = "!" then
+    Out.Int(7, 0);
+    Out.Ln
+  end
   CountTo(21, n)
 end Hello.
