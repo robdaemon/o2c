@@ -1,11 +1,11 @@
 module Hello;
 import Out;
 
-var n: INTEGER;
+var n: integer;
 
 const Greeting = "hello from Oberon-2";
 
-procedure CountTo(k: INTEGER; VAR total: INTEGER);
+procedure CountTo(k: integer; var total: integer);
 begin
   total := k * 2;
   Out.Int(total, 0);

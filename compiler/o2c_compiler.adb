@@ -101,6 +101,29 @@ package body O2c_Compiler is
       end case;
    end Ada_Type;
 
+   --  Standard type names fold like keywords: INTEGER/Integer/integer
+   --  are all accepted in type position (case-insensitivity deviation).
+   --  Ordinary identifiers stay case-sensitive.
+   function Eq_No_Case (A, B : String) return Boolean is
+      function Fold (C : Character) return Character is
+      begin
+         if C in 'a' .. 'z' then
+            return Character'Val (Character'Pos (C) - 32);
+         end if;
+         return C;
+      end Fold;
+   begin
+      if A'Length /= B'Length then
+         return False;
+      end if;
+      for I in A'Range loop
+         if Fold (A (I)) /= Fold (B (I - A'First + B'First)) then
+            return False;
+         end if;
+      end loop;
+      return True;
+   end Eq_No_Case;
+
    function Ada_String_Literal (S : String) return String is
       R : Unbounded_String;
    begin
@@ -359,10 +382,10 @@ package body O2c_Compiler is
          declare
             T : constant String := Cur.Text (1 .. Cur.Len);
          begin
-            if T = "INTEGER" then
+            if Eq_No_Case (T, "INTEGER") then
                Typ := T_Int;
                Init := "0";
-            elsif T = "BOOLEAN" then
+            elsif Eq_No_Case (T, "BOOLEAN") then
                Typ := T_Bool;
                Init := "F";
             else
@@ -423,9 +446,9 @@ package body O2c_Compiler is
                   raise O2c_Error with "a type name expected (line "
                     & Natural'Image (Cur.Line) & ")";
                end if;
-               if Cur.Text (1 .. Cur.Len) = "INTEGER" then
+               if Eq_No_Case (Cur.Text (1 .. Cur.Len), "INTEGER") then
                   PTyp (N_Par) := T_Int;
-               elsif Cur.Text (1 .. Cur.Len) = "BOOLEAN" then
+               elsif Eq_No_Case (Cur.Text (1 .. Cur.Len), "BOOLEAN") then
                   PTyp (N_Par) := T_Bool;
                else
                   raise O2c_Error with "M2 parameter types: INTEGER/BOOLEAN"

@@ -21,9 +21,10 @@ precedence (`+ - * DIV MOD & OR ~ = # < <= > >=`, parens), typed
 assignment, and call statements — `Out.String`, `Out.Int`, `Out.Ln`,
 and local-procedure calls. Errors are reported with line/column.
 
-**Deviation from the Oberon-2 spec (project decision): keywords are
-case-insensitive** (`module`/`MODULE`/`Begin`… all lex as keywords).
-Identifiers stay case-sensitive.
+**Deviation from the Oberon-2 spec (project decision): keywords and
+standard type names are case-insensitive** (`module`/`MODULE`,
+`integer`/`INTEGER` in type position, `var`/`VAR`, `Begin`… all
+accepted). Ordinary identifiers stay case-sensitive.
 
 Not yet in M1: `var`/`type`/records/arrays, procedure parameters,
 expressions beyond literals/const refs, arithmetic statements, other

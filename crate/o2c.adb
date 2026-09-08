@@ -16,11 +16,11 @@ procedure O2c is
      "module Hello;" & ASCII.LF &
      "import Out;" & ASCII.LF &
      ASCII.LF &
-     "var n: INTEGER;" & ASCII.LF &
+     "var n: integer;" & ASCII.LF &
      ASCII.LF &
      "const Greeting = ""hello from Oberon-2"";" & ASCII.LF &
      ASCII.LF &
-     "procedure CountTo(k: INTEGER; VAR total: INTEGER);" & ASCII.LF &
+     "procedure CountTo(k: integer; var total: integer);" & ASCII.LF &
      "begin" & ASCII.LF &
      "  total := k * 2;" & ASCII.LF &
      "  Out.Int(total, 0);" & ASCII.LF &
