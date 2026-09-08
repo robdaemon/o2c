@@ -33,6 +33,7 @@ package body O2c_Compiler is
       Typ    : EType := T_Int;
       Name   : Unbounded_String;
       Params : Natural := 0;
+      Ret    : Boolean := False;   --  procedure is a function (returns Typ)
       P      : Param_Array := (others => <>);
    end record;
 
@@ -45,6 +46,11 @@ package body O2c_Compiler is
    Mod_Name  : Unbounded_String;
    Used_Int  : Boolean := False;
    Seen_Proc : Boolean := False;
+   In_Proc   : Boolean := False;   --  parsing inside a procedure body
+   Cur_Proc_Ret : Boolean := False;
+   Cur_Ret_Type : EType := T_Int;
+   Ctrl_Depth   : Natural := 0;    --  open IF/WHILE/REPEAT/FOR nesting
+   Func_Return_Ok : Boolean := False;
 
    procedure Append_Decl (S : String) is
    begin
@@ -91,6 +97,13 @@ package body O2c_Compiler is
       end loop;
       return 0;
    end Find;
+
+   function Starts_Expr (K : Lex.Token_Kind) return Boolean is
+     (K = Lex.Tok_Ident or else K = Lex.Tok_Number
+      or else K = Lex.Tok_String or else K = Lex.Tok_LParen
+      or else K = Lex.Tok_Minus or else K = Lex.Tok_Plus
+      or else K = Lex.Tok_Tilde or else K = Lex.Tok_Not
+      or else K = Lex.Tok_True or else K = Lex.Tok_False);
 
    function Ada_Type (T : EType) return String is
    begin
@@ -198,10 +211,69 @@ package body O2c_Compiler is
             end;
          when Lex.Tok_Ident =>
             Id := Find (Cur.Text (1 .. Cur.Len));
-            if Id = 0 or else Syms (Id).Kind = S_Proc then
+            if Id = 0 then
                raise O2c_Error with "unknown variable or constant '"
                  & Cur.Text (1 .. Cur.Len) & "' (line "
                  & Natural'Image (Cur.Line) & ")";
+            end if;
+            if Syms (Id).Kind = S_Proc then
+               if not Syms (Id).Ret then
+                  raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
+                    & "' is a proper procedure, not a function (line "
+                    & Natural'Image (Cur.Line) & ")";
+               end if;
+               R.Typ := Syms (Id).Typ;
+               R.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
+               Next;
+               if Cur.Kind = Lex.Tok_LParen then
+                  Next;
+                  declare
+                     Args : array (1 .. Max_Params) of Unbounded_String;
+                     N_A  : Natural := 0;
+                     Call : Unbounded_String;
+                  begin
+                     loop
+                        exit when Cur.Kind = Lex.Tok_RParen;
+                        N_A := N_A + 1;
+                        if N_A > Max_Params then
+                           raise O2c_Error with "too many arguments";
+                        end if;
+                        declare
+                           A : Expr_Rec := Parse_Expr;
+                        begin
+                           Args (N_A) := A.Text;
+                           if Syms (Id).P (N_A).Typ /= A.Typ then
+                              raise O2c_Error with "argument "
+                                & Natural'Image (N_A) & " of "
+                                & Cur.Text (1 .. Cur.Len)
+                                & " has the wrong type";
+                           end if;
+                        end;
+                        exit when Cur.Kind /= Lex.Tok_Comma;
+                        Next;
+                     end loop;
+                     if N_A /= Syms (Id).Params then
+                        raise O2c_Error with "call expects "
+                          & Natural'Image (Syms (Id).Params)
+                          & " argument(s), got " & Natural'Image (N_A);
+                     end if;
+                     Expect (Lex.Tok_RParen, "')'");
+                     Next;
+                     Call := Call & To_String (R.Text) & " (";
+                     for I in 1 .. N_A loop
+                        if I > 1 then
+                           Call := Call & ", ";
+                        end if;
+                        Call := Call & Args (I);
+                     end loop;
+                     Call := Call & ")";
+                     R.Text := Call;
+                  end;
+               elsif Syms (Id).Params /= 0 then
+                  raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
+                    & "' needs arguments";
+               end if;
+               return R;
             end if;
             R.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
             R.Typ := Syms (Id).Typ;
@@ -421,6 +493,8 @@ package body O2c_Compiler is
       PRef  : array (1 .. Max_Params) of Boolean;
       N_Par : Natural := 0;
       Param_Base : Natural;
+      Ret_Typ : EType := T_Int;
+      Is_Function : Boolean := False;
       Hdr   : Unbounded_String;
    begin
       Seen_Proc := True;
@@ -467,12 +541,32 @@ package body O2c_Compiler is
          Expect (Lex.Tok_RParen, "')' after the parameters");
          Next;
       end if;
+      --  optional function return type
+      Ret_Typ := T_Int;
+      if Cur.Kind = Lex.Tok_Colon then
+         Next;
+         if Cur.Kind /= Lex.Tok_Ident then
+            raise O2c_Error with "a return type name expected (line "
+              & Natural'Image (Cur.Line) & ")";
+         end if;
+         if Eq_No_Case (Cur.Text (1 .. Cur.Len), "INTEGER") then
+            Ret_Typ := T_Int;
+         elsif Eq_No_Case (Cur.Text (1 .. Cur.Len), "BOOLEAN") then
+            Ret_Typ := T_Bool;
+         else
+            raise O2c_Error with "M4 return types: INTEGER/BOOLEAN only ('"
+              & Cur.Text (1 .. Cur.Len) & "')";
+         end if;
+         Next;
+         Is_Function := True;
+      end if;
       Expect (Lex.Tok_Semi, "';' after the procedure header");
       Next;
 
       N_Sym := N_Sym + 1;
       Syms (N_Sym) := (Kind => S_Proc, Name => To_Unbounded_String (Name),
-                       Params => N_Par, others => <>);
+                       Params => N_Par, Typ => Ret_Typ,
+                       Ret => Is_Function, others => <>);
       for I in 1 .. N_Par loop
          Syms (N_Sym).P (I) :=
            (Name => PName (I), Typ => PTyp (I), By_Ref => PRef (I));
@@ -486,7 +580,8 @@ package body O2c_Compiler is
                           Name => PName (I), others => <>);
       end loop;
 
-      Hdr := Hdr & "   procedure " & Name;
+      Hdr := Hdr & "   " & (if Is_Function then "function " else "procedure ")
+        & Name;
       if N_Par > 0 then
          Hdr := Hdr & " (";
          for I in 1 .. N_Par loop
@@ -499,6 +594,9 @@ package body O2c_Compiler is
          end loop;
          Hdr := Hdr & ")";
       end if;
+      if Is_Function then
+         Hdr := Hdr & " return " & Ada_Type (Ret_Typ);
+      end if;
       Append_Decl (To_String (Hdr) & " is");
       if Cur.Kind = Lex.Tok_Begin then
          declare
@@ -507,7 +605,16 @@ package body O2c_Compiler is
             Body_Buf := Null_Unbounded_String;
             Append_Decl ("   begin");
             Next;
+            Cur_Proc_Ret := Is_Function;
+            Cur_Ret_Type := Ret_Typ;
+            Func_Return_Ok := False;
+            In_Proc := True;
             Statement_Seq;        --  stops at END; fills Body_Buf
+            In_Proc := False;
+            if Is_Function and then not Func_Return_Ok then
+               raise O2c_Error with "function " & Name
+                 & " must end with a RETURN statement";
+            end if;
             if Length (Body_Buf) = 0 then
                Append_Decl ("      null;");
             else
@@ -558,7 +665,9 @@ package body O2c_Compiler is
          declare
             Before : constant Natural := Length (Body_Buf);
          begin
+            Ctrl_Depth := Ctrl_Depth + 1;
             Statement_Seq (Stop_On_Else => True);
+            Ctrl_Depth := Ctrl_Depth - 1;
             if Length (Body_Buf) = Before then
                Append_Body ("         null;");
             end if;
@@ -571,7 +680,9 @@ package body O2c_Compiler is
             declare
                Before : constant Natural := Length (Body_Buf);
             begin
+               Ctrl_Depth := Ctrl_Depth + 1;
                Statement_Seq;        --  until END
+               Ctrl_Depth := Ctrl_Depth - 1;
                if Length (Body_Buf) = Before then
                   Append_Body ("         null;");
                end if;
@@ -601,7 +712,9 @@ package body O2c_Compiler is
       declare
          Before : constant Natural := Length (Body_Buf);
       begin
+         Ctrl_Depth := Ctrl_Depth + 1;
          Statement_Seq;              --  until END
+         Ctrl_Depth := Ctrl_Depth - 1;
          if Length (Body_Buf) = Before then
             Append_Body ("         null;");
          end if;
@@ -619,7 +732,9 @@ package body O2c_Compiler is
       declare
          Before : constant Natural := Length (Body_Buf);
       begin
+         Ctrl_Depth := Ctrl_Depth + 1;
          Statement_Seq (Stop_On_Until => True);
+         Ctrl_Depth := Ctrl_Depth - 1;
          if Length (Body_Buf) = Before then
             Append_Body ("         null;");
          end if;
@@ -701,7 +816,9 @@ package body O2c_Compiler is
       declare
          Before : constant Natural := Length (Body_Buf);
       begin
+         Ctrl_Depth := Ctrl_Depth + 1;
          Statement_Seq;              --  until END
+         Ctrl_Depth := Ctrl_Depth - 1;
          if Length (Body_Buf) = Before then
             Append_Body ("         null;");
          end if;
@@ -722,7 +839,33 @@ package body O2c_Compiler is
       loop
          exit when At_Stop (Stop_On_Else, Stop_On_Until);
 
-         if Cur.Kind = Lex.Tok_If then
+         if Cur.Kind = Lex.Tok_Return then
+            if not In_Proc then
+               raise O2c_Error with "RETURN only inside procedures (line "
+                 & Natural'Image (Cur.Line) & ")";
+            end if;
+            Next;
+            if Cur_Proc_Ret then
+               declare
+                  V : Expr_Rec := Parse_Expr;
+               begin
+                  if V.Typ /= Cur_Ret_Type then
+                     raise O2c_Error with "RETURN value type mismatch (line "
+                       & Natural'Image (Cur.Line) & ")";
+                  end if;
+                  Append_Body ("      return " & To_String (V.Text) & ";");
+                  if Ctrl_Depth = 0 then
+                     Func_Return_Ok := True;
+                  end if;
+               end;
+            else
+               if Starts_Expr (Cur.Kind) then
+                  raise O2c_Error with "a proper procedure returns no value"
+                    & " (line " & Natural'Image (Cur.Line) & ")";
+               end if;
+               Append_Body ("      return;");
+            end if;
+         elsif Cur.Kind = Lex.Tok_If then
             Parse_If;
          elsif Cur.Kind = Lex.Tok_While then
             Parse_While;

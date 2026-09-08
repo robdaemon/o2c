@@ -34,6 +34,10 @@ procedure O2c is
     "    Out.Ln" & ASCII.LF &
     "  end" & ASCII.LF &
     "end CountTo;" & ASCII.LF &
+    "procedure Square(x: integer): integer;" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  return x * x" & ASCII.LF &
+    "end Square;" & ASCII.LF &
     ASCII.LF &
     "begin" & ASCII.LF &
     "  n := 0;" & ASCII.LF &

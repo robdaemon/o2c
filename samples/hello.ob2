@@ -20,6 +20,12 @@ begin
   end
 end CountTo;
 
+procedure Square(x: integer): integer;
+begin
+  return x * x
+end Square;
+
+
 begin
   n := 0;
   repeat
@@ -32,6 +38,9 @@ begin
   for n := 4 to 5 do
     Out.Int(n, 0)
   end;
+  Out.Ln;
+
+  Out.Int(Square(3), 0);
   Out.Ln;
   CountTo(21, n)
 end Hello.
