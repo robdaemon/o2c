@@ -1,8 +1,9 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir](https://…/aegir) operating system. M1 plan:
-Oberon-2 (subset, keywords case-insensitive) translated to Ada, built
-through aegir's userspace runtime chain from outside the monorepo.
+Targets the [Aegir] operating system. M1 plan: an Oberon-2 subset
+(keywords case-insensitive — the one deliberate deviation from the
+Oberon-2 spec) translated to Ada, built through aegir's userspace
+runtime chain from outside the monorepo.
 
 ## Layout
 - `compiler/` — translator sources (Ada; lexer/parser/emitter M1+)
@@ -11,9 +12,13 @@ through aegir's userspace runtime chain from outside the monorepo.
 - `tests/`   — expected-output tests
 
 ## Build
-AEGIR_ROOT must point at the aegir checkout (default `~/src/aegir`):
 
-    make build     # -> crate/bin/o2c.elf (riscv64, links libaegir_user.a)
+`AEGIR_ROOT` must point at the aegir checkout. It is **required** and
+has no default (no machine-specific fallback paths), so CI and other
+machines fail loudly instead of silently building against the wrong
+tree:
+
+    make build AEGIR_ROOT=/path/to/aegir     # -> crate/bin/o2c.elf
 
 Run/deploy `o2c.elf` under Aegir the same way as any userspace ELF
 (initrd Test staging or the Sys volume + shell).

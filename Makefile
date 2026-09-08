@@ -1,7 +1,11 @@
-# o2c driver.  AEGIR_ROOT points at the aegir checkout whose userspace
-# runtime chain this repo's programs build against.
-AEGIR_ROOT ?= $(HOME)/src/aegir
-ALR_DIR    := $(AEGIR_ROOT)/userspace/echo   # any aegir alr crate provides the toolchain env
+# o2c driver.  AEGIR_ROOT must point at the aegir checkout whose
+# userspace runtime chain this repo's programs build against.  It is
+# required: unset/empty fails the build instead of assuming a path.
+ifndef AEGIR_ROOT
+$(error AEGIR_ROOT is not set - point it at the aegir checkout, e.g. make build AEGIR_ROOT=/path/to/aegir)
+endif
+
+ALR_DIR := $(AEGIR_ROOT)/userspace/echo   # any aegir alr crate provides the toolchain env
 
 .PHONY: build clean
 
