@@ -17,6 +17,9 @@ procedure O2c is
     "import Out;" & ASCII.LF &
     ASCII.LF &
     "var n: integer;" & ASCII.LF &
+    "type Vector = ARRAY 4 OF integer;" & ASCII.LF &
+    "type Pair = RECORD a, b: integer END;" & ASCII.LF &
+    "var v: Vector; p: Pair; q: Pair; i: integer;" & ASCII.LF &
     ASCII.LF &
     "const Greeting = ""hello from Oberon-2"";" & ASCII.LF &
     ASCII.LF &
@@ -52,6 +55,24 @@ procedure O2c is
     "    Out.Int(n, 0)" & ASCII.LF &
     "  end;" & ASCII.LF &
     "  Out.Ln;" & ASCII.LF &
+    "  i := 0;" & ASCII.LF &
+    "  while i < 4 do" & ASCII.LF &
+    "    v[i] := i * i;" & ASCII.LF &
+    "    i := i + 1" & ASCII.LF &
+    "  end;" & ASCII.LF &
+    "  i := 0;" & ASCII.LF &
+    "  repeat" & ASCII.LF &
+    "    Out.Int(v[i], 0);" & ASCII.LF &
+    "    i := i + 1" & ASCII.LF &
+    "  until i = 4;" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  p.a := 7;" & ASCII.LF &
+    "  p.b := Square(p.a) - 1;" & ASCII.LF &
+    "  Out.Int(p.b, 0);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  q := p;" & ASCII.LF &
+    "  Out.Int(q.b, 0);" & ASCII.LF &
+    "  Out.Ln" & ASCII.LF &
     "  CountTo(21, n)" & ASCII.LF &
     "end Hello.";
 

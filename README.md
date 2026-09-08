@@ -19,7 +19,9 @@ Supported subset: `module`, `import Out`, `const` and `var`
 `VAR` (by-reference) parameters, full expressions with Oberon
 precedence (`+ - * DIV MOD & OR ~ = # < <= > >=`, parens), typed
 assignment, control flow (`IF/ELSIF/ELSE`, `WHILE/DO`, `REPEAT/UNTIL`,
-`FOR/TO/BY`), procedures and **functions** (`: T` return types with
+`FOR/TO/BY`), **type declarations** (`ARRAY n OF INTEGER|BOOLEAN` and
+`RECORD` of scalar fields) with index/field designators, whole-value
+copies, procedures and **functions** (`: T` return types with
 `RETURN`, usable in expressions), and call statements — `Out.String`,
 `Out.Int`, `Out.Ln`, and local-procedure calls. Errors are reported
 with line/column.

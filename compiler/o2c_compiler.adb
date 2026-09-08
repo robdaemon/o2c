@@ -15,6 +15,28 @@ package body O2c_Compiler is
       Typ  : EType := T_Int;
    end record;
 
+   Max_Fields : constant := 32;
+   Max_UTypes : constant := 32;
+
+   type UField is record
+      Name : Unbounded_String;
+      Typ  : EType := T_Int;
+   end record;
+
+   type UField_Array is array (1 .. Max_Fields) of UField;
+
+   type UType is record
+      Name    : Unbounded_String;
+      Is_Rec  : Boolean := True;
+      Arr_Len : Integer := 0;      --  arrays (0 = record)
+      Elem    : EType := T_Int;    --  array element type
+      N_F     : Natural := 0;
+      F       : UField_Array := (others => <>);
+   end record;
+
+   UTypes : array (1 .. Max_UTypes) of UType := (others => <>);
+   N_UT   : Natural := 0;
+
    Max_Syms   : constant := 256;
    Max_Params : constant := 8;
 
@@ -34,6 +56,7 @@ package body O2c_Compiler is
       Name   : Unbounded_String;
       Params : Natural := 0;
       Ret    : Boolean := False;   --  procedure is a function (returns Typ)
+      UT     : Natural := 0;       --  user type index (0 = scalar Typ)
       P      : Param_Array := (others => <>);
    end record;
 
@@ -98,6 +121,26 @@ package body O2c_Compiler is
       return 0;
    end Find;
 
+   function Find_UT (Name : String) return Natural is
+   begin
+      for I in 1 .. N_UT loop
+         if To_String (UTypes (I).Name) = Name then
+            return I;
+         end if;
+      end loop;
+      return 0;
+   end Find_UT;
+
+   function Field_Of (UT : Natural; Name : String) return Natural is
+   begin
+      for I in 1 .. UTypes (UT).N_F loop
+         if To_String (UTypes (UT).F (I).Name) = Name then
+            return I;
+         end if;
+      end loop;
+      return 0;
+   end Field_Of;
+
    function Starts_Expr (K : Lex.Token_Kind) return Boolean is
      (K = Lex.Tok_Ident or else K = Lex.Tok_Number
       or else K = Lex.Tok_String or else K = Lex.Tok_LParen
@@ -137,6 +180,11 @@ package body O2c_Compiler is
       return True;
    end Eq_No_Case;
 
+   function Scalar_Init (T : EType) return String is
+   begin
+      return (if T = T_Int then "0" else "False");
+   end Scalar_Init;
+
    function Ada_String_Literal (S : String) return String is
       R : Unbounded_String;
    begin
@@ -157,6 +205,7 @@ package body O2c_Compiler is
                               Stop_On_Until : Boolean := False);
    procedure Decl_Const;
    procedure Decl_Var;
+   procedure Decl_Type;
    procedure Decl_Procedure;
 
    --  expressions -------------------------------------------------
@@ -274,6 +323,50 @@ package body O2c_Compiler is
                     & "' needs arguments";
                end if;
                return R;
+            end if;
+            if Syms (Id).Kind = S_Var and then Syms (Id).UT /= 0 then
+               declare
+                  Nm : constant String := Cur.Text (1 .. Cur.Len);
+                  U  : constant Natural := Syms (Id).UT;
+               begin
+                  Next;              --  past the variable name
+                  if UTypes (U).Is_Rec then
+                     Expect (Lex.Tok_Dot, "'.' to select a record field");
+                     Next;
+                     Expect (Lex.Tok_Ident, "a field name");
+                     declare
+                        F : constant Natural :=
+                          Field_Of (U, Cur.Text (1 .. Cur.Len));
+                     begin
+                        if F = 0 then
+                           raise O2c_Error with "no field '"
+                             & Cur.Text (1 .. Cur.Len) & "' in record "
+                             & To_String (UTypes (U).Name);
+                        end if;
+                        R.Text := To_Unbounded_String (Nm)
+                          & "." & To_String (UTypes (U).F (F).Name);
+                        R.Typ := UTypes (U).F (F).Typ;
+                     end;
+                     Next;
+                     return R;
+                  else
+                     Expect (Lex.Tok_LBracket, "'[' to index an array");
+                     Next;
+                     declare
+                        Ix : Expr_Rec := Parse_Expr;
+                     begin
+                        if Ix.Typ /= T_Int then
+                           raise O2c_Error with "array index must be INTEGER";
+                        end if;
+                        R.Text := To_Unbounded_String (Nm) & " ("
+                          & Ix.Text & ")";
+                        R.Typ := UTypes (U).Elem;
+                     end;
+                     Expect (Lex.Tok_RBracket, "']'");
+                     Next;
+                     return R;
+                  end if;
+               end;
             end if;
             R.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
             R.Typ := Syms (Id).Typ;
@@ -451,40 +544,178 @@ package body O2c_Compiler is
 
       Expect (Lex.Tok_Colon, "':' in a VAR declaration");
       Next;
-      if Cur.Kind = Lex.Tok_Ident then
-         declare
-            T : constant String := Cur.Text (1 .. Cur.Len);
-         begin
-            if Eq_No_Case (T, "INTEGER") then
-               Typ := T_Int;
-               Init := "0";
-            elsif Eq_No_Case (T, "BOOLEAN") then
-               Typ := T_Bool;
-               Init := "F";
+      declare
+         UT      : Natural := 0;
+         Is_UT   : Boolean := False;
+         Init_Txt : Unbounded_String;
+      begin
+         if Cur.Kind = Lex.Tok_Ident then
+            declare
+               T : constant String := Cur.Text (1 .. Cur.Len);
+            begin
+               if Eq_No_Case (T, "INTEGER") then
+                  Typ := T_Int;
+               elsif Eq_No_Case (T, "BOOLEAN") then
+                  Typ := T_Bool;
+               else
+                  UT := Find_UT (T);
+                  if UT = 0 then
+                     raise O2c_Error with "unknown type '" & T
+                       & "' (line " & Natural'Image (Cur.Line) & ")";
+                  end if;
+                  Is_UT := True;
+               end if;
+               Next;
+            end;
+         else
+            raise O2c_Error with "a type name expected (line "
+              & Natural'Image (Cur.Line) & ")";
+         end if;
+         Expect (Lex.Tok_Semi, "';'");
+         Next;
+
+         if Is_UT then
+            if UTypes (UT).Is_Rec then
+               Init_Txt := Init_Txt & "(";
+               for F in 1 .. UTypes (UT).N_F loop
+                  if F > 1 then
+                     Init_Txt := Init_Txt & ", ";
+                  end if;
+                  Init_Txt := Init_Txt & To_String (UTypes (UT).F (F).Name)
+                    & " => " & Scalar_Init (UTypes (UT).F (F).Typ);
+               end loop;
+               Init_Txt := Init_Txt & ")";
             else
-               raise O2c_Error with "M2 variable types: INTEGER and BOOLEAN"
-                 & " only ('" & T & "' at line " & Natural'Image (Cur.Line)
-                 & ")";
+               Init_Txt := Init_Txt & "(others => "
+                 & Scalar_Init (UTypes (UT).Elem) & ")";
             end if;
-            Next;
-         end;
-      else
-         raise O2c_Error with "a type name expected (line "
-           & Natural'Image (Cur.Line) & ")";
-      end if;
-      Expect (Lex.Tok_Semi, "';'");
+            for I in 1 .. N loop
+               N_Sym := N_Sym + 1;
+               Syms (N_Sym) := (Kind => S_Var, Typ => T_Int, UT => UT,
+                                Name => Names (I), others => <>);
+               Append_Decl ("   " & To_String (Names (I)) & " : "
+                            & To_String (UTypes (UT).Name) & " := "
+                            & To_String (Init_Txt) & ";");
+            end loop;
+         else
+            for I in 1 .. N loop
+               N_Sym := N_Sym + 1;
+               Syms (N_Sym) := (Kind => S_Var, Typ => Typ,
+                                Name => Names (I), others => <>);
+               Append_Decl ("   " & To_String (Names (I)) & " : "
+                            & Ada_Type (Typ) & " := " & Scalar_Init (Typ)
+                            & ";");
+            end loop;
+         end if;
+      end;
+   end Decl_Var;
+
+   procedure Decl_Type is
+      Name : constant String := Ident_Text;
+      UTI  : Natural;
+   begin
+      Next;                       --  past the type name
+      Expect (Lex.Tok_Equal, "'='");
       Next;
 
-      for I in 1 .. N loop
-         N_Sym := N_Sym + 1;
-         Syms (N_Sym) := (Kind => S_Var, Typ => Typ,
-                          Name => Names (I), others => <>);
-         Append_Decl ("   " & To_String (Names (I)) & " : "
-                      & Ada_Type (Typ)
-                      & " := " & (if Init = "0" then "0" else "False")
-                      & ";");
-      end loop;
-   end Decl_Var;
+      N_UT := N_UT + 1;
+      if N_UT > UTypes'Last then
+         raise O2c_Error with "too many type declarations";
+      end if;
+      UTI := N_UT;
+      UTypes (UTI) := (Name => To_Unbounded_String (Name),
+                       Is_Rec => True, others => <>);
+
+      if Cur.Kind = Lex.Tok_Array then
+         Next;
+         Expect (Lex.Tok_Number, "an array length");
+         declare
+            L : constant Integer := Integer'Value (Cur.Text (1 .. Cur.Len));
+         begin
+            if L <= 0 then
+               raise O2c_Error with "array length must be positive";
+            end if;
+            UTypes (UTI).Arr_Len := L;
+            Next;
+         end;
+         Expect (Lex.Tok_Of, "'OF'");
+         Next;
+         if Cur.Kind /= Lex.Tok_Ident then
+            raise O2c_Error with "an element type expected";
+         end if;
+         if Eq_No_Case (Cur.Text (1 .. Cur.Len), "INTEGER") then
+            UTypes (UTI).Elem := T_Int;
+         elsif Eq_No_Case (Cur.Text (1 .. Cur.Len), "BOOLEAN") then
+            UTypes (UTI).Elem := T_Bool;
+         else
+            raise O2c_Error with "M5 array element types: INTEGER/BOOLEAN"
+              & " only ('" & Cur.Text (1 .. Cur.Len) & "')";
+         end if;
+         Next;
+         UTypes (UTI).Is_Rec := False;
+         Append_Decl ("   type " & Name & " is array (0 .. "
+                      & Integer'Image (UTypes (UTI).Arr_Len - 1)
+                      & ") of " & Ada_Type (UTypes (UTI).Elem) & ";");
+      elsif Cur.Kind = Lex.Tok_Record then
+         Next;
+         loop
+            exit when Cur.Kind = Lex.Tok_End;
+            declare
+               FNames : array (1 .. 16) of Unbounded_String;
+               NF     : Natural := 0;
+               FT     : EType;
+            begin
+               while Cur.Kind = Lex.Tok_Ident loop
+                  NF := NF + 1;
+                  if NF > FNames'Last then
+                     raise O2c_Error with "too many fields in one section";
+                  end if;
+                  FNames (NF) := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
+                  Next;
+                  exit when Cur.Kind /= Lex.Tok_Comma;
+                  Next;
+               end loop;
+               Expect (Lex.Tok_Colon, "':' in a record field section");
+               Next;
+               if Cur.Kind /= Lex.Tok_Ident then
+                  raise O2c_Error with "a field type expected";
+               end if;
+               if Eq_No_Case (Cur.Text (1 .. Cur.Len), "INTEGER") then
+                  FT := T_Int;
+               elsif Eq_No_Case (Cur.Text (1 .. Cur.Len), "BOOLEAN") then
+                  FT := T_Bool;
+               else
+                  raise O2c_Error with "M5 field types: INTEGER/BOOLEAN only";
+               end if;
+               Next;
+               if Cur.Kind = Lex.Tok_Semi then
+                  Next;             --  optional separator before END
+               end if;
+               for I in 1 .. NF loop
+                  UTypes (UTI).N_F := UTypes (UTI).N_F + 1;
+                  if UTypes (UTI).N_F > Max_Fields then
+                     raise O2c_Error with "too many record fields";
+                  end if;
+                  UTypes (UTI).F (UTypes (UTI).N_F) :=
+                    (Name => FNames (I), Typ => FT);
+               end loop;
+            end;
+         end loop;
+         Expect (Lex.Tok_End, "'END' closing the RECORD");
+         Next;
+         Append_Decl ("   type " & Name & " is record");
+         for F in 1 .. UTypes (UTI).N_F loop
+            Append_Decl ("      " & To_String (UTypes (UTI).F (F).Name)
+                         & " : " & Ada_Type (UTypes (UTI).F (F).Typ) & ";");
+         end loop;
+         Append_Decl ("   end record;");
+      else
+         raise O2c_Error with "expected ARRAY or RECORD in type " & Name;
+      end if;
+
+      Expect (Lex.Tok_Semi, "';'");
+      Next;
+   end Decl_Type;
 
    procedure Decl_Procedure is
       Name  : constant String := Ident_Text;
@@ -878,7 +1109,97 @@ package body O2c_Compiler is
             Head (1 .. H_Len) := Cur.Text (1 .. H_Len);
             Idx := Find (Head (1 .. H_Len));
             Next;
-            if Cur.Kind = Lex.Tok_Dot then
+            if Cur.Kind = Lex.Tok_LBracket and then Idx /= 0
+              and then Syms (Idx).Kind = S_Var
+              and then Syms (Idx).UT /= 0
+              and then not UTypes (Syms (Idx).UT).Is_Rec
+            then
+               --  array element assignment: a[i] := e
+               Next;                --  past '['
+               declare
+                  Ix : Expr_Rec := Parse_Expr;
+                  V  : Expr_Rec;
+               begin
+                  if Ix.Typ /= T_Int then
+                     raise O2c_Error with "array index must be INTEGER";
+                  end if;
+                  Expect (Lex.Tok_RBracket, "']'");
+                  Next;
+                  Expect (Lex.Tok_Assign, "':='");
+                  Next;
+                  V := Parse_Expr;
+                  if V.Typ /= UTypes (Syms (Idx).UT).Elem then
+                     raise O2c_Error with "element type mismatch assigning "
+                       & Head (1 .. H_Len);
+                  end if;
+                  Append_Body ("      " & Head (1 .. H_Len) & " ("
+                               & To_String (Ix.Text) & ") := "
+                               & To_String (V.Text) & ";");
+               end;
+            elsif Cur.Kind = Lex.Tok_Dot and then Idx /= 0
+              and then Syms (Idx).Kind = S_Var
+              and then Syms (Idx).UT /= 0
+            then
+               --  record field assignment: r.f := e
+               declare
+                  U     : constant Natural := Syms (Idx).UT;
+                  FName : String (1 .. 64);
+                  F_Len : Natural;
+                  F     : Natural;
+                  V     : Expr_Rec;
+               begin
+                  if UTypes (U).Is_Rec then
+                     Next;          --  past '.'
+                     Expect (Lex.Tok_Ident, "a field name");
+                     FName (1 .. Cur.Len) := Cur.Text (1 .. Cur.Len);
+                     F_Len := Cur.Len;
+                     F := Field_Of (U, FName (1 .. F_Len));
+                     if F = 0 then
+                        raise O2c_Error with "no field '" & FName (1 .. F_Len)
+                          & "' in record " & To_String (UTypes (U).Name);
+                     end if;
+                     Next;
+                     Expect (Lex.Tok_Assign, "':='");
+                     Next;
+                     V := Parse_Expr;
+                     if V.Typ /= UTypes (U).F (F).Typ then
+                        raise O2c_Error with "field type mismatch assigning "
+                          & Head (1 .. H_Len) & "." & FName (1 .. F_Len);
+                     end if;
+                     Append_Body ("      " & Head (1 .. H_Len) & "."
+                                  & FName (1 .. F_Len) & " := "
+                                  & To_String (V.Text) & ";");
+                  else
+                     raise O2c_Error with "array '" & Head (1 .. H_Len)
+                       & "' needs an index";
+                  end if;
+               end;
+            elsif Cur.Kind = Lex.Tok_Assign and then Idx /= 0
+              and then Syms (Idx).Kind = S_Var
+              and then Syms (Idx).UT /= 0
+            then
+               --  whole record/array copy: b := a  (same user type)
+               declare
+                  R  : Natural;
+               begin
+                  Next;             --  past ':='
+                  if Cur.Kind /= Lex.Tok_Ident then
+                     raise O2c_Error with "whole-value copy needs a variable"
+                       & " of the same type";
+                  end if;
+                  R := Find (Cur.Text (1 .. Cur.Len));
+                  if R = 0 or else Syms (R).Kind /= S_Var
+                    or else Syms (R).UT /= Syms (Idx).UT
+                  then
+                     raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
+                       & "' is not a same-typed variable (copy of "
+                       & Head (1 .. H_Len) & ")";
+                  end if;
+                  Append_Body ("      " & Head (1 .. H_Len) & " := "
+                               & Cur.Text (1 .. Cur.Len) & ";");
+                  Next;
+               end;
+            elsif Cur.Kind = Lex.Tok_Dot then
                --  Out.String / Out.Int / Out.Ln
                Next;
                Expect (Lex.Tok_Ident, "a member name after '.'");
@@ -1088,11 +1409,20 @@ package body O2c_Compiler is
             while Cur.Kind = Lex.Tok_Ident loop
                Decl_Var;
             end loop;
+         elsif Cur.Kind = Lex.Tok_Type then
+            if Seen_Proc then
+               raise O2c_Error with "declare CONST/VAR/TYPE before PROCEDUREs"
+                 & " (order rule)";
+            end if;
+            Next;
+            while Cur.Kind = Lex.Tok_Ident loop
+               Decl_Type;
+            end loop;
          elsif Cur.Kind = Lex.Tok_Procedure then
             Next;
             Decl_Procedure;
          else
-            raise O2c_Error with "expected CONST/VAR/PROCEDURE/BEGIN/END"
+            raise O2c_Error with "expected CONST/VAR/TYPE/PROCEDURE/BEGIN/END"
               & " at line " & Natural'Image (Cur.Line);
          end if;
       end loop;

@@ -1,7 +1,11 @@
 module Hello;
 import Out;
 
+type Vector = ARRAY 4 OF integer;
+type Pair = RECORD a, b: integer END;
+
 var n: integer;
+var v: Vector; p: Pair; q: Pair; i: integer;
 
 const Greeting = "hello from Oberon-2";
 
@@ -42,5 +46,23 @@ begin
 
   Out.Int(Square(3), 0);
   Out.Ln;
+  i := 0;
+  while i < 4 do
+    v[i] := i * i;
+    i := i + 1
+  end;
+  i := 0;
+  repeat
+    Out.Int(v[i], 0);
+    i := i + 1
+  until i = 4;
+  Out.Ln;
+  p.a := 7;
+  p.b := Square(p.a) - 1;
+  Out.Int(p.b, 0);
+  Out.Ln;
+  q := p;
+  Out.Int(q.b, 0);
+  Out.Ln
   CountTo(21, n)
 end Hello.

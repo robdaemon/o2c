@@ -13,7 +13,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK="${TMPDIR:-/tmp}/o2c-m1"
 QEMU_LOG="$WORK/boot.log"
-RUN_MIN=${RUN_MIN:-300}
+RUN_MIN=${RUN_MIN:-280}
 
 rm -rf "$WORK"; mkdir -p "$WORK"
 
@@ -24,7 +24,7 @@ trap cleanup EXIT INT TERM
 
 boot_once() {  # $1 = extra make vars, $2 = marker
    rm -f "$QEMU_LOG"
-   ( cd "$AEGIR_ROOT" && make run INITRD_MODE=test \
+   ( cd "$AEGIR_ROOT" && make run INITRD_MODE=min \
         O2C_ROOT="$ROOT" $1 QEMU_ARGS='-nographic -display none' \
         >"$QEMU_LOG" 2>&1 ) &
    local mp=$!
