@@ -222,7 +222,8 @@ package body O2c_Compiler is
    --  forward specs
    function Parse_Expr return Expr_Rec;
    procedure Statement_Seq (Stop_On_Else : Boolean := False;
-                              Stop_On_Until : Boolean := False);
+                              Stop_On_Until : Boolean := False;
+                              Stop_On_Bar : Boolean := False);
    procedure Decl_Const;
    procedure Decl_Var;
    procedure Decl_Type;
@@ -940,11 +941,13 @@ package body O2c_Compiler is
 
    --  statements ---------------------------------------------------
 
-   function At_Stop (Stop_Else, Stop_Until : Boolean) return Boolean is
+   function At_Stop (Stop_Else, Stop_Until, Stop_Bar : Boolean)
+     return Boolean is
      (Cur.Kind = Lex.Tok_End or else Cur.Kind = Lex.Tok_EOF
       or else (Stop_Else and then
                (Cur.Kind = Lex.Tok_Elsif or else Cur.Kind = Lex.Tok_Else))
-      or else (Stop_Until and then Cur.Kind = Lex.Tok_Until));
+      or else (Stop_Until and then Cur.Kind = Lex.Tok_Until)
+      or else (Stop_Bar and then Cur.Kind = Lex.Tok_Bar));
 
    procedure Parse_If is
       Cond : Expr_Rec;
@@ -1130,16 +1133,113 @@ package body O2c_Compiler is
       Append_Body ("      end loop;");
    end Parse_For;
 
+   procedure Parse_Case is
+      Sel : Expr_Rec;
+      Used_Else : Boolean := False;
+   begin
+      Next;                       --  CASE
+      Sel := Parse_Expr;
+      if Sel.Typ /= T_Int then
+         raise O2c_Error with "CASE selector must be INTEGER (line "
+           & Natural'Image (Cur.Line) & ")";
+      end if;
+      Expect (Lex.Tok_Of, "'OF'");
+      Next;
+      Append_Body ("      case " & To_String (Sel.Text) & " is");
+
+      --  alternatives: label {"," label} ":" seq  separated by "|",
+      --  optional ELSE, closed by END
+      loop
+         if Cur.Kind = Lex.Tok_Else then
+            if Used_Else then
+               raise O2c_Error with "duplicate CASE ELSE";
+            end if;
+            Used_Else := True;
+            Append_Body ("      when others =>");
+            Next;
+         else
+            declare
+               Labels : Unbounded_String;
+               First  : Boolean := True;
+            begin
+               loop
+                  --  one integer label (range labels not in M7)
+                  if Cur.Kind = Lex.Tok_Minus then
+                     Next;
+                     Expect (Lex.Tok_Number, "a label after '-'");
+                     if First then
+                        Labels := To_Unbounded_String ("-")
+                          & Cur.Text (1 .. Cur.Len);
+                     else
+                        Labels := Labels & " | -" & Cur.Text (1 .. Cur.Len);
+                     end if;
+                     Next;
+                  elsif Cur.Kind = Lex.Tok_Number then
+                     if First then
+                        Labels := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
+                     else
+                        Labels := Labels & " | " & Cur.Text (1 .. Cur.Len);
+                     end if;
+                     Next;
+                  else
+                     raise O2c_Error with "CASE label expected (line "
+                       & Natural'Image (Cur.Line) & ")";
+                  end if;
+                  First := False;
+                  exit when Cur.Kind /= Lex.Tok_Comma;
+                  Next;
+               end loop;
+               Expect (Lex.Tok_Colon, "':' after the CASE labels");
+               Next;
+               Append_Body ("      when " & To_String (Labels) & " =>");
+            end;
+         end if;
+
+         --  this alternative's statement sequence
+         declare
+            Before : constant Natural := Length (Body_Buf);
+         begin
+            Ctrl_Depth := Ctrl_Depth + 1;
+            Statement_Seq (Stop_On_Else => True, Stop_On_Bar => True);
+            Ctrl_Depth := Ctrl_Depth - 1;
+            if Length (Body_Buf) = Before then
+               Append_Body ("         null;");
+            end if;
+         end;
+
+         if Cur.Kind = Lex.Tok_Bar then
+            Next;
+         elsif Cur.Kind = Lex.Tok_Else then
+            null;                  --  next loop iteration handles ELSE
+         elsif Cur.Kind = Lex.Tok_End then
+            exit;
+         else
+            raise O2c_Error with "expected '|', ELSE or END in CASE (line "
+              & Natural'Image (Cur.Line) & ")";
+         end if;
+      end loop;
+
+      Expect (Lex.Tok_End, "'END' closing the CASE");
+      Next;
+      if not Used_Else then
+         Append_Body ("      when others => null;");
+      end if;
+      Append_Body ("      end case;");
+   end Parse_Case;
+
    procedure Statement_Seq (Stop_On_Else : Boolean := False;
-                            Stop_On_Until : Boolean := False) is
+                            Stop_On_Until : Boolean := False;
+                            Stop_On_Bar : Boolean := False) is
       Head : String (1 .. 64);
       H_Len : Natural := 0;
       Idx  : Natural;
    begin
       loop
-         exit when At_Stop (Stop_On_Else, Stop_On_Until);
+         exit when At_Stop (Stop_On_Else, Stop_On_Until, Stop_On_Bar);
 
-         if Cur.Kind = Lex.Tok_Return then
+         if Cur.Kind = Lex.Tok_Case then
+            Parse_Case;
+         elsif Cur.Kind = Lex.Tok_Return then
             if not In_Proc then
                raise O2c_Error with "RETURN only inside procedures (line "
                  & Natural'Image (Cur.Line) & ")";

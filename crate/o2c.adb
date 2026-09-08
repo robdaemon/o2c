@@ -84,6 +84,15 @@ procedure O2c is
     "    Out.Int(7, 0);" & ASCII.LF &
     "    Out.Ln" & ASCII.LF &
     "  end" & ASCII.LF &
+    "  i := 2;" & ASCII.LF &
+    "  case i of" & ASCII.LF &
+    "    0: Out.Int(0, 0)" & ASCII.LF &
+    "  | 1: Out.String(""one"")" & ASCII.LF &
+    "  | 2, 3: Out.Int(i, 0)" & ASCII.LF &
+    "  else" & ASCII.LF &
+    "    Out.Int(9, 0)" & ASCII.LF &
+    "  end;" & ASCII.LF &
+    "  Out.Ln" & ASCII.LF &
     "  CountTo(21, n)" & ASCII.LF &
     "end Hello.";
 

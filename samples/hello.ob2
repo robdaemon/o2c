@@ -75,5 +75,14 @@ begin
     Out.Int(7, 0);
     Out.Ln
   end
+  i := 2;
+  case i of
+    0: Out.Int(0, 0)
+  | 1: Out.String("one")
+  | 2, 3: Out.Int(i, 0)
+  else
+    Out.Int(9, 0)
+  end;
+  Out.Ln
   CountTo(21, n)
 end Hello.
