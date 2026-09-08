@@ -1,0 +1,16 @@
+--  o2c: Oberon-2 to Ada translator for Aegir (dogfood: o2c itself is
+--  an Aegir userspace program built with the riscv64 chain).
+--  Build via the repo Makefile (see README); uses the AEGIR_ROOT
+--  external contract documented in the aegir docs/USERSPACE.md.
+project O2c extends "aegir_program.gpr" is
+   for Source_Dirs use ("../compiler", ".");
+   for Object_Dir use "obj";
+   for Exec_Dir use "bin";
+   for Main use ("o2c.adb");
+   for Runtime ("Ada") use external ("AEGIR_ROOT", "/home/rroland/src/aegir")
+     & "/userspace/gnat-rts";
+
+   package Builder is
+      for Executable ("o2c.adb") use "o2c.elf";
+   end Builder;
+end O2c;
