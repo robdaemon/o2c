@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M1 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M2 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -14,10 +14,12 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 
 ## M1 status
 
-Supported subset: `module`, `import Out`, `const` (integer and
-string), argument-free nested `procedure`s, and a statement sequence
-of calls — `Out.String`, `Out.Int`, `Out.Ln`, and local-procedure
-calls. Errors are reported with line/column.
+Supported subset: `module`, `import Out`, `const` and `var`
+(INTEGER/BOOLEAN, module-level), nested `procedure`s with value and
+`VAR` (by-reference) parameters, full expressions with Oberon
+precedence (`+ - * DIV MOD & OR ~ = # < <= > >=`, parens), typed
+assignment, and call statements — `Out.String`, `Out.Int`, `Out.Ln`,
+and local-procedure calls. Errors are reported with line/column.
 
 **Deviation from the Oberon-2 spec (project decision): keywords are
 case-insensitive** (`module`/`MODULE`/`Begin`… all lex as keywords).
@@ -39,7 +41,7 @@ has no default (no machine-specific fallback), so CI fails loudly:
 1. Stage `crate/bin/o2c.elf` as `Tests/O2c` via the aegir Makefile's
    `O2C_ROOT` knob and boot a test-mode initrd:
    `make run INITRD_MODE=test O2C_ROOT=../o2c`.
-2. o2c compiles the embedded `hello.ob2` sample and prints the
+2. o2c compiles the embedded demo module and prints the
    generated Ada with `O2C|` line prefixes between `--- ada begin ---`
    / `--- ada end ---` markers (exact host reconstruction despite
    shared-console chatter).
@@ -50,4 +52,4 @@ has no default (no machine-specific fallback), so CI fails loudly:
 4. Boot it under Aegir and assert the console output.
 
 Verified result: `samples/hello.ob2` compiles, builds, and prints
-`hello from Oberon-2` on the Aegir console.
+`hello from Oberon-2` then `42` on the Aegir console.
