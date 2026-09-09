@@ -185,6 +185,23 @@ package body O2c_Compiler is
    XMs : array (1 .. Max_XM) of XM_Entry := (others => <>);
    N_XM : Natural := 0;
 
+   --  widened-pointer dispatch shadows (M29): when a library exports
+   --  an override of an imported base method, it also exports a shadow
+   --  dispatcher on the base view so base-typed pointers held by
+   --  importers dispatch to this library's overrides.
+   Max_Sh : constant := 64;
+   type Sh_Entry is record
+      Owner : Unbounded_String;   --  module exporting the shadow
+      BOwn  : Unbounded_String;   --  base module (owns base dispatcher)
+      BRec  : Unbounded_String;   --  base record (short) name
+      MName : Unbounded_String;
+   end record;
+   Shs : array (1 .. Max_Sh) of Sh_Entry := (others => <>);
+   N_Sh : Natural := 0;
+
+   procedure Sh_Add (Owner, BOwn, BRec, MName : String);
+   function Sh_Find (BOwn, BRec, MName : String) return Natural;
+
    --  forward (body defined with the other M20 import machinery)
    function Import_Type (Owner, Mem : String) return Natural;
 
@@ -4798,9 +4815,27 @@ package body O2c_Compiler is
                                              raise O2c_Error with "method '"
                                                & DNm & "' needs arguments";
                                           end if;
-                                          Call := Call & Ownr & "." & DNm
-                                            & "_Disp_O2c_" & RNm & " ("
-                                            & Rtxt;
+                                          declare
+                                             SI : constant Natural :=
+                                               Sh_Find (Ownr, RNm, DNm);
+                                          begin
+                                             if SI /= 0 then
+                                                --  M29: widened-pointer
+                                                --  dispatch through the
+                                                --  override module's shadow
+                                                Call := Call
+                                                  & To_String (Shs (SI).Owner)
+                                                  & "." & DNm
+                                                  & "_Any_Disp_O2c_"
+                                                  & To_String (Shs (SI).BRec)
+                                                  & " (" & Rtxt;
+                                             else
+                                                Call := Call & Ownr & "."
+                                                  & DNm
+                                                  & "_Disp_O2c_" & RNm
+                                                  & " (" & Rtxt;
+                                             end if;
+                                          end;
                                           if N_A > 0 then
                                              Call := Call & ", "
                                                & ArgsT;
@@ -5228,6 +5263,39 @@ package body O2c_Compiler is
       XMs (N_XM) := E;
    end XM_Add;
 
+   procedure Sh_Add (Owner, BOwn, BRec, MName : String) is
+   begin
+      for I in 1 .. N_Sh loop
+         if To_String (Shs (I).BOwn) = BOwn
+           and then To_String (Shs (I).BRec) = BRec
+           and then To_String (Shs (I).MName) = MName
+         then
+            return;                --  one shadow per (base, method)
+         end if;
+      end loop;
+      N_Sh := N_Sh + 1;
+      if N_Sh > Shs'Last then
+         raise O2c_Error with "too many dispatch shadows";
+      end if;
+      Shs (N_Sh) := (Owner => To_Unbounded_String (Owner),
+                     BOwn  => To_Unbounded_String (BOwn),
+                     BRec  => To_Unbounded_String (BRec),
+                     MName => To_Unbounded_String (MName));
+   end Sh_Add;
+
+   function Sh_Find (BOwn, BRec, MName : String) return Natural is
+   begin
+      for I in 1 .. N_Sh loop
+         if To_String (Shs (I).BOwn) = BOwn
+           and then To_String (Shs (I).BRec) = BRec
+           and then To_String (Shs (I).MName) = MName
+         then
+            return I;
+         end if;
+      end loop;
+      return 0;
+   end Sh_Find;
+
    --  M20c exporter side: for every exported type-bound method of the
    --  module just parsed, register its dispatcher in the catalog and,
    --  for procedure methods, emit the dispatcher spec (package spec)
@@ -5341,6 +5409,128 @@ package body O2c_Compiler is
                      Append_Decl ("   end " & Dsp_Name (DN, B) & ";");
                   end;
                end if;
+            end if;
+         end;
+      end loop;
+
+      --  M29: widened-pointer dispatch shadows.  When an exported
+      --  procedure method on an exported local RECORD overrides a
+      --  method of its imported exported parent, also export a shadow
+      --  dispatcher on the parent view: it dispatches this module's
+      --  subtree and falls back to the parent module's dispatcher, so
+      --  base-typed pointers held by importers reach this override.
+      for Bd in 1 .. N_Bound loop
+         declare
+            SIdx : constant Natural := Bounds (Bd).SymIdx;
+            R    : constant Natural := Bounds (Bd).RecUT;
+            DN   : constant String := To_String (Bounds (Bd).Name);
+         begin
+            if Syms (SIdx).Exp and then UTypes (R).ExpT
+              and then not Syms (SIdx).Ret
+              and then UTypes (R).Parent /= 0
+              and then UTypes (UTypes (R).Parent).Imported
+              and then XM_Chain (UTypes (R).Parent, DN) /= 0
+            then
+               declare
+                  PB    : constant Natural := UTypes (R).Parent;
+                  PNm   : constant String := To_String (UTypes (PB).Name);
+                  PSh   : constant String := Short_Nm (PNm);
+                  BOwn  : constant String := UT_Owner (PB);
+                  RcvrN : constant String :=
+                    To_String (Syms (SIdx).P (1).Name);
+                  Hdr   : Unbounded_String;
+                  ArgL  : Unbounded_String;
+                  Cand  : array (1 .. Max_Bound) of Natural :=
+                    (others => 0);
+                  N_C   : Natural := 0;
+               begin
+                  Hdr := Hdr & "procedure " & DN & "_Any_Disp_O2c_"
+                    & PSh & " (" & RcvrN
+                    & (if Syms (SIdx).P (1).By_Ref
+                       then " : in out " else " : ")
+                    & PNm & "'Class";
+                  for I in 2 .. Syms (SIdx).Params loop
+                     Hdr := Hdr & "; " & To_String (Syms (SIdx).P (I).Name)
+                       & (if Syms (SIdx).P (I).By_Ref
+                          then " : in out " else " : ")
+                       & P_Ada_Type (Syms (SIdx).P (I));
+                     if I > 2 then
+                        ArgL := ArgL & ", ";
+                     end if;
+                     ArgL := ArgL & To_String (Syms (SIdx).P (I).Name);
+                  end loop;
+                  Hdr := Hdr & ")";
+                  for X in 1 .. N_UT loop
+                     if UTypes (X).Is_Rec and then X /= R
+                       and then Rec_Descends (X, R)
+                     then
+                        for Bd2 in 1 .. N_Bound loop
+                           if Bounds (Bd2).RecUT = X
+                             and then To_String (Bounds (Bd2).Name) = DN
+                           then
+                              declare
+                                 Pos : Positive := N_C + 1;
+                              begin
+                                 while Pos > 1 and then
+                                   Rec_Depth (X) > Rec_Depth (Cand (Pos - 1))
+                                 loop
+                                    Cand (Pos) := Cand (Pos - 1);
+                                    Pos := Pos - 1;
+                                 end loop;
+                                 Cand (Pos) := X;
+                              end;
+                              N_C := N_C + 1;
+                           end if;
+                        end loop;
+                     end if;
+                  end loop;
+                  Append_Spec ("   " & To_String (Hdr) & ";");
+                  Append_Decl ("   " & To_String (Hdr) & " is");
+                  Append_Decl ("   begin");
+                  if N_C > 0 then
+                     for I in 1 .. N_C loop
+                        Append_Decl ("      "
+                                     & (if I = 1 then "if " else "elsif ")
+                                     & RcvrN & " in "
+                                     & To_String (UTypes (Cand (I)).Name)
+                                     & "'Class then");
+                        Append_Decl ("         "
+                                     & Method_Impl_Name (DN, Cand (I))
+                                     & " (" & To_String
+                                         (UTypes (Cand (I)).Name) & " ("
+                                     & RcvrN & ")"
+                                     & (if Syms (SIdx).Params > 1
+                                        then ", " & To_String (ArgL)
+                                        else "") & ");");
+                     end loop;
+                     Append_Decl ("      else");
+                  end if;
+                  --  this module's override subtree first, then the
+                  --  base module's dispatcher for everything else
+                  Append_Decl ("         if " & RcvrN & " in "
+                               & To_String (UTypes (R).Name)
+                               & "'Class then");
+                  Append_Decl ("            "
+                               & Method_Impl_Name (DN, R) & " ("
+                               & To_String (UTypes (R).Name) & " (" & RcvrN
+                               & ")"
+                               & (if Syms (SIdx).Params > 1
+                                  then ", " & To_String (ArgL)
+                                  else "") & ");");
+                  Append_Decl ("         else");
+                  Append_Decl ("            " & BOwn & "." & DN
+                               & "_Disp_O2c_" & PSh & " (" & RcvrN
+                               & (if Syms (SIdx).Params > 1
+                                  then ", " & To_String (ArgL)
+                                  else "") & ");");
+                  Append_Decl ("         end if;");
+                  if N_C > 0 then
+                     Append_Decl ("      end if;");
+                  end if;
+                  Append_Decl ("   end " & DN & "_Any_Disp_O2c_" & PSh
+                               & ";");
+                  Sh_Add (To_String (Mod_Name), BOwn, PSh, DN);
+               end;
             end if;
          end;
       end loop;

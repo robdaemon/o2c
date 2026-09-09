@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M28 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M29 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M28 status
+## M29 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,18 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M29 — widened-pointer dispatch across packages**: when a library
+exports a procedure-method override on a subtype of an imported
+exported type, it also exports a *shadow dispatcher on the base view*
+(`Widen_Any_Disp_O2c_Shape`).  A caller holding a base-typed pointer
+(`A.PShape`) that was widened to the library's subtype (`B.PCircle`)
+dispatches through the shadow: the extending library's override runs
+for its own subtree and everything else falls back to the base
+module's dispatcher.  Verified in an A/B/C harness: a Circle reached
+through a Shape pointer prints `31` (override `+k*10`) while a plain
+Shape prints `3` (base `+k`).  Function-method shadows and ambiguous
+multi-library overrides are documented as not covered.
 
 **M28 — whole-record copies out of module VARIABLEs**: a local
 variable of an imported RECORD type can now take its value from an
