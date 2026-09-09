@@ -257,6 +257,7 @@ package body O2c_Compiler is
    Used_Bool_Arr : Boolean := False;  --  need O2c_Bool_Arr base (M12)
    Used_Set      : Boolean := False;  --  need O2c_Set type + Interfaces
    Used_Real     : Boolean := False;  --  need O2c_Put_Real helper (M18)
+   Nested_Depth : Natural := 0;    --  nested PROCEDURE declarations (M32)
    Loop_Depth : Natural := 0;      --  open LOOP statements (EXIT target)
    Loop_N     : Natural := 0;      --  LOOP counter for generated labels
    Loop_Lbl   : array (1 .. 64) of Unbounded_String;  --  per-depth label
@@ -3420,6 +3421,10 @@ package body O2c_Compiler is
          Exported := True;        --  export mark (M19)
          Next;
       end if;
+      if Exported and then Nested_Depth > 0 then
+         raise O2c_Error with "procedures cannot be exported inside a "
+           & "procedure ('" & Name & "')";
+      end if;
       if Cur.Kind = Lex.Tok_LParen then
          Next;
          loop
@@ -3771,9 +3776,26 @@ package body O2c_Compiler is
             while Cur.Kind = Lex.Tok_Ident loop
                Decl_Var;
             end loop;
+         elsif Cur.Kind = Lex.Tok_Procedure then
+            --  M32: nested procedure (no receiver, no export)
+            declare
+               Save_Recv : constant Natural := Recv_UT;
+            begin
+               Next;              --  past PROCEDURE
+               if Cur.Kind = Lex.Tok_LParen then
+                  raise O2c_Error with "local type-bound procedures are "
+                    & "not supported (inside " & Name & ", line "
+                    & Natural'Image (Cur.Line) & ")";
+               end if;
+               Recv_UT := 0;
+               Nested_Depth := Nested_Depth + 1;
+               Decl_Procedure;
+               Nested_Depth := Nested_Depth - 1;
+               Recv_UT := Save_Recv;
+            end;
          else
-            raise O2c_Error with "expected CONST/TYPE/VAR or BEGIN in "
-              & "procedure " & Name & " (line "
+            raise O2c_Error with "expected CONST/TYPE/VAR/PROCEDURE or "
+              & "BEGIN in procedure " & Name & " (line "
               & Natural'Image (Cur.Line) & ")";
          end if;
       end loop;
@@ -5706,6 +5728,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       G_N := 0;
       N_Dsp := 0;
       N_Imp := 0;
+      Nested_Depth := 0;
       Seen_Proc := False;
       Pkg_Mode := Is_Lib;
 

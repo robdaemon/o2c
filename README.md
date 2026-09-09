@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M31 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M32 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M31 status
+## M32 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,15 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M32 — nested procedures**: a procedure body may declare further
+procedures (`PROCEDURE` sections among its local CONST/TYPE/VAR
+declarations).  Nested procedures close over the enclosing
+procedure's parameters and locals and over module variables, may be
+recursive, cannot be exported, and cannot declare type-bound
+procedures; nested functions work in expressions.  Verified natively:
+Bump and Twice nested in Outer update the outer local `t` (7) and the
+module counter (12).
 
 **M31 — ambiguous multi-library overrides for widened dispatch**:
 shadows now chain instead of collapsing: each library's base-view
