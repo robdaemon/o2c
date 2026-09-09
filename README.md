@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M14 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M15 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,14 +12,15 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M14 status
+## M15 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
 `VAR` (by-reference) parameters — including **user types (records,
 arrays, pointers) as parameters and returns (M11)**, **open array
 (`ARRAY OF`) parameters (M12)** and **record extension + type-bound
-procedures (M13, static; M14 dynamic dispatch)** — plus **local
+procedures (M13 static, M14 dynamic, M15 method
+functions)** — plus **local
 `const`/`type`/`var` declarations inside procedures (M10)**, full
 expressions with Oberon
 precedence (`+ - * DIV MOD & OR ~ = # < <= > >=`, parens), typed
@@ -90,6 +91,16 @@ demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
 
+**M15 — method functions (return values)**:
+type-bound procedures may now declare a return type
+(`procedure (var c: Circle) Ring: integer;`).  Each method function
+gets a dispatcher function per bound record (spec emitted at its
+declaration, body generated after every method is known) whose tag
+chain returns the runtime-appropriate implementation, so
+`circ.Ring()` works in expressions with dynamic dispatch intact
+(`Out.Int(circ.Ring(), 0)`).  Calling a method function as a
+statement is rejected.
+
 **M14 — dynamic dispatch**: a type-bound procedure invoked on a
 POINTER receiver (p.M) now dispatches on the runtime tag: the
 compiler emits a membership chain (deepest override first, `if
@@ -124,10 +135,10 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 `new`, `nil`, `pointer to`, …) so they are easy to type; any case is
 accepted.
 
-Not yet in M14: nested modules and other imports (only `Out`),
+Not yet in M15: nested modules and other imports (only `Out`),
 declaring procedures inside procedures, multi-dimensional arrays,
-record-typed fields/nested arrays, method functions
-(return values), `SET` and other Oberon-2 types.
+record-typed fields/nested arrays, `SET` and other Oberon-2
+types.
 
 ## Build
 

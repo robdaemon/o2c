@@ -50,6 +50,12 @@ package O2c_Lexer is
    --  Word is not a reserved word.
    function Keyword_Of (Word : String) return Token_Kind;
 
+   --  Return the next token without consuming it.
+   function Peek_Token return Token;
+
+   --  Return the next two tokens without consuming them.
+   procedure Peek_Token2 (T1, T2 : out Token);
+
    --  Human-readable kind name (for the shell demo / tests).
    function Image (Kind : Token_Kind) return String;
 

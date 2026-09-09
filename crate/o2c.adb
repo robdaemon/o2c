@@ -154,6 +154,11 @@ procedure O2c is
     "  c.r := c.r + k" & ASCII.LF &
     "end Widen;" & ASCII.LF &
     ASCII.LF &
+    "procedure (var c: Circle) Ring: integer;" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  return c.r" & ASCII.LF &
+    "end Ring;" & ASCII.LF &
+    ASCII.LF &
     ASCII.LF &
     "begin" & ASCII.LF &
     "  n := 0;" & ASCII.LF &
@@ -253,7 +258,7 @@ procedure O2c is
     "  end;" & ASCII.LF &
     "  shp := circ;" & ASCII.LF &
     "  shp.Widen(3);" & ASCII.LF &
-    "  Out.Int(circ^.r, 0);" & ASCII.LF &
+    "  Out.Int(circ.Ring(), 0);" & ASCII.LF &
     "  Out.Ln" & ASCII.LF &
     "end Hello.";
 

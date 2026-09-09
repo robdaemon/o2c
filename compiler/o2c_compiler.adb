@@ -103,6 +103,17 @@ package body O2c_Compiler is
    G_Rec : array (1 .. Max_Guards) of Natural := (others => 0);
    G_N   : Natural := 0;
 
+   --  method-function dispatchers (M15): one per (method, bound record),
+   --  spec emitted at the method declaration, body after all methods.
+   Max_Dsp : constant := 32;
+   type Dsp_Rec is record
+      MName : Unbounded_String;
+      BRec  : Natural := 0;
+      SymIdx : Natural := 0;   --  impl S_Proc (params 1.. incl receiver)
+   end record;
+   Dsps : array (1 .. Max_Dsp) of Dsp_Rec := (others => <>);
+   N_Dsp : Natural := 0;
+
    Decl_Buf  : Unbounded_String;
    Body_Buf  : Unbounded_String;
    Cur       : Lex.Token;
@@ -212,6 +223,17 @@ package body O2c_Compiler is
       return False;
    end Rec_Descends;
 
+   function Rec_Depth (UT : Natural) return Natural is
+      D : Natural := 0;
+      U : Natural := UT;
+   begin
+      while U /= 0 loop
+         D := D + 1;
+         U := UTypes (U).Parent;
+      end loop;
+      return D;
+   end Rec_Depth;
+
    --  Nearest type-bound method named Name visible on record type UT:
    --  searches UT then its ancestors (M13); returns a Bounds index.
    function Bound_Find (UT : Natural; Name : String) return Natural is
@@ -235,6 +257,11 @@ package body O2c_Compiler is
       return Name & "_O2c_" & To_String (UTypes (UT).Name);
    end Method_Impl_Name;
 
+   function Dsp_Name (Name : String; Rec : Natural) return String is
+   begin
+      return Name & "_Disp_O2c_" & To_String (UTypes (Rec).Name);
+   end Dsp_Name;
+
    function Starts_Expr (K : Lex.Token_Kind) return Boolean is
      (K = Lex.Tok_Ident or else K = Lex.Tok_Number
       or else K = Lex.Tok_String or else K = Lex.Tok_LParen
@@ -255,6 +282,129 @@ package body O2c_Compiler is
               with "internal: Ada_Type on a pointer/NIL typing sentinel";
       end case;
    end Ada_Type;
+
+   --  Ada type name of a formal parameter (mirrors Formal_Ada_Type).
+   function P_Ada_Type (P : Param_Rec) return String is
+   begin
+      if P.Open then
+         if P.Typ = T_Char then
+            return "String";
+         elsif P.Typ = T_Int then
+            return "O2c_Int_Arr";
+         else
+            return "O2c_Bool_Arr";
+         end if;
+      elsif P.UT /= 0 then
+         return To_String (UTypes (P.UT).Name);
+      else
+         return Ada_Type (P.Typ);
+      end if;
+   end P_Ada_Type;
+
+   --  Dispatcher function header for method function (M15): the
+   --  receiver is the class-wide view of the bound record B, extra
+   --  parameters mirror the method implementation.
+   function Dsp_Hdr (DN : String; B : Natural; SIdx : Natural) return String is
+      S : Sym renames Syms (SIdx);
+      H : Unbounded_String;
+   begin
+      H := H & "function " & Dsp_Name (DN, B) & " (";
+      for I in 1 .. S.Params loop
+         if I > 1 then
+            H := H & "; ";
+         end if;
+         H := H & To_String (S.P (I).Name)
+           & (if S.P (I).By_Ref then " : in out " else " : ")
+           & (if I = 1 then To_String (UTypes (B).Name) & "'Class"
+              else P_Ada_Type (S.P (I)));
+      end loop;
+      H := H & ") return "
+        & (if S.UT /= 0 then To_String (UTypes (S.UT).Name)
+           else Ada_Type (S.Typ));
+      return To_String (H);
+   end Dsp_Hdr;
+
+   --  Emit the bodies of all method-function dispatchers (M15).  Run
+   --  after every method is known, so each chain covers every override
+   --  in the bound record's subtree (deepest first).
+   procedure Emit_Dsp_Bodies is
+   begin
+      for D in 1 .. N_Dsp loop
+         declare
+            SIdx : constant Natural := Dsps (D).SymIdx;
+            DN   : constant String := To_String (Dsps (D).MName);
+            B    : constant Natural := Dsps (D).BRec;
+            Rcvr : constant String :=
+              To_String (Syms (SIdx).P (1).Name);
+            ArgN : array (1 .. Max_Params) of Unbounded_String;
+            NArg : Natural := Syms (SIdx).Params;
+            ArgL : Unbounded_String;
+            Cand : array (1 .. Max_Bound) of Natural := (others => 0);
+            N_C  : Natural := 0;
+         begin
+            --  argument names (params 2.., passed straight through)
+            for I in 2 .. NArg loop
+               ArgN (I) := Syms (SIdx).P (I).Name;
+               if I > 2 then
+                  ArgL := ArgL & ", ";
+               end if;
+               ArgL := ArgL & ArgN (I);
+            end loop;
+            --  overriding descendants of B, deepest first
+            for X in 1 .. N_UT loop
+               if UTypes (X).Is_Rec and then X /= B
+                 and then Rec_Descends (X, B)
+               then
+                  for Bd in 1 .. N_Bound loop
+                     if Bounds (Bd).RecUT = X
+                       and then To_String (Bounds (Bd).Name) = DN
+                     then
+                        declare
+                           Pos : Positive := N_C + 1;
+                        begin
+                           while Pos > 1 and then
+                             Rec_Depth (X) > Rec_Depth (Cand (Pos - 1))
+                           loop
+                              Cand (Pos) := Cand (Pos - 1);
+                              Pos := Pos - 1;
+                           end loop;
+                           Cand (Pos) := X;
+                        end;
+                        N_C := N_C + 1;
+                     end if;
+                  end loop;
+               end if;
+            end loop;
+            Append_Decl ("   " & Dsp_Hdr (DN, B, SIdx) & " is");
+            Append_Decl ("   begin");
+            if N_C > 0 then
+               for I in 1 .. N_C loop
+                  Append_Decl ("      if " & Rcvr & " in "
+                               & To_String (UTypes (Cand (I)).Name)
+                               & "'Class then");
+                  Append_Decl ("         return "
+                               & Method_Impl_Name (DN, Cand (I)) & " ("
+                               & To_String (UTypes (Cand (I)).Name) & " ("
+                               & Rcvr & ")"
+                               & (if NArg > 1
+                                  then ", " & To_String (ArgL)
+                                  else "")
+                               & ");");
+               end loop;
+               Append_Decl ("      else");
+            end if;
+            Append_Decl ("         return " & Method_Impl_Name (DN, B)
+                         & " (" & To_String (UTypes (B).Name) & " (" & Rcvr
+                         & ")"
+                         & (if NArg > 1 then ", " & To_String (ArgL) else "")
+                         & ");");
+            if N_C > 0 then
+               Append_Decl ("      end if;");
+            end if;
+            Append_Decl ("   end " & Dsp_Name (DN, B) & ";");
+         end;
+      end loop;
+   end Emit_Dsp_Bodies;
 
    --  Standard type names fold like keywords: INTEGER/Integer/integer
    --  are all accepted in type position (case-insensitivity deviation).
@@ -626,17 +776,6 @@ package body O2c_Compiler is
       return A;
    end Parse_Actual;
 
-   function Rec_Depth (UT : Natural) return Natural is
-      D : Natural := 0;
-      U : Natural := UT;
-   begin
-      while U /= 0 loop
-         D := D + 1;
-         U := UTypes (U).Parent;
-      end loop;
-      return D;
-   end Rec_Depth;
-
    --  Emit a type-bound procedure call.  Cur is just past the method
    --  name; Recv is the Ada receiver expression (a record variable or
    --  p.all).  Formal #1 is the receiver, so the actual count must be
@@ -970,6 +1109,100 @@ package body O2c_Compiler is
                         Next;
                      end;
                      return R;
+                  end if;
+                  if Cur.Kind = Lex.Tok_Dot then
+                     --  method function call r.M(...) / p.M(...) (M15):
+                     --  detect via lookahead (member then '(')
+                     declare
+                        T1 : Lex.Token;
+                        T2 : Lex.Token;
+                        Mb : String (1 .. 64);
+                        M_Len : Natural := 0;
+                     begin
+                        Lex.Peek_Token2 (T1, T2);
+                        if T1.Kind = Lex.Tok_Ident and then
+                          T2.Kind = Lex.Tok_LParen
+                        then
+                           M_Len := T1.Len;
+                           Mb (1 .. M_Len) := T1.Text (1 .. T1.Len);
+                           declare
+                              Urec : constant Natural :=
+                                (if UTypes (U).Is_Ptr
+                                 then UTypes (U).Ptr_Tgt
+                                 else U);
+                              BI : constant Natural :=
+                                Bound_Find (Urec, Mb (1 .. M_Len));
+                           begin
+                              if BI /= 0
+                                and then Syms (Bounds (BI).SymIdx).Ret
+                              then
+                                 declare
+                                    SIdx : constant Natural :=
+                                      Bounds (BI).SymIdx;
+                                    DN : constant String :=
+                                      To_String (Bounds (BI).Name);
+                                    BB : constant Natural :=
+                                      Bounds (BI).RecUT;
+                                    Rcv : constant String :=
+                                      (if UTypes (U).Is_Ptr
+                                       then Nm & ".all"
+                                       else Nm);
+                                    Exp : constant Natural :=
+                                      Syms (SIdx).Params - 1;
+                                    Call : Unbounded_String;
+                                    N_A  : Natural := 0;
+                                 begin
+                                    Next;   --  past '.'
+                                    Expect (Lex.Tok_Ident, "a method name");
+                                    Next;   --  past method name
+                                    Expect (Lex.Tok_LParen, "'('");
+                                    Next;
+                                    Call := Call
+                                      & Dsp_Name (DN, BB) & " (" & Rcv;
+                                    loop
+                                       exit when
+                                         Cur.Kind = Lex.Tok_RParen;
+                                       N_A := N_A + 1;
+                                       if N_A > Exp then
+                                          raise O2c_Error with "method '"
+                                            & DN & "' expects "
+                                            & Natural'Image (Exp)
+                                            & " argument(s)";
+                                       end if;
+                                       declare
+                                          A : Expr_Rec := Parse_Actual
+                                            (Syms (SIdx).P (N_A + 1));
+                                       begin
+                                          Call := Call & ", "
+                                            & To_String (A.Text);
+                                       end;
+                                       exit when
+                                         Cur.Kind /= Lex.Tok_Comma;
+                                       Next;
+                                    end loop;
+                                    if N_A /= Exp then
+                                       raise O2c_Error with "method '"
+                                         & DN & "' expects "
+                                         & Natural'Image (Exp)
+                                         & " argument(s), got "
+                                         & Natural'Image (N_A);
+                                    end if;
+                                    Expect (Lex.Tok_RParen, "')'");
+                                    Next;
+                                    Call := Call & ")";
+                                    R.Text := Call;
+                                    if Syms (SIdx).UT /= 0 then
+                                       R.Typ := T_Ptr;
+                                       R.Ptr_UT := Syms (SIdx).UT;
+                                    else
+                                       R.Typ := Syms (SIdx).Typ;
+                                    end if;
+                                    return R;
+                                 end;
+                              end if;
+                           end;
+                        end if;
+                     end;
                   end if;
                   if UTypes (U).Is_Ptr or else UTypes (U).Is_Rec then
                      --  POINTER/record designator: '^' deref and
@@ -1749,10 +1982,6 @@ package body O2c_Compiler is
       Ret_Typ := T_Int;
       Ret_UT := 0;
       if Cur.Kind = Lex.Tok_Colon then
-         if Recv_UT /= 0 then
-            raise O2c_Error with "type-bound procedures cannot return "
-              & "values (M13) (line " & Natural'Image (Cur.Line) & ")";
-         end if;
          Next;
          if Cur.Kind /= Lex.Tok_Ident then
             raise O2c_Error with "a return type name expected (line "
@@ -1916,6 +2145,28 @@ package body O2c_Compiler is
       Expect (Lex.Tok_Semi, "';' after END");
       Next;
       Append_Decl ("   end " & To_String (Impl_Nm) & ";");
+      if Recv_UT /= 0 and then Is_Function then
+         --  method function: dispatcher spec (its body is emitted once
+         --  every method is known, in Emit_Dsp_Bodies)
+         declare
+            Found : Boolean := False;
+         begin
+            for D in 1 .. N_Dsp loop
+               if Dsps (D).BRec = Recv_UT
+                 and then To_String (Dsps (D).MName) = Name
+               then
+                  Found := True;
+               end if;
+            end loop;
+            if not Found then
+               N_Dsp := N_Dsp + 1;
+               Dsps (N_Dsp) := (MName => To_Unbounded_String (Name),
+                                BRec => Recv_UT, SymIdx => Param_Base);
+               Append_Decl ("   " & Dsp_Hdr (Name, Recv_UT, Param_Base)
+                            & ";");
+            end if;
+         end;
+      end if;
 
       N_Sym := Param_Base;        --  drop parameters and locals
       N_UT := Local_N_UT;         --  drop procedure-local types (M10)
@@ -2595,6 +2846,11 @@ package body O2c_Compiler is
                   F_Len := Cur.Len;
                   BI := Bound_Find (Urec, FName (1 .. F_Len));
                   if BI /= 0 then
+                     if Syms (Bounds (BI).SymIdx).Ret then
+                        raise O2c_Error with "method '" & FName (1 .. F_Len)
+                          & "' is a function; use its value (line "
+                          & Natural'Image (Cur.Line) & ")";
+                     end if;
                      --  type-bound procedure call on the receiver
                      declare
                         Rtxt : constant String :=
@@ -2887,6 +3143,7 @@ package body O2c_Compiler is
       N_Bound := 0;
       Recv_UT := 0;
       G_N := 0;
+      N_Dsp := 0;
       Seen_Proc := False;
 
       Lex.Init (Source);
@@ -2989,6 +3246,9 @@ package body O2c_Compiler is
       end loop;
 
       Check_No_Pending;
+
+      --  method-function dispatchers (M15), now that every method is known
+      Emit_Dsp_Bodies;
 
       if Cur.Kind = Lex.Tok_Begin then
          Next;

@@ -139,6 +139,11 @@ begin
   c.r := c.r + k
 end Widen;
 
+procedure (var c: Circle) Ring: integer;
+begin
+  return c.r
+end Ring;
+
 
 begin
   n := 0;
@@ -238,6 +243,6 @@ begin
   end;
   shp := circ;
   shp.Widen(3);
-  Out.Int(circ^.r, 0);
+  Out.Int(circ.Ring(), 0);
   Out.Ln
 end Hello.

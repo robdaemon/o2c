@@ -170,6 +170,31 @@ package body O2c_Lexer is
       return Tok_Ident;
    end Keyword_Of;
 
+   function Peek_Token return Token is
+      SP : constant Natural := Pos;
+      SL : constant Natural := Cur_Line;
+      SC : constant Natural := Cur_Col;
+      T  : Token;
+   begin
+      T := Next_Token;
+      Pos := SP;
+      Cur_Line := SL;
+      Cur_Col := SC;
+      return T;
+   end Peek_Token;
+
+   procedure Peek_Token2 (T1, T2 : out Token) is
+      SP : constant Natural := Pos;
+      SL : constant Natural := Cur_Line;
+      SC : constant Natural := Cur_Col;
+   begin
+      T1 := Next_Token;
+      T2 := Next_Token;
+      Pos := SP;
+      Cur_Line := SL;
+      Cur_Col := SC;
+   end Peek_Token2;
+
    function Next_Token return Token is
       T  : Token;
       N  : Natural;
