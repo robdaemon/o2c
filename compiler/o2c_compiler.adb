@@ -6291,6 +6291,87 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       return To_String (Main_Txt);
    end Compile;
 
+   --  Oakwood builtin libraries embedded in the compiler (M38):
+   --  auto-provided to every multi-module build so that any module can
+   --  simply 'import Strings;' without staging a source file.
+   function Oak_Strings_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module Strings;" & ASCII.LF
+        & "procedure Length*(s: array of char): integer;" & ASCII.LF
+        & "  var i, n: integer;" & ASCII.LF
+        & "begin" & ASCII.LF
+        & "  n := 0;" & ASCII.LF
+        & "  for i := 0 to len(s) - 1 do" & ASCII.LF
+        & "    if s[i] = CHR(0) then" & ASCII.LF
+        & "      return n" & ASCII.LF
+        & "    end;" & ASCII.LF
+        & "    n := n + 1" & ASCII.LF
+        & "  end;" & ASCII.LF
+        & "  return n" & ASCII.LF
+        & "end Length;" & ASCII.LF
+        & "procedure Pos*(sub: array of char; s: array of char): integer;" & ASCII.LF
+        & "  var i, j, sl, sul, bad: integer;" & ASCII.LF
+        & "begin" & ASCII.LF
+        & "  sl := Length(s);" & ASCII.LF
+        & "  sul := Length(sub);" & ASCII.LF
+        & "  if sul = 0 then" & ASCII.LF
+        & "    return 0" & ASCII.LF
+        & "  end;" & ASCII.LF
+        & "  if sul > sl then" & ASCII.LF
+        & "    return -1" & ASCII.LF
+        & "  end;" & ASCII.LF
+        & "  for i := 0 to sl - sul do" & ASCII.LF
+        & "    j := 0;" & ASCII.LF
+        & "    bad := 0;" & ASCII.LF
+        & "    while (j < sul) & (bad = 0) do" & ASCII.LF
+        & "      if s[i + j] # sub[j] then" & ASCII.LF
+        & "        bad := 1" & ASCII.LF
+        & "      else" & ASCII.LF
+        & "        j := j + 1" & ASCII.LF
+        & "      end" & ASCII.LF
+        & "    end;" & ASCII.LF
+        & "    if (bad = 0) & (j = sul) then" & ASCII.LF
+        & "      return i" & ASCII.LF
+        & "    end" & ASCII.LF
+        & "  end;" & ASCII.LF
+        & "  return -1" & ASCII.LF
+        & "end Pos;" & ASCII.LF
+        & "procedure Cap*(var s: array of char);" & ASCII.LF
+        & "  var i, n: integer;" & ASCII.LF
+        & "begin" & ASCII.LF
+        & "  n := Length(s);" & ASCII.LF
+        & "  for i := 0 to n - 1 do" & ASCII.LF
+        & "    if (ORD(s[i]) >= 97) & (ORD(s[i]) <= 122) then" & ASCII.LF
+        & "      s[i] := CHR(ORD(s[i]) - 32)" & ASCII.LF
+        & "    end" & ASCII.LF
+        & "  end" & ASCII.LF
+        & "end Cap;" & ASCII.LF
+        & "procedure Delete*(var s: array of char; i: integer; n: integer);" & ASCII.LF
+        & "  var j, sl, a, c: integer;" & ASCII.LF
+        & "begin" & ASCII.LF
+        & "  sl := Length(s);" & ASCII.LF
+        & "  a := i;" & ASCII.LF
+        & "  c := n;" & ASCII.LF
+        & "  if a < 0 then a := 0 end;" & ASCII.LF
+        & "  if c < 0 then c := 0 end;" & ASCII.LF
+        & "  if a >= sl then return end;" & ASCII.LF
+        & "  if a + c > sl then c := sl - a end;" & ASCII.LF
+        & "  j := a;" & ASCII.LF
+        & "  while j + c < sl do" & ASCII.LF
+        & "    s[j] := s[j + c];" & ASCII.LF
+        & "    j := j + 1" & ASCII.LF
+        & "  end;" & ASCII.LF
+        & "  while j < sl do" & ASCII.LF
+        & "    s[j] := CHR(0);" & ASCII.LF
+        & "    j := j + 1" & ASCII.LF
+        & "  end" & ASCII.LF
+        & "end Delete;" & ASCII.LF
+        & "end Strings." & ASCII.LF
+        & "" & ASCII.LF;
+      return To_String (S);
+   end Oak_Strings_Src;
+
    function Compile_Multi (Main_Source : String; Libs : Lib_Array;
                            N_Libs : Natural; Count : out Natural)
                            return Unit_Array
@@ -6324,15 +6405,28 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
               & " of Boolean;" & ASCII.LF
               & "   type O2c_Set is mod 2**32;" & ASCII.LF
               & "end O2c_Types;" & ASCII.LF));
+      --  M38: compile the builtin Oakwood modules first so that user
+      --  modules and the main can import them
+      Compile_Module (Oak_Strings_Src, True, M_T, S_T, B_T);
+      Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
+      if Length (B_T) > 0 then
+         Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+      end if;
+      N_Prov := N_Prov + 1;
+      Provided (N_Prov) := Mod_Name;
+
       for I in 1 .. N_Libs loop
-         Compile_Module (To_String (Libs (I).Text), True,
-                         M_T, S_T, B_T);
-         Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
-         if Length (B_T) > 0 then
-            Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+         if not Is_Provided (To_String (Libs (I).Name)) then
+            --  skip a user module that duplicates a builtin (M38)
+            Compile_Module (To_String (Libs (I).Text), True,
+                            M_T, S_T, B_T);
+            Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
+            if Length (B_T) > 0 then
+               Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+            end if;
+            N_Prov := N_Prov + 1;
+            Provided (N_Prov) := Mod_Name;
          end if;
-         N_Prov := N_Prov + 1;
-         Provided (N_Prov) := Mod_Name;
       end loop;
       Compile_Module (Main_Source, False, M_T, S_T, B_T);
       Add (Lower (To_String (Mod_Name)) & ".adb", M_T);

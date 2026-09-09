@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M37 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M38 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M37 status
+## M38 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,14 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M38 — Oakwood modules (Strings)**: the Oakwood `Strings` module
+(`Length`, `Pos`, `Cap`, `Delete` over NUL-terminated `ARRAY OF
+CHAR`) ships as source text embedded in the compiler and is
+auto-provided to every `Compile_Multi` build, so any module can
+`import Strings;` with no staged file or driver change.  A user lib
+whose name duplicates a builtin is skipped.  Demo: `Strings.Pos("lo",
+"hello") + 999` prints `1002`.
 
 **M37 — multi-level extensions and CHAR/BOOLEAN aggregates**:
 extending an extended RECORD is now allowed, and record aggregates

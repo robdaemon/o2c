@@ -1,5 +1,5 @@
 module Hello;
-import Out, Math, Geo;
+import Out, Math, Geo, Strings;
 
 type Vector = array 4 of integer;
 type Pair = record a, b: integer end;
@@ -355,6 +355,8 @@ begin
   rg.q.y := 2;
   rg.w := 3;
   Out.Int(rg.p.x + rg.p.y + rg.q.x + rg.q.y + rg.w, 0);
+  Out.Ln;
+  Out.Int(Strings.Pos("lo", "hello") + 999, 0);
   Out.Ln;
   bx.x := 10;
   bx.y := 20;
