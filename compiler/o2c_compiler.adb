@@ -1942,6 +1942,100 @@ package body O2c_Compiler is
                                     return R;
                                  end;
                               end if;
+                              if BI = 0 and then UTypes (Urec).Imported then
+                                 --  M20d: method function on an imported
+                                 --  record type: call the exported
+                                 --  dispatcher and use its result.
+                                 declare
+                                    Ownr : constant String :=
+                                      UT_Owner (Urec);
+                                    XMI  : constant Natural :=
+                                      XM_Bound (Ownr, Urec,
+                                                Mb (1 .. M_Len));
+                                 begin
+                                    if XMI /= 0 then
+                                       if not XMs (XMI).Ret then
+                                          raise O2c_Error with "method '"
+                                            & Mb (1 .. M_Len)
+                                            & "' is a proper procedure, not "
+                                            & "a function (line "
+                                            & Natural'Image (Cur.Line) & ")";
+                                       end if;
+                                       declare
+                                          RNm : constant String :=
+                                            To_String (XMs (XMI).RecN);
+                                          Rcv : constant String :=
+                                            (if UTypes (U).Is_Ptr
+                                             then Nm & ".all"
+                                             else Nm);
+                                          Call : Unbounded_String;
+                                          N_A  : Natural := 0;
+                                       begin
+                                          Next;   --  past '.'
+                                          Expect (Lex.Tok_Ident,
+                                                  "a method name");
+                                          Next;   --  past method name
+                                          Expect (Lex.Tok_LParen, "'('");
+                                          Next;
+                                          Call := Call & Ownr & "."
+                                            & Mb (1 .. M_Len)
+                                            & "_Disp_O2c_" & RNm & " ("
+                                            & Rcv;
+                                          loop
+                                             exit when
+                                               Cur.Kind = Lex.Tok_RParen;
+                                             N_A := N_A + 1;
+                                             if N_A > XMs (XMI).Params then
+                                                raise O2c_Error with
+                                                  "method '" & Mb (1 .. M_Len)
+                                                  & "' expects "
+                                                  & Natural'Image
+                                                    (XMs (XMI).Params)
+                                                  & " argument(s)";
+                                             end if;
+                                             declare
+                                                A : Expr_Rec := Parse_Actual
+                                                  (XM_Formal (XMI, N_A));
+                                             begin
+                                                Call := Call & ", "
+                                                  & To_String (A.Text);
+                                             end;
+                                             exit when
+                                               Cur.Kind /= Lex.Tok_Comma;
+                                             Next;
+                                          end loop;
+                                          if N_A /= XMs (XMI).Params then
+                                             raise O2c_Error with
+                                               "method '" & Mb (1 .. M_Len)
+                                               & "' expects "
+                                               & Natural'Image
+                                                 (XMs (XMI).Params)
+                                               & " argument(s), got "
+                                               & Natural'Image (N_A);
+                                          end if;
+                                          Expect (Lex.Tok_RParen, "')'");
+                                          Next;
+                                          Call := Call & ")";
+                                          R.Text := Call;
+                                          if Length (XMs (XMI).Ret_Nm) > 0
+                                          then
+                                             declare
+                                                Q : constant String :=
+                                                  To_String
+                                                    (XMs (XMI).Ret_Nm);
+                                             begin
+                                                R.Typ := T_Ptr;
+                                                R.Ptr_UT := Import_Type
+                                                  (Q_Owner (Q), Q_Mem (Q));
+                                             end;
+                                          else
+                                             R.Typ := XMs (XMI).Typ;
+                                          end if;
+                                          return R;
+                                       end;
+                                    end if;
+                                 end;
+                              end if;
                            end;
                         end if;
                      end;

@@ -98,8 +98,10 @@ Scale*(k: integer)`) gets an exported dispatcher
 the tag chain over the module's subtype tree; importers call it as a
 plain `obj.Method(...)` on their imported-typed variables and the
 compiler resolves the deepest bound method through the exported-method
-catalog.  The demo calls `a.Scale(3)` on a `Math.Point`, printing
-`309` at the end.  Function methods across modules are M20d.
+catalog.  The demo calls `a.Scale(3)` and the method function
+`a.Sum()` on a `Math.Point`, printing `309` twice at the end.
+Function-method calls now import too (they resolve in expressions via
+the catalog and call the exported function dispatcher).
 
 **M20b — exported procedures on exported types**: library
 procedures marked `name*` may now take VAR RECORD parameters and

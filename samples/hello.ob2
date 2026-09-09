@@ -309,5 +309,7 @@ begin
   Out.Ln;
   a.Scale(3);
   Out.Int(a.x + a.y, 0);
+  Out.Ln;
+  Out.Int(a.Sum(), 0);
   Out.Ln
 end Hello.

@@ -19,6 +19,10 @@ begin
   p.x := p.x * k;
   p.y := p.y * k
 end Scale;
+procedure (var p: Point) Sum*: integer;
+begin
+  return p.x + p.y
+end Sum;
 procedure Sqr*(x: integer): integer;
 begin
   return x * x
