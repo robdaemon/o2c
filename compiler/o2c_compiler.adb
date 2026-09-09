@@ -1764,6 +1764,61 @@ package body O2c_Compiler is
                R.Text := (if Neg then "-" else "") & "(" & R.Text & ")";
             end;
          when Lex.Tok_Ident =>
+            if Eq_No_Case (Cur.Text (1 .. Cur.Len), "ORD")
+              or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "CHR")
+              or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "ABS")
+              or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "ODD")
+            then
+               --  predeclared functions (M25): ORD/CHR/ABS/ODD
+               declare
+                  Fn : constant String := Cur.Text (1 .. Cur.Len);
+               begin
+                  Next;             --  past the function name
+                  Expect (Lex.Tok_LParen, "'(' after " & Fn);
+                  Next;
+                  declare
+                     A : Expr_Rec := Parse_Expr;
+                  begin
+                     if Eq_No_Case (Fn, "ORD") then
+                        if A.Typ /= T_Char then
+                           raise O2c_Error with "ORD needs a CHAR argument";
+                        end if;
+                        R.Text := To_Unbounded_String
+                          ("Character'Pos (" & To_String (A.Text) & ")");
+                        R.Typ := T_Int;
+                     elsif Eq_No_Case (Fn, "CHR") then
+                        if A.Typ /= T_Int then
+                           raise O2c_Error with "CHR needs an INTEGER "
+                             & "argument";
+                        end if;
+                        R.Text := To_Unbounded_String
+                          ("Character'Val (" & To_String (A.Text) & ")");
+                        R.Typ := T_Char;
+                     elsif Eq_No_Case (Fn, "ABS") then
+                        if not (A.Typ = T_Int or else A.Typ = T_Long
+                                or else A.Typ = T_Real)
+                        then
+                           raise O2c_Error with "ABS needs an INTEGER, "
+                             & "LONGINT or REAL argument";
+                        end if;
+                        R.Text := To_Unbounded_String
+                          ("abs (" & To_String (A.Text) & ")");
+                        R.Typ := A.Typ;
+                     else  --  ODD
+                        if A.Typ /= T_Int and then A.Typ /= T_Long then
+                           raise O2c_Error with "ODD needs an INTEGER or "
+                             & "LONGINT argument";
+                        end if;
+                        R.Text := To_Unbounded_String
+                          ("((" & To_String (A.Text) & " mod 2) = 1)");
+                        R.Typ := T_Bool;
+                     end if;
+                  end;
+                  Expect (Lex.Tok_RParen, "')'");
+                  Next;
+               end;
+               return R;
+            end if;
             if Eq_No_Case (Cur.Text (1 .. Cur.Len), "LEN") then
                --  LEN(array): predeclared length (M12)
                Next;             --  past LEN
@@ -4175,7 +4230,72 @@ package body O2c_Compiler is
          elsif Cur.Kind = Lex.Tok_Ident then
             H_Len := Cur.Len;
             Head (1 .. H_Len) := Cur.Text (1 .. H_Len);
-            if Eq_No_Case (Head (1 .. H_Len), "NEW") then
+            if Eq_No_Case (Head (1 .. H_Len), "INC")
+              or else Eq_No_Case (Head (1 .. H_Len), "DEC")
+            then
+               --  predeclared INC/DEC (M25): INC(x [, n]) / DEC(x [, n])
+               declare
+                  Neg  : constant Boolean :=
+                    Eq_No_Case (Head (1 .. H_Len), "DEC");
+                  Id   : Natural := 0;
+                  Nm   : String (1 .. 128);
+                  N_Len : Natural;
+               begin
+                  Next;              --  past INC/DEC
+                  if Cur.Kind = Lex.Tok_LParen then
+                     Next;
+                     if Cur.Kind /= Lex.Tok_Ident then
+                        raise O2c_Error with "INC/DEC needs a variable "
+                          & "(line " & Natural'Image (Cur.Line) & ")";
+                     end if;
+                     Id := Find (Cur.Text (1 .. Cur.Len));
+                     N_Len := Cur.Len;
+                     Nm (1 .. N_Len) := Cur.Text (1 .. Cur.Len);
+                     Next;
+                  else
+                     Id := Find (Head (1 .. H_Len));
+                     N_Len := H_Len;
+                     Nm (1 .. N_Len) := Head (1 .. H_Len);
+                  end if;
+                  if Id = 0 or else Syms (Id).Kind /= S_Var
+                    or else not (Syms (Id).Typ = T_Int
+                                 or else Syms (Id).Typ = T_Long)
+                  then
+                     raise O2c_Error with "INC/DEC needs an INTEGER or "
+                       & "LONGINT variable (line "
+                       & Natural'Image (Cur.Line) & ")";
+                  end if;
+                  declare
+                     Step : String := "1";
+                  begin
+                     if Cur.Kind = Lex.Tok_Comma then
+                        Next;
+                        declare
+                           V : Expr_Rec := Parse_Expr;
+                        begin
+                           if V.Typ /= T_Int then
+                              raise O2c_Error with "the INC/DEC step must "
+                                & "be INTEGER";
+                           end if;
+                           if Syms (Id).Typ = T_Long
+                             and then not V.Lit
+                           then
+                              raise O2c_Error with "INC/DEC on LONGINT "
+                                & "takes plain literals only";
+                           end if;
+                           Step := To_String (V.Text);
+                        end;
+                     end if;
+                     Append_Body ("      " & Nm (1 .. N_Len) & " := "
+                                  & Nm (1 .. N_Len)
+                                  & (if Neg then " - " else " + ")
+                                  & Step & ";");
+                  end;
+                  if Cur.Kind = Lex.Tok_RParen then
+                     Next;
+                  end if;
+               end;
+            elsif Eq_No_Case (Head (1 .. H_Len), "NEW") then
                --  NEW(p): allocate the record a POINTER designates (M8).
                --  NEW is a predeclared procedure, recognized here in
                --  statement position like a keyword (case-insensitive).

@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M24 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M25 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M24 status
+## M25 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,14 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M25 — predeclared functions**: the standard functions are
+recognized case-insensitively like `LEN`/`NEW`: `ORD(ch)` →
+`Character'Pos`, `CHR(i)` → `Character'Val`, `ABS(x)` for
+INTEGER/LONGINT/REAL, `ODD(i)` for INTEGER/LONGINT, and the `INC(x
+[, n])` / `DEC(x [, n])` statements on INTEGER/LONGINT variables
+(literal steps on LONGINT, matching the LONGINT mixing rule).  The
+demo prints `53 1 65 66 10-4`.
 
 **M24 — cross-module type composition**: exported shapes may now
 reference another module's exported types.  Record fields accept a
@@ -281,7 +289,7 @@ accepted.
 The module/import epic plus importer-side RECORD extension is shipped
 (M19-M23).  Remaining: opaque pointers, exported-method overrides with dynamic
 dispatch across packages, whole-record copies out of module VARIABLEs,
-and the standard predeclared functions.
+(the standard predeclared functions are M25).
 declaring procedures inside procedures, multi-dimensional arrays,
 `SET` and other Oberon-2 types.
 
