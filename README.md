@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M22 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M23 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M22 status
+## M23 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,18 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M23 — extend an imported RECORD type**: an importer can now
+write `type P3 = record (Math.Point) z: integer end;` — the parent
+may be an imported exported RECORD, emitted as an Ada type extension
+over the package type.  Inherited exported fields stay accessible and
+exported methods of the base resolve through the catalog chain
+(XM_Chain), so `px.Scale(2)` calls the Math dispatcher with the
+derived record as the class-wide receiver; the importer may add its
+own methods on the subtype (statically bound).  Guards reject
+declaring methods directly on an imported type and exporting a
+method that overrides an imported base method (dynamic overrides
+across packages remain M24).
 
 **M22 — field export marks, whole-record module vars, SET
 fields**: fields of exported RECORD types may now carry `name*`
@@ -254,9 +266,11 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 `new`, `nil`, `pointer to`, …) so they are easy to type; any case is
 accepted.
 
-Field-level export marks are enforced (M22); whole-record assignment
-to exported module VARIABLEs works.  The module/import epic is
-feature-complete (M19-M22).
+The module/import epic plus importer-side RECORD extension is shipped
+(M19-M23).  Remaining: cross-module type composition (exported shapes
+may only reference same-module types), opaque pointers, exported-method
+overrides with dynamic dispatch across packages (M24), whole-record
+copies out of module VARIABLEs, and the standard predeclared functions.
 declaring procedures inside procedures, multi-dimensional arrays,
 `SET` and other Oberon-2 types.
 

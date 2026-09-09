@@ -402,6 +402,28 @@ package body O2c_Compiler is
       return 0;
    end XM_Bound;
 
+   --  M23: deepest exported method bound on Rec's chain, including
+   --  imported ancestors (a local extension of an imported record
+   --  inherits the module's exported methods).
+   function XM_Chain (Rec : Natural; MName : String) return Natural is
+      U : Natural := Rec;
+   begin
+      while U /= 0 loop
+         if UTypes (U).Imported then
+            declare
+               X : constant Natural :=
+                 XM_Bound (UT_Owner (U), U, MName);
+            begin
+               if X /= 0 then
+                  return X;
+               end if;
+            end;
+         end if;
+         U := UTypes (U).Parent;
+      end loop;
+      return 0;
+   end XM_Chain;
+
    function XM_Formal (XMI, I : Natural) return Param_Rec is
       F : Param_Rec := XMs (XMI).P (I);
    begin
@@ -2026,16 +2048,18 @@ package body O2c_Compiler is
                                     return R;
                                  end;
                               end if;
-                              if BI = 0 and then UTypes (Urec).Imported then
-                                 --  M20d: method function on an imported
-                                 --  record type: call the exported
-                                 --  dispatcher and use its result.
+                              if BI = 0 and then
+                                XM_Chain (Urec, Mb (1 .. M_Len)) /= 0
+                              then
+                                 --  M20d/M23: method function from an
+                                 --  imported record (or a local extension
+                                 --  of one): call the exported dispatcher
+                                 --  and use its result.
                                  declare
-                                    Ownr : constant String :=
-                                      UT_Owner (Urec);
                                     XMI  : constant Natural :=
-                                      XM_Bound (Ownr, Urec,
-                                                Mb (1 .. M_Len));
+                                      XM_Chain (Urec, Mb (1 .. M_Len));
+                                    Ownr : constant String :=
+                                      To_String (XMs (XMI).Owner);
                                  begin
                                     if XMI /= 0 then
                                        if not XMs (XMI).Ret then
@@ -2914,24 +2938,41 @@ package body O2c_Compiler is
             Next;
             Expect (Lex.Tok_Ident, "the parent record type after '('");
             declare
-               PT : constant Natural := Find_UT (Cur.Text (1 .. Cur.Len));
+               PT  : Natural := 0;
+               PNm : constant String := Cur.Text (1 .. Cur.Len);
             begin
+               if Imported_Mod (PNm)
+                 and then Lex.Peek_Token.Kind = Lex.Tok_Dot
+               then
+                  --  M23: extend an imported exported RECORD type
+                  declare
+                     Own : constant String := PNm;
+                  begin
+                     Next;         --  past the module name
+                     Next;         --  past '.'
+                     Expect (Lex.Tok_Ident, "an exported type name");
+                     PT := Import_Type (Own, Cur.Text (1 .. Cur.Len));
+                     Next;
+                  end;
+               else
+                  PT := Find_UT (PNm);
+                  Next;
+               end if;
                if PT = 0 then
                   raise O2c_Error with "unknown parent record type '"
-                    & Cur.Text (1 .. Cur.Len) & "' (line "
+                    & PNm & "' (line "
                     & Natural'Image (Cur.Line) & ")";
                end if;
                if not UTypes (PT).Is_Rec or else UTypes (PT).Is_Ext
                  or else UTypes (PT).Is_Ptr
                then
-                  raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
+                  raise O2c_Error with "'" & To_String (UTypes (PT).Name)
                     & "' is not an extensible RECORD type (line "
                     & Natural'Image (Cur.Line) & ")";
                end if;
                UTypes (UTI).Is_Ext := True;
                UTypes (UTI).Parent := PT;
             end;
-            Next;
             Expect (Lex.Tok_RParen, "')' after the parent record type");
             Next;
          end if;
@@ -3098,6 +3139,11 @@ package body O2c_Compiler is
       end Formal_Ada_Type;
    begin
       if Recv_UT /= 0 then
+         if UTypes (Recv_UT).Imported then
+            raise O2c_Error with "type-bound procedures on an imported "
+              & "RECORD type must be declared in that module (M23; '"
+              & Name & "')";
+         end if;
          --  type-bound procedure: receiver is formal parameter #1
          Impl_Nm := To_Unbounded_String (Method_Impl_Name (Name, Recv_UT));
          N_Par := 1;
@@ -3283,6 +3329,11 @@ package body O2c_Compiler is
          --  M20c: exported type-bound method.  Its dispatcher is
          --  exported from the package spec; plain procedures keep the
          --  M19/M20b path below.
+         if XM_Chain (Recv_UT, Name) /= 0 then
+            raise O2c_Error with "exported method '" & Name
+              & "' overrides a method of an imported RECORD type; "
+              & "cross-module overrides are not supported yet (M23)";
+         end if;
          if not UTypes (Recv_UT).ExpT then
             raise O2c_Error with "type-bound procedure '" & Name
               & "' can be exported only on an exported type (M20c)";
@@ -4391,15 +4442,18 @@ package body O2c_Compiler is
                                         else 0));
                                  end;
                               end if;
-                              if BI = 0 and then UTypes (Urec).Imported then
-                                 --  M20c: method on an imported record
-                                 --  type: call the exported dispatcher
+                              if BI = 0 and then
+                                XM_Chain (Urec, T1.Text (1 .. T1.Len)) /= 0
+                              then
+                                 --  M20c/M23: method from an imported
+                                 --  record (or a local extension of one):
+                                 --  call the exported dispatcher
                                  declare
-                                    Ownr : constant String :=
-                                      UT_Owner (Urec);
                                     XMI  : constant Natural :=
-                                      XM_Bound (Ownr, Urec,
+                                      XM_Chain (Urec,
                                                 T1.Text (1 .. T1.Len));
+                                    Ownr : constant String :=
+                                      To_String (XMs (XMI).Owner);
                                  begin
                                     if XMI /= 0 then
                                        if XMs (XMI).Ret then

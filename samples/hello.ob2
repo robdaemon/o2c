@@ -10,6 +10,7 @@ type Shape = record x: integer end;
 type Circle = record (Shape) r: integer end;
 type PShape = pointer to Shape;
 type PCircle = pointer to Circle;
+type P3 = record (Math.Point) z: integer end;
 type Mat = array 2 of Vector;
 type Tote = record m: Mat; k: integer end;
 
@@ -25,6 +26,7 @@ var m: integer;
 var a, b: Math.Point;
 var hx, tx: Math.Node;
 var w: Math.Vec;
+var px: P3;
 
 const Greeting = "hello from Oberon-2";
 
@@ -154,6 +156,10 @@ begin
 end Ring;
 
 
+procedure (var q: P3) AddZ(d: integer);
+begin
+  q.z := q.z + d
+end AddZ;
 begin
   n := 0;
   repeat
@@ -326,6 +332,13 @@ begin
   a.y := 25;
   Math.origin := a;
   Out.Int(Math.origin.x + Math.origin.y, 0);
+  Out.Ln;
+  px.x := 10;
+  px.y := 4;
+  px.z := 1;
+  px.Scale(2);
+  px.AddZ(3);
+  Out.Int(px.x + px.y + px.z, 0);
   Out.Ln;
   Math.marks := {1, 3};
   if 2 IN Math.marks then Out.Int(26, 0) else Out.Int(27, 0) end;
