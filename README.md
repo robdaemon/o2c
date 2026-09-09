@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M35 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M36 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M35 status
+## M36 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,15 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M36 — extension and array aggregates**: record aggregates now work
+on single-level extension types: the compiler emits an Ada extension
+aggregate over a qualified parent aggregate (`{a = 5, c = 7}` on a
+record extending B becomes `(B'(a => 5, b => 0) with c => 7)`),
+including inherited-field names where exported.  Fixed numeric/bool
+ARRAY variables accept positional `{e1, e2, ...}` literals (exactly
+the declared length).  Multi-level extensions are rejected.  Verified
+natively: `12 3 5`.
 
 **M35 — record aggregate literals**: a record-typed variable may be
 assigned a literal `{field = value, ...}` (whole-record copy RHS).
