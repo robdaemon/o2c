@@ -49,6 +49,8 @@ package body O2c_Compiler is
       Elem_UT : Natural := 0;       --  array element user type (M16)
       N_F     : Natural := 0;
       F       : UField_Array := (others => <>);
+      ExpT    : Boolean := False;   --  export mark on the type (M20)
+      Imported : Boolean := False;  --  synthesized from another module (M20)
    end record;
 
    UTypes : array (1 .. Max_UTypes) of UType := (others => <>);
@@ -117,7 +119,32 @@ package body O2c_Compiler is
    Pkg_Mode   : Boolean := False;   --  compiling a library module
    Multi_Ok   : Boolean := False;   --  library imports are available
    Spec_Buf   : Unbounded_String;   --  package spec text (exports)
+   Spec_Decl  : Boolean := False;   --  route Append_Decl to Spec_Buf (M20)
    Used_Console : Boolean := False; --  module emits Console calls
+
+   --  exported type catalog (M20): the visible TYPE declarations of
+   --  library modules.  References between types are stored by name
+   --  (Owner.Type) because each module owns its own UTypes table.
+   Max_XT : constant := 64;
+   type XT_Field is record
+      Name   : Unbounded_String;
+      Typ    : EType := T_Int;      --  scalar field type (UT_Nm = "")
+      UT_Nm  : Unbounded_String;    --  qualified user type name, if any
+   end record;
+   type XT_Field_Arr is array (1 .. 16) of XT_Field;
+   type XT_Entry is record
+      Owner   : Unbounded_String;
+      Name    : Unbounded_String;
+      Is_Rec  : Boolean := False;
+      Is_Ptr  : Boolean := False;
+      Is_Ext  : Boolean := False;
+      Ptr_Nm  : Unbounded_String;   --  qualified POINTER TO target
+      Par_Nm  : Unbounded_String;   --  qualified RECORD (Parent)
+      N_F     : Natural := 0;
+      F       : XT_Field_Arr := (others => <>);
+   end record;
+   XT_Tab : array (1 .. Max_XT) of XT_Entry := (others => <>);
+   N_XT   : Natural := 0;
 
    --  type-bound procedures (M13): method name, the record type it is
    --  bound to, and its S_Proc symbol (params 1.. include the receiver).
@@ -175,7 +202,11 @@ package body O2c_Compiler is
 
    procedure Append_Decl (S : String) is
    begin
-      Decl_Buf := Decl_Buf & S & ASCII.LF;
+      if Spec_Decl then
+         Spec_Buf := Spec_Buf & S & ASCII.LF;
+      else
+         Decl_Buf := Decl_Buf & S & ASCII.LF;
+      end if;
    end Append_Decl;
 
    procedure Append_Body (S : String) is
@@ -255,6 +286,202 @@ package body O2c_Compiler is
       end loop;
       return R;
    end Lower;
+
+   function QName (Owner, Mem : String) return String is
+   begin
+      return Owner & "." & Mem;
+   end QName;
+
+   function XT_Find (Owner : String; Mem : String) return Natural is
+   begin
+      for I in 1 .. N_XT loop
+         if To_String (XT_Tab (I).Owner) = Owner
+           and then To_String (XT_Tab (I).Name) = Mem
+         then
+            return I;
+         end if;
+      end loop;
+      return 0;
+   end XT_Find;
+
+   --  M20a: register and validate the exported TYPE declarations of a
+   --  library module after it has been parsed.  Exported shapes may
+   --  reference scalars (INTEGER/LONGINT/REAL/CHAR/BOOLEAN) and other
+   --  exported records/pointers of the same module only; arrays, SET
+   --  fields, non-exported shapes and cross-module composition are M20b.
+   procedure Capture_Types is
+   begin
+      for U in 1 .. N_UT loop
+         if not UTypes (U).ExpT then
+            null;
+         elsif UTypes (U).Is_Ptr then
+            if UTypes (U).Ptr_Tgt = 0
+              or else not UTypes (UTypes (U).Ptr_Tgt).ExpT
+              or else not UTypes (UTypes (U).Ptr_Tgt).Is_Rec
+            then
+               raise O2c_Error with "exported POINTER TO type '"
+                 & To_String (UTypes (U).Name)
+                 & "' must designate an exported RECORD of the same module "
+                 & "(M20a)";
+            end if;
+         elsif UTypes (U).Is_Rec then
+            if UTypes (U).Is_Ext
+              and then (UTypes (U).Parent = 0
+                        or else not UTypes (UTypes (U).Parent).ExpT)
+            then
+               raise O2c_Error with "exported extension type '"
+                 & To_String (UTypes (U).Name)
+                 & "' must extend an exported RECORD of the same module "
+                 & "(M20a)";
+            end if;
+            for F in 1 .. UTypes (U).N_F loop
+               declare
+                  Fld : UField renames UTypes (U).F (F);
+               begin
+                  if Fld.UT /= 0 then
+                     if not (UTypes (Fld.UT).Is_Rec
+                             or else UTypes (Fld.UT).Is_Ptr)
+                       or else not UTypes (Fld.UT).ExpT
+                     then
+                        raise O2c_Error with "exported RECORD '"
+                          & To_String (UTypes (U).Name)
+                          & "': field '" & To_String (Fld.Name)
+                          & "' must be scalar or an exported RECORD/POINTER "
+                          & "of the same module (arrays are M20b)";
+                     end if;
+                  elsif Fld.Typ = T_Set then
+                     raise O2c_Error with "exported RECORD '"
+                       & To_String (UTypes (U).Name)
+                       & "': SET fields are not exportable (M20a)";
+                  end if;
+               end;
+            end loop;
+         end if;
+      end loop;
+      --  register the shapes (references as qualified names)
+      for U in 1 .. N_UT loop
+         if UTypes (U).ExpT then
+            N_XT := N_XT + 1;
+            if N_XT > XT_Tab'Last then
+               raise O2c_Error with "too many exported types";
+            end if;
+            XT_Tab (N_XT) :=
+              (Owner => To_Unbounded_String (To_String (Mod_Name)),
+               Name  => UTypes (U).Name,
+               Is_Rec => UTypes (U).Is_Rec,
+               Is_Ptr => UTypes (U).Is_Ptr,
+               Is_Ext => UTypes (U).Is_Ext,
+               others => <>);
+            if UTypes (U).Is_Ptr then
+               XT_Tab (N_XT).Ptr_Nm := To_Unbounded_String
+                 (QName (To_String (Mod_Name),
+                         To_String (UTypes (UTypes (U).Ptr_Tgt).Name)));
+            end if;
+            if UTypes (U).Is_Ext then
+               XT_Tab (N_XT).Par_Nm := To_Unbounded_String
+                 (QName (To_String (Mod_Name),
+                         To_String (UTypes (UTypes (U).Parent).Name)));
+            end if;
+            if UTypes (U).Is_Rec then
+               XT_Tab (N_XT).N_F := UTypes (U).N_F;
+               for F in 1 .. UTypes (U).N_F loop
+                  declare
+                     Fld : UField renames UTypes (U).F (F);
+                  begin
+                     XT_Tab (N_XT).F (F).Name := Fld.Name;
+                     if Fld.UT /= 0 then
+                        XT_Tab (N_XT).F (F).UT_Nm := To_Unbounded_String
+                          (QName (To_String (Mod_Name),
+                                  To_String (UTypes (Fld.UT).Name)));
+                     else
+                        XT_Tab (N_XT).F (F).Typ := Fld.Typ;
+                     end if;
+                  end;
+               end loop;
+            end if;
+         end if;
+      end loop;
+   end Capture_Types;
+
+   --  M20a importer side: synthesize the exported types of a library
+   --  module into this module's UTypes table (qualified Ada names), so
+   --  the designator engine, NEW and value initialisation behave like
+   --  local types.  Two passes: stubs first (cycles like Node ->
+   --  NodeDesc -> Node resolve), then shapes.
+   function Import_Type (Owner, Mem : String) return Natural is
+      function UT_By_Name (Nm : String) return Natural is
+      begin
+         for U in 1 .. N_UT loop
+            if UTypes (U).Imported
+              and then To_String (UTypes (U).Name) = Nm
+            then
+               return U;
+            end if;
+         end loop;
+         return 0;
+      end UT_By_Name;
+
+      Idx : array (1 .. Max_XT) of Natural := (others => 0);
+      Nn  : Natural := 0;
+      Map : array (1 .. Max_XT) of Natural := (others => 0);
+   begin
+      if UT_By_Name (QName (Owner, Mem)) /= 0 then
+         return UT_By_Name (QName (Owner, Mem));   --  already imported
+      end if;
+      if XT_Find (Owner, Mem) = 0 then
+         raise O2c_Error with "'" & QName (Owner, Mem)
+           & "' is not an exported TYPE of module " & Owner;
+      end if;
+      for X in 1 .. N_XT loop
+         if To_String (XT_Tab (X).Owner) = Owner then
+            Nn := Nn + 1;
+            Idx (Nn) := X;
+         end if;
+      end loop;
+      for J in 1 .. Nn loop
+         N_UT := N_UT + 1;
+         if N_UT > UTypes'Last then
+            raise O2c_Error with "too many type declarations "
+              & "(imported types)";
+         end if;
+         Map (Idx (J)) := N_UT;
+         UTypes (N_UT) :=
+           (Name => To_Unbounded_String
+              (QName (Owner, To_String (XT_Tab (Idx (J)).Name))),
+            Is_Rec  => XT_Tab (Idx (J)).Is_Rec,
+            Is_Ptr  => XT_Tab (Idx (J)).Is_Ptr,
+            Is_Ext  => XT_Tab (Idx (J)).Is_Ext,
+            Imported => True, others => <>);
+      end loop;
+      for J in 1 .. Nn loop
+         declare
+            X  : constant Natural := Idx (J);
+            U  : constant Natural := Map (X);
+         begin
+            if XT_Tab (X).Is_Ptr then
+               UTypes (U).Ptr_Tgt :=
+                 UT_By_Name (To_String (XT_Tab (X).Ptr_Nm));
+            end if;
+            if XT_Tab (X).Is_Ext then
+               UTypes (U).Parent :=
+                 UT_By_Name (To_String (XT_Tab (X).Par_Nm));
+            end if;
+            if XT_Tab (X).Is_Rec then
+               UTypes (U).N_F := XT_Tab (X).N_F;
+               for F in 1 .. XT_Tab (X).N_F loop
+                  UTypes (U).F (F) :=
+                    (Name => XT_Tab (X).F (F).Name,
+                     Typ => XT_Tab (X).F (F).Typ,
+                     UT => (if Length (XT_Tab (X).F (F).UT_Nm) = 0
+                            then 0
+                            else UT_By_Name
+                              (To_String (XT_Tab (X).F (F).UT_Nm))));
+               end loop;
+            end if;
+         end;
+      end loop;
+      return UT_By_Name (QName (Owner, Mem));
+   end Import_Type;
 
    procedure Next is
    begin
@@ -2092,16 +2319,28 @@ package body O2c_Compiler is
             declare
                T : constant String := Cur.Text (1 .. Cur.Len);
             begin
-               Typ := Builtin_Type_Of (T);
-               if Typ = T_Str then
-                  UT := Find_UT (T);
-                  if UT = 0 then
-                     raise O2c_Error with "unknown type '" & T
-                       & "' (line " & Natural'Image (Cur.Line) & ")";
-                  end if;
+               if Imported_Mod (T)
+                 and then Lex.Peek_Token.Kind = Lex.Tok_Dot
+               then
+                  --  variable of an imported exported type (M20)
+                  Next;              --  past the module name
+                  Next;              --  past '.'
+                  Expect (Lex.Tok_Ident, "an exported type name");
+                  UT := Import_Type (T, Cur.Text (1 .. Cur.Len));
                   Is_UT := True;
+                  Next;
+               else
+                  Typ := Builtin_Type_Of (T);
+                  if Typ = T_Str then
+                     UT := Find_UT (T);
+                     if UT = 0 then
+                        raise O2c_Error with "unknown type '" & T
+                          & "' (line " & Natural'Image (Cur.Line) & ")";
+                     end if;
+                     Is_UT := True;
+                  end if;
+                  Next;
                end if;
-               Next;
             end;
          else
             raise O2c_Error with "a type name expected (line "
@@ -2161,6 +2400,7 @@ package body O2c_Compiler is
    procedure Decl_Type is
       Name : constant String := Ident_Text;
       UTI  : Natural;
+      Exp  : Boolean := False;
    begin
       if Find_UT (Name) /= 0 then
          raise O2c_Error with "type '" & Name & "' is already declared "
@@ -2168,8 +2408,12 @@ package body O2c_Compiler is
       end if;
       Next;                       --  past the type name
       if Cur.Kind = Lex.Tok_Star then
-         raise O2c_Error with "TYPE export is not supported yet (M19; '"
-           & Name & "')";
+         Exp := True;             --  export mark (M20)
+         Next;
+      end if;
+      if Exp and then In_Proc then
+         raise O2c_Error with "types cannot be exported inside a "
+           & "procedure";
       end if;
       Expect (Lex.Tok_Equal, "'='");
       Next;
@@ -2180,9 +2424,15 @@ package body O2c_Compiler is
       end if;
       UTI := N_UT;
       UTypes (UTI) := (Name => To_Unbounded_String (Name),
-                       Is_Rec => True, others => <>);
+                       Is_Rec => True, ExpT => (Pkg_Mode and then Exp),
+                       others => <>);
+      Spec_Decl := UTypes (UTI).ExpT;
 
       if Cur.Kind = Lex.Tok_Array then
+         if UTypes (UTI).ExpT then
+            raise O2c_Error with "exported fixed ARRAY types are M20b "
+              & "(found '" & Name & "')";
+         end if;
          Next;
          Expect (Lex.Tok_Number, "an array length");
          declare
@@ -2414,6 +2664,7 @@ package body O2c_Compiler is
 
       Expect (Lex.Tok_Semi, "';'");
       Next;
+      Spec_Decl := False;
    end Decl_Type;
 
    procedure Decl_Procedure is
@@ -2458,6 +2709,11 @@ package body O2c_Compiler is
       end Formal_Ada_Type;
    begin
       if Recv_UT /= 0 then
+         if UTypes (Recv_UT).ExpT then
+            raise O2c_Error with "type-bound procedures on an exported "
+              & "type are M20b ('" & To_String (UTypes (Recv_UT).Name)
+              & "')";
+         end if;
          --  type-bound procedure: receiver is formal parameter #1
          Impl_Nm := To_Unbounded_String (Method_Impl_Name (Name, Recv_UT));
          N_Par := 1;
@@ -4077,6 +4333,10 @@ package body O2c_Compiler is
       Expect (Lex.Tok_Dot, "'.' after END");
       Next;
       Expect (Lex.Tok_EOF, "end of file");
+
+      if Pkg_Mode then
+         Capture_Types;           --  validate + register exported types
+      end if;
 
       --  ---- unit assembly (M19) ----
       if not Pkg_Mode then

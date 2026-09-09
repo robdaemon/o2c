@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M19 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M20 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M19 status
+## M20 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,18 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M20a — cross-module data types**: library `TYPE`
+declarations marked `name*` are emitted into the package spec and
+recorded in a name-based catalog.  `RECORD` (scalar/exported-record or
+-pointer fields; SET and array fields rejected), `POINTER TO` (target
+must be an exported RECORD), and extensions over an exported base
+work.  An importer writes `var p: Math.Point` (or a POINTER such as
+`Math.Node`); the compiler synthesises the exported shapes into its
+type table, so `NEW`, `^` deref, `.field` chains, whole-record copies
+and pointer sharing behave like local types.  The demo builds and
+walks a `Math.Node` list and copies a `Math.Point`, printing `100`
+twice at the end.
 
 **M19 — modules**: `module M; import Out, Other;` compiles from
 separate source files: `O2c_Compiler.Compile_Multi` turns each library
@@ -180,10 +192,11 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 `new`, `nil`, `pointer to`, …) so they are easy to type; any case is
 accepted.
 
-Not yet in M19: exported record/array/pointer types, exported SET-typed
-or record-typed VARIABLEs, and methods across module boundaries (M20),
-plus true separate Ada packages per module already landed — exports ride
-`name*` marks and importers use qualified `M.name`.
+Not yet in M20: exported fixed ARRAY types, exported SET-typed or
+record-typed VARIABLEs, exported procedures taking/returning exported
+types, array-typed fields in exported records, and methods across
+module boundaries (M20b); exported records expose all their fields to
+importers (field-level `*` marks are not enforced yet).
 declaring procedures inside procedures, multi-dimensional arrays,
 `SET` and other Oberon-2 types.
 

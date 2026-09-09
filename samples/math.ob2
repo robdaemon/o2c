@@ -1,5 +1,8 @@
 module Math;
 const Pi* = 3.14159;
+type Point* = record x, y: integer end;
+type Node* = pointer to NodeDesc;
+type NodeDesc* = record v: integer; next: Node end;
 var base: integer;
 var count*: integer;
 procedure Sqr*(x: integer): integer;

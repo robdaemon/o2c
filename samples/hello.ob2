@@ -22,6 +22,8 @@ var sac: Tote;
 var s2: set; l2: longint;
 var r: real;
 var m: integer;
+var a, b: Math.Point;
+var hx, tx: Math.Node;
 
 const Greeting = "hello from Oberon-2";
 
@@ -284,5 +286,19 @@ begin
   Out.Int(Math.count, 0);
   Out.Ln;
   Out.Real(Math.Pi, 0);
+  Out.Ln;
+  a.x := 60;
+  a.y := 40;
+  b := a;
+  Out.Int(a.x + b.y, 0);
+  Out.Ln;
+  new(hx);
+  hx^.v := 60;
+  hx^.next := nil;
+  new(tx);
+  tx^.v := 40;
+  tx^.next := hx;
+  hx := tx;
+  Out.Int(hx^.v + hx^.next^.v, 0);
   Out.Ln
 end Hello.
