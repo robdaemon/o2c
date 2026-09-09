@@ -327,12 +327,10 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 `new`, `nil`, `pointer to`, …) so they are easy to type; any case is
 accepted.
 
-The module/import epic plus importer-side RECORD extension is shipped
-(M19-M23).  Remaining: opaque pointers, exported-method overrides with dynamic
-dispatch across packages, whole-record copies out of module VARIABLEs,
-(the standard predeclared functions are M25).
-declaring procedures inside procedures, multi-dimensional arrays,
-`SET` and other Oberon-2 types.
+The module/import epic and the whole README-tracked follow-up list are
+shipped (M19-M29).  Remaining: function-method shadows and ambiguous
+multi-library overrides for widened dispatch, plus the documented
+deviations (case-insensitive keywords; LONGINT/INTEGER mixing).
 
 ## Build
 
