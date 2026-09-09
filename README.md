@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M25 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M26 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M25 status
+## M26 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,16 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M26 — opaque pointers**: an exported `POINTER TO` may designate a
+*private* RECORD declared after the pointer (`Handle* = pointer to
+HandleDesc`; `HandleDesc` stays out of the export catalog).  The
+defining module shows the incomplete/access/full record in its spec
+so the Ada type exists, but importers only ever see the pointer: they
+declare variables, assign, compare to NIL and pass it to the module's
+exported procedures/functions (`Math.Make(9)` / `Math.Get(hd)`).
+`NEW` on an opaque pointer and `^` dereference from an importer are
+rejected with M26 errors.  Native demo prints `9`.
 
 **M25 — predeclared functions**: the standard functions are
 recognized case-insensitively like `LEN`/`NEW`: `ORD(ch)` →

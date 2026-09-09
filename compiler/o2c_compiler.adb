@@ -52,6 +52,8 @@ package body O2c_Compiler is
       F       : UField_Array := (others => <>);
       ExpT    : Boolean := False;   --  export mark on the type (M20)
       Imported : Boolean := False;  --  synthesized from another module (M20)
+      ForcedSpec : Boolean := False; --  private RECORD shown in the spec
+                                    --  as an opaque pointer target (M26)
    end record;
 
    UTypes : array (1 .. Max_UTypes) of UType := (others => <>);
@@ -161,6 +163,7 @@ package body O2c_Compiler is
       Arr_Len : Integer := 0;
       Elem    : EType := T_Int;
       Elem_Nm : Unbounded_String;
+      Opaque  : Boolean := False;   --  pointer to a private record (M26)
    end record;
    XT_Tab : array (1 .. Max_XT) of XT_Entry := (others => <>);
    N_XT   : Natural := 0;
@@ -532,13 +535,19 @@ package body O2c_Compiler is
             null;
          elsif UTypes (U).Is_Ptr then
             if UTypes (U).Ptr_Tgt = 0
-              or else not UTypes (UTypes (U).Ptr_Tgt).ExpT
               or else not UTypes (UTypes (U).Ptr_Tgt).Is_Rec
             then
                raise O2c_Error with "exported POINTER TO type '"
                  & To_String (UTypes (U).Name)
-                 & "' must designate an exported RECORD of the same module "
-                 & "(M20a)";
+                 & "' must designate a RECORD of the same module";
+            end if;
+            if not UTypes (UTypes (U).Ptr_Tgt).ExpT
+              and then not UTypes (UTypes (U).Ptr_Tgt).ForcedSpec
+            then
+               raise O2c_Error with "exported POINTER TO type '"
+                 & To_String (UTypes (U).Name)
+                 & "' must designate an exported RECORD or a private "
+                 & "RECORD declared after it (opaque, M26)";
             end if;
          elsif UTypes (U).Is_Rec then
             if UTypes (U).Is_Ext
@@ -602,8 +611,12 @@ package body O2c_Compiler is
                Is_Ext => UTypes (U).Is_Ext,
                others => <>);
             if UTypes (U).Is_Ptr then
-               XT_Tab (N_XT).Ptr_Nm := To_Unbounded_String
-                 (Qual_UT (UTypes (U).Ptr_Tgt));
+               if UTypes (UTypes (U).Ptr_Tgt).ExpT then
+                  XT_Tab (N_XT).Ptr_Nm := To_Unbounded_String
+                    (Qual_UT (UTypes (U).Ptr_Tgt));
+               else
+                  XT_Tab (N_XT).Opaque := True;
+               end if;
             end if;
             if UTypes (U).Is_Ext then
                XT_Tab (N_XT).Par_Nm := To_Unbounded_String
@@ -722,8 +735,10 @@ package body O2c_Compiler is
             U  : constant Natural := Map (X);
          begin
             if XT_Tab (X).Is_Ptr then
-               UTypes (U).Ptr_Tgt :=
-                 UT_Ref (To_String (XT_Tab (X).Ptr_Nm));
+               if Length (XT_Tab (X).Ptr_Nm) > 0 then
+                  UTypes (U).Ptr_Tgt :=
+                    UT_Ref (To_String (XT_Tab (X).Ptr_Nm));
+               end if;   --  opaque: Ptr_Tgt stays 0 (M26)
             end if;
             if XT_Tab (X).Is_Ext then
                UTypes (U).Parent :=
@@ -1229,6 +1244,12 @@ package body O2c_Compiler is
             end if;
             Next;
             VK := V_Rec;
+            if UTypes (UT).Ptr_Tgt = 0
+              and then UTypes (UT).Imported
+            then
+               raise O2c_Error with "this POINTER is opaque: dereference "
+                 & "only inside its defining module (M26)";
+            end if;
             UT := UTypes (UT).Ptr_Tgt;
             if UT = 0 then
                raise O2c_Error with "internal: deref of an unresolved "
@@ -3053,6 +3074,14 @@ package body O2c_Compiler is
                     & "' must be a RECORD type (line "
                     & Natural'Image (Cur.Line) & ")";
                end if;
+               if UTypes (UTI).ExpT
+                 and then not UTypes (TGT).ExpT
+                 and then not UTypes (TGT).ForcedSpec
+               then
+                  raise O2c_Error with "opaque POINTER TO '"
+                    & Name & "': declare its private RECORD after the "
+                    & "pointer (M26)";
+               end if;
                UTypes (UTI).Ptr_Tgt := TGT;
                Append_Decl ("   type " & Name & " is access all " & TName
                          & "'Class;");
@@ -3197,7 +3226,34 @@ package body O2c_Compiler is
          --  then the full record to complete it.
          declare
             First_Pend : Boolean := True;
+            OpaqueT    : Boolean := False;
          begin
+            --  M26: if an exported POINTER TO this private record was
+            --  declared earlier, the whole pair must live in the spec.
+            for P in 1 .. N_UT loop
+               if UTypes (P).Is_Ptr and then UTypes (P).Pend
+                 and then To_String (UTypes (P).Pend_Nm) = Name
+                 and then UTypes (P).ExpT
+                 and then not UTypes (UTI).ExpT
+               then
+                  OpaqueT := True;
+               end if;
+            end loop;
+            if OpaqueT then
+               UTypes (UTI).ForcedSpec := True;
+               Spec_Decl := True;
+               for F in 1 .. UTypes (UTI).N_F loop
+                  if UTypes (UTI).F (F).UT /= 0
+                    and then not UTypes (UTypes (UTI).F (F).UT).ExpT
+                    and then not UTypes (UTypes (UTI).F (F).UT).Imported
+                  then
+                     raise O2c_Error with "opaque target '" & Name
+                       & "': field '" & To_String (UTypes (UTI).F (F).Name)
+                       & "' must be scalar or an exported/imported type "
+                       & "to appear in the spec (M26)";
+                  end if;
+               end loop;
+            end if;
             for P in 1 .. N_UT loop
                if UTypes (P).Is_Ptr and then UTypes (P).Pend
                  and then To_String (UTypes (P).Pend_Nm) = Name
@@ -4330,6 +4386,10 @@ package body O2c_Compiler is
                      end if;
                      Expect (Lex.Tok_RParen, "')' after the NEW argument");
                      Next;
+                     if UTypes (D.UT).Ptr_Tgt = 0 then
+                        raise O2c_Error with "cannot NEW an opaque POINTER "
+                          & "here (M26)";
+                     end if;
                      Append_Body ("      " & To_String (D.Text) & " := new "
                                   & To_String
                                     (UTypes (UTypes (D.UT).Ptr_Tgt).Name)
