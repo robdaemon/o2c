@@ -44,7 +44,7 @@ make -C "$ROOT" build AEGIR_ROOT="$AEGIR_ROOT" >/dev/null
 
 echo "run_m1: boot 1/2 - o2c emits Ada for hello (retry on torn capture)"
 ATT=0
-while [ "$ATT" -lt 4 ]; do
+while [ "$ATT" -lt 6 ]; do
    ATT=$((ATT+1))
    echo "run_m1:   attempt $ATT"
    boot_once "" '--- ada end ---'
@@ -60,12 +60,11 @@ while [ "$ATT" -lt 4 ]; do
         -XAEGIR_ROOT="$AEGIR_ROOT" >/dev/null ); then
       break
    else
-      echo "run_m1: host build of emitted Ada failed (torn capture); "
-        "retrying" >&2
+      echo "run_m1: host build of emitted Ada failed (torn capture); retrying" >&2
    fi
 done
-if [ "$ATT" -ge 4 ]; then
-   echo "run_m1: emitted-Ada capture/build failed after 4 attempts" >&2
+if [ "$ATT" -ge 6 ]; then
+   echo "run_m1: emitted-Ada capture/build failed after 6 attempts" >&2
    exit 1
 fi
 

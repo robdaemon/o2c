@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M15 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M16 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M15 status
+## M16 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -20,7 +20,7 @@ Supported subset: `module`, `import Out`, `const` and `var`
 arrays, pointers) as parameters and returns (M11)**, **open array
 (`ARRAY OF`) parameters (M12)** and **record extension + type-bound
 procedures (M13 static, M14 dynamic, M15 method
-functions)** — plus **local
+functions)**, and **record-typed fields + nested arrays (M16)** — plus **local
 `const`/`type`/`var` declarations inside procedures (M10)**, full
 expressions with Oberon
 precedence (`+ - * DIV MOD & OR ~ = # < <= > >=`, parens), typed
@@ -91,6 +91,19 @@ demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
 
+**M16 — record-typed fields and nested arrays**: record
+fields may name an earlier RECORD or ARRAY type, and arrays may take
+an earlier ARRAY/RECORD type as their element type (so nested and
+multi-dimensional arrays like `Mat = array 2 of Row` and records
+holding arrays compile).  Value initializers are generated
+recursively (`(others => (others => 0))` for arrays of arrays, full
+aggregates for records in records).  The designator chain now walks
+`.field` / `^` / `[i]` selectors over record, pointer and array
+values, so reads and writes like `in1.p.a`, `a[i][j]` and
+`w.m[0][1]` work (char arrays keep the +1 Ada index rule at the
+right nesting level).  The demo sets `sac.m[0][1] := 3`,
+`sac.m[1][2] := 4` and reads the sum back.
+
 **M15 — method functions (return values)**:
 type-bound procedures may now declare a return type
 (`procedure (var c: Circle) Ring: integer;`).  Each method function
@@ -135,10 +148,9 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 `new`, `nil`, `pointer to`, …) so they are easy to type; any case is
 accepted.
 
-Not yet in M15: nested modules and other imports (only `Out`),
+Not yet in M16: nested modules and other imports (only `Out`),
 declaring procedures inside procedures, multi-dimensional arrays,
-record-typed fields/nested arrays, `SET` and other Oberon-2
-types.
+`SET` and other Oberon-2 types.
 
 ## Build
 

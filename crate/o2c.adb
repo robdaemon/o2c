@@ -25,12 +25,15 @@ procedure O2c is
     "type Circle = record (Shape) r: integer end;" & ASCII.LF &
     "type PShape = pointer to Shape;" & ASCII.LF &
     "type PCircle = pointer to Circle;" & ASCII.LF &
+    "type Mat = array 2 of Vector;" & ASCII.LF &
+    "type Tote = record m: Mat; k: integer end;" & ASCII.LF &
     ASCII.LF &
     "var n: integer;" & ASCII.LF &
     "var v: Vector; p: Pair; q: Pair; i: integer;" & ASCII.LF &
     "var msg: Line; ch: char;" & ASCII.LF &
     "var head, cur: Node;" & ASCII.LF &
     "var shp: PShape; circ: PCircle;" & ASCII.LF &
+    "var sac: Tote;" & ASCII.LF &
     ASCII.LF &
     "const Greeting = ""hello from Oberon-2"";" & ASCII.LF &
     ASCII.LF &
@@ -259,6 +262,11 @@ procedure O2c is
     "  shp := circ;" & ASCII.LF &
     "  shp.Widen(3);" & ASCII.LF &
     "  Out.Int(circ.Ring(), 0);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  sac.m[0][1] := 3;" & ASCII.LF &
+    "  sac.m[1][2] := 4;" & ASCII.LF &
+    "  sac.k := 5;" & ASCII.LF &
+    "  Out.Int(sac.m[0][1] + sac.m[1][2] + sac.k, 0);" & ASCII.LF &
     "  Out.Ln" & ASCII.LF &
     "end Hello.";
 

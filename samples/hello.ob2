@@ -10,12 +10,15 @@ type Shape = record x: integer end;
 type Circle = record (Shape) r: integer end;
 type PShape = pointer to Shape;
 type PCircle = pointer to Circle;
+type Mat = array 2 of Vector;
+type Tote = record m: Mat; k: integer end;
 
 var n: integer;
 var v: Vector; p: Pair; q: Pair; i: integer;
 var msg: Line; ch: char;
 var head, cur: Node;
 var shp: PShape; circ: PCircle;
+var sac: Tote;
 
 const Greeting = "hello from Oberon-2";
 
@@ -244,5 +247,10 @@ begin
   shp := circ;
   shp.Widen(3);
   Out.Int(circ.Ring(), 0);
+  Out.Ln;
+  sac.m[0][1] := 3;
+  sac.m[1][2] := 4;
+  sac.k := 5;
+  Out.Int(sac.m[0][1] + sac.m[1][2] + sac.k, 0);
   Out.Ln
 end Hello.
