@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M26 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M27 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M26 status
+## M27 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,17 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M27 — exported-method overrides across packages**: a library may
+export a RECORD that extends an imported exported type and export a
+method overriding one of that type's exported methods (`Geo.Box` over
+`Math.Point` overriding `Sum*`).  Capture accepts foreign extension
+parents (and adds the `with`), the override dispatcher is exported
+from the extending module, and importer calls resolve to the deepest
+override through the catalog (XM_Chain), so a `Geo.Box` variable in
+Hello dispatches to Geo's `Sum` (printing `39`).  Dispatch through a
+pointer widened across module boundaries is documented as
+out of scope.
 
 **M26 — opaque pointers**: an exported `POINTER TO` may designate a
 *private* RECORD declared after the pointer (`Handle* = pointer to

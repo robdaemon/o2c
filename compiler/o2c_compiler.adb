@@ -552,12 +552,14 @@ package body O2c_Compiler is
          elsif UTypes (U).Is_Rec then
             if UTypes (U).Is_Ext
               and then (UTypes (U).Parent = 0
-                        or else not UTypes (UTypes (U).Parent).ExpT)
+                        or else (not UTypes (UTypes (U).Parent).ExpT
+                                 and then
+                                   not UTypes (UTypes (U).Parent).Imported))
             then
                raise O2c_Error with "exported extension type '"
                  & To_String (UTypes (U).Name)
-                 & "' must extend an exported RECORD of the same module "
-                 & "(M20a)";
+                 & "' must extend an exported RECORD of this module or of "
+                 & "an imported module (M27)";
             end if;
             for F in 1 .. UTypes (U).N_F loop
                declare
@@ -660,6 +662,9 @@ package body O2c_Compiler is
             end loop;
             if Length (XT_Tab (I).Elem_Nm) > 0 then
                Add_SW (Q_Owner (To_String (XT_Tab (I).Elem_Nm)));
+            end if;
+            if Length (XT_Tab (I).Par_Nm) > 0 then
+               Add_SW (Q_Owner (To_String (XT_Tab (I).Par_Nm)));
             end if;
          end if;
       end loop;
@@ -3526,14 +3531,13 @@ package body O2c_Compiler is
               else Ada_Type (Ret_Typ));
       end if;
       if Exported and then Recv_UT /= 0 then
-         --  M20c: exported type-bound method.  Its dispatcher is
+         --  M20c/M27: exported type-bound method.  Its dispatcher is
          --  exported from the package spec; plain procedures keep the
-         --  M19/M20b path below.
-         if XM_Chain (Recv_UT, Name) /= 0 then
-            raise O2c_Error with "exported method '" & Name
-              & "' overrides a method of an imported RECORD type; "
-              & "cross-module overrides are not supported yet (M23)";
-         end if;
+         --  M19/M20b path below.  When the (exported) receiver extends
+         --  an imported RECORD and overrides one of its exported
+         --  methods, this module's dispatcher is what importers call,
+         --  so the override dispatches for types seen through this
+         --  module (M27).
          if not UTypes (Recv_UT).ExpT then
             raise O2c_Error with "type-bound procedure '" & Name
               & "' can be exported only on an exported type (M20c)";
