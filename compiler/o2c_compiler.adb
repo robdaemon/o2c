@@ -78,11 +78,46 @@ package body O2c_Compiler is
       UT     : Natural := 0;       --  user type index (0 = scalar Typ)
       Open_Arr : Boolean := False; --  ARRAY OF parameter (M12); Typ = elem
       By_Ref   : Boolean := False; --  formal VAR parameter
+      Exp    : Boolean := False;   --  export mark 'name*' (M19)
       P      : Param_Array := (others => <>);
    end record;
 
    Syms  : array (1 .. Max_Syms) of Sym := (others => <>);
    N_Sym : Natural := 0;
+
+   --  module imports (M19): the builtin Out plus user library modules
+   --  provided earlier in a Compile_Multi run.
+   Max_Imports : constant := 8;
+   type Import_Rec is record
+      Name : Unbounded_String;
+   end record;
+   Imports : array (1 .. Max_Imports) of Import_Rec := (others => <>);
+   N_Imp   : Natural := 0;
+
+   --  library modules already compiled in this Compile_Multi run
+   Max_Prov : constant := 16;
+   Provided : array (1 .. Max_Prov) of Unbounded_String := (others => <>);
+   N_Prov   : Natural := 0;
+
+   --  export catalog (M19): the visible symbols of library modules
+   --  compiled so far; importers resolve qualified names against it.
+   Max_X : constant := 512;
+   type X_Entry is record
+      Owner  : Unbounded_String;
+      Name   : Unbounded_String;
+      Kind   : Sym_Kind := S_Const;
+      Typ    : EType := T_Int;      --  scalar type of const/var/function
+      Params : Natural := 0;
+      Ret    : Boolean := False;
+      P      : Param_Array := (others => <>);
+   end record;
+   Xs  : array (1 .. Max_X) of X_Entry := (others => <>);
+   N_X : Natural := 0;
+
+   Pkg_Mode   : Boolean := False;   --  compiling a library module
+   Multi_Ok   : Boolean := False;   --  library imports are available
+   Spec_Buf   : Unbounded_String;   --  package spec text (exports)
+   Used_Console : Boolean := False; --  module emits Console calls
 
    --  type-bound procedures (M13): method name, the record type it is
    --  bound to, and its S_Proc symbol (params 1.. include the receiver).
@@ -147,6 +182,79 @@ package body O2c_Compiler is
    begin
       Body_Buf := Body_Buf & S & ASCII.LF;
    end Append_Body;
+
+   procedure Append_Spec (S : String) is
+   begin
+      Spec_Buf := Spec_Buf & S & ASCII.LF;
+   end Append_Spec;
+
+   function Is_Provided (Nm : String) return Boolean is
+   begin
+      for I in 1 .. N_Prov loop
+         if To_String (Provided (I)) = Nm then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Is_Provided;
+
+   --  True when Nm is one of this module's user library imports (Out
+   --  keeps its legacy special-cased handling).
+   function Imported_Mod (Nm : String) return Boolean is
+   begin
+      if Nm = "Out" then
+         return False;
+      end if;
+      for I in 1 .. N_Imp loop
+         if To_String (Imports (I).Name) = Nm then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Imported_Mod;
+
+   --  Catalog index of the exported member Mem of library module Mod.
+   function Find_X (Owner : String; Mem : String) return Natural is
+   begin
+      for I in 1 .. N_X loop
+         if To_String (Xs (I).Owner) = Owner
+           and then To_String (Xs (I).Name) = Mem
+         then
+            return I;
+         end if;
+      end loop;
+      return 0;
+   end Find_X;
+
+   procedure X_Add (Owner : String; E : X_Entry) is
+   begin
+      N_X := N_X + 1;
+      if N_X > Xs'Last then
+         raise O2c_Error with "too many exported symbols";
+      end if;
+      Xs (N_X) := E;
+      Xs (N_X).Owner := To_Unbounded_String (Owner);
+   end X_Add;
+
+   --  M19: exportable scalar kinds.  SET stays module-private because
+   --  each Ada unit declares its own O2c_Set type; user types and open
+   --  arrays need a shared package type and are an M20 item.
+   function Scalar_Exportable (T : EType) return Boolean is
+   begin
+      return T = T_Int or else T = T_Long or else T = T_Real
+        or else T = T_Char or else T = T_Bool;
+   end Scalar_Exportable;
+
+   function Lower (S : String) return String is
+      R : String (S'Range);
+   begin
+      for I in S'Range loop
+         R (I) := (if S (I) in 'A' .. 'Z'
+                   then Character'Val (Character'Pos (S (I)) + 32)
+                   else S (I));
+      end loop;
+      return R;
+   end Lower;
 
    procedure Next is
    begin
@@ -1157,6 +1265,99 @@ package body O2c_Compiler is
                end;
                return R;
             end if;
+            --  imported module member (M19): Math.const / Math.var reads
+            --  and Math.func(...) calls keep their qualification in the
+            --  generated Ada (the library module is an Ada package).
+            declare
+               FNm : constant String := Cur.Text (1 .. Cur.Len);
+            begin
+               if Imported_Mod (FNm) then
+                  declare
+                     T1 : Lex.Token := Lex.Peek_Token;
+                  begin
+                     if T1.Kind = Lex.Tok_Dot then
+                        Next;       --  past the module name
+                        Next;       --  past '.'
+                        Expect (Lex.Tok_Ident, "a member name");
+                        declare
+                           MName : constant String := Cur.Text (1 .. Cur.Len);
+                           XI    : Natural;
+                        begin
+                           Next;
+                           XI := Find_X (FNm, MName);
+                           if XI = 0 then
+                              raise O2c_Error with "'" & FNm & "." & MName
+                                & "' is not exported by module " & FNm;
+                           end if;
+                           if Xs (XI).Kind = S_Const or else
+                              Xs (XI).Kind = S_Var
+                           then
+                              R.Text := To_Unbounded_String
+                                (FNm & "." & MName);
+                              R.Typ := Xs (XI).Typ;
+                              R.Lit := False;
+                              return R;
+                           end if;
+                           if not Xs (XI).Ret then
+                              raise O2c_Error with "'" & FNm & "." & MName
+                                & "' is a proper procedure, not a function";
+                           end if;
+                           R.Typ := Xs (XI).Typ;
+                           if Cur.Kind = Lex.Tok_LParen then
+                              Next;
+                              declare
+                                 Args : array (1 .. Max_Params)
+                                   of Unbounded_String;
+                                 N_A  : Natural := 0;
+                                 Call : Unbounded_String;
+                              begin
+                                 loop
+                                    exit when Cur.Kind = Lex.Tok_RParen;
+                                    N_A := N_A + 1;
+                                    if N_A > Max_Params then
+                                       raise O2c_Error with "too many "
+                                         & "arguments";
+                                    end if;
+                                    declare
+                                       A : Expr_Rec :=
+                                         Parse_Actual (Xs (XI).P (N_A));
+                                    begin
+                                       Args (N_A) := A.Text;
+                                    end;
+                                    exit when Cur.Kind /= Lex.Tok_Comma;
+                                    Next;
+                                 end loop;
+                                 if N_A /= Xs (XI).Params then
+                                    raise O2c_Error with "call expects "
+                                      & Natural'Image (Xs (XI).Params)
+                                      & " argument(s), got "
+                                      & Natural'Image (N_A);
+                                 end if;
+                                 Expect (Lex.Tok_RParen, "')'");
+                                 Next;
+                                 Call := Call & FNm & "." & MName & " (";
+                                 for I in 1 .. N_A loop
+                                    if I > 1 then
+                                       Call := Call & ", ";
+                                    end if;
+                                    Call := Call & Args (I);
+                                 end loop;
+                                 Call := Call & ")";
+                                 R.Text := Call;
+                              end;
+                           elsif Xs (XI).Params /= 0 then
+                              raise O2c_Error with "'" & FNm & "." & MName
+                                & "' needs arguments";
+                           else
+                              R.Text := To_Unbounded_String
+                                (FNm & "." & MName);
+                           end if;
+                           return R;
+                        end;
+                     end if;
+                  end;
+               end if;
+            end;
             Id := Find (Cur.Text (1 .. Cur.Len));
             if Id = 0 then
                raise O2c_Error with "unknown variable or constant '"
@@ -1810,8 +2011,17 @@ package body O2c_Compiler is
    procedure Decl_Const is
       Name : constant String := Ident_Text;
       V    : Expr_Rec;
+      Exp  : Boolean := False;
    begin
       Next;                       --  past the name
+      if Cur.Kind = Lex.Tok_Star then
+         Exp := True;             --  export mark (M19)
+         Next;
+      end if;
+      if Exp and then In_Proc then
+         raise O2c_Error with "constants cannot be exported inside a "
+           & "procedure";
+      end if;
       Expect (Lex.Tok_Equal, "'='");
       Next;
       V := Parse_Expr;
@@ -1820,14 +2030,31 @@ package body O2c_Compiler is
 
       N_Sym := N_Sym + 1;
       Syms (N_Sym) := (Kind => S_Const, Typ => V.Typ,
-                       Name => To_Unbounded_String (Name),
+                       Name => To_Unbounded_String (Name), Exp => Exp,
                        others => <>);
-      Append_Decl ("   " & Name & " : constant " & Ada_Type (V.Typ)
-                   & " := " & To_String (V.Text) & ";");
+      if Exp and then Pkg_Mode then
+         if not V.Lit and then V.Typ /= T_Str then
+            raise O2c_Error with "exported constants must be plain "
+              & "literals (M19; '" & Name & "')";
+         end if;
+         if V.Typ /= T_Str and then not Scalar_Exportable (V.Typ) then
+            raise O2c_Error with "exported constants: INTEGER/LONGINT/"
+              & "REAL/CHAR/BOOLEAN/string only ('" & Name & "')";
+         end if;
+         Append_Spec ("   " & Name & " : constant " & Ada_Type (V.Typ)
+                      & " := " & To_String (V.Text) & ";");
+         X_Add (To_String (Mod_Name),
+                (Kind => S_Const, Typ => V.Typ,
+                 Name => To_Unbounded_String (Name), others => <>));
+      else
+         Append_Decl ("   " & Name & " : constant " & Ada_Type (V.Typ)
+                      & " := " & To_String (V.Text) & ";");
+      end if;
    end Decl_Const;
 
    procedure Decl_Var is
       Names : array (1 .. 16) of Unbounded_String;
+      Exps  : array (1 .. 16) of Boolean := (others => False);
       N     : Natural := 0;
       Typ   : EType;
       Init  : String (1 .. 1);
@@ -1839,8 +2066,19 @@ package body O2c_Compiler is
          end if;
          Names (N) := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
          Next;
+         if Cur.Kind = Lex.Tok_Star then
+            Exps (N) := True;      --  export mark (M19)
+            Next;
+         end if;
          exit when Cur.Kind /= Lex.Tok_Comma;
          Next;
+      end loop;
+
+      for I in 1 .. N loop
+         if Exps (I) and then In_Proc then
+            raise O2c_Error with "variables cannot be exported inside a "
+              & "procedure";
+         end if;
       end loop;
 
       Expect (Lex.Tok_Colon, "':' in a VAR declaration");
@@ -1879,6 +2117,10 @@ package body O2c_Compiler is
                Init_Txt := Init_Txt & Value_Init (UT);
             end if;
             for I in 1 .. N loop
+               if Exps (I) then
+                  raise O2c_Error with "only scalar VARIABLEs can be "
+                    & "exported (M19; '" & To_String (Names (I)) & "')";
+               end if;
                N_Sym := N_Sym + 1;
                Syms (N_Sym) := (Kind => S_Var, Typ => T_Int, UT => UT,
                                 Name => Names (I), others => <>);
@@ -1888,12 +2130,29 @@ package body O2c_Compiler is
             end loop;
          else
             for I in 1 .. N loop
+               if Exps (I) and then
+                 not (Scalar_Exportable (Typ) and then Typ /= T_Set)
+               then
+                  raise O2c_Error with "exported VARIABLEs: INTEGER/"
+                    & "LONGINT/REAL/CHAR/BOOLEAN only (M19; '"
+                    & To_String (Names (I)) & "')";
+               end if;
                N_Sym := N_Sym + 1;
                Syms (N_Sym) := (Kind => S_Var, Typ => Typ,
-                                Name => Names (I), others => <>);
-               Append_Decl ("   " & To_String (Names (I)) & " : "
-                            & Ada_Type (Typ) & " := " & Scalar_Init (Typ)
-                            & ";");
+                                Name => Names (I), Exp => Exps (I),
+                                others => <>);
+               if Exps (I) and then Pkg_Mode then
+                  Append_Spec ("   " & To_String (Names (I)) & " : "
+                               & Ada_Type (Typ) & " := "
+                               & Scalar_Init (Typ) & ";");
+                  X_Add (To_String (Mod_Name),
+                         (Kind => S_Var, Typ => Typ,
+                          Name => Names (I), others => <>));
+               else
+                  Append_Decl ("   " & To_String (Names (I)) & " : "
+                               & Ada_Type (Typ) & " := " & Scalar_Init (Typ)
+                               & ";");
+               end if;
             end loop;
          end if;
       end;
@@ -1908,6 +2167,10 @@ package body O2c_Compiler is
            & "(line " & Natural'Image (Cur.Line) & ")";
       end if;
       Next;                       --  past the type name
+      if Cur.Kind = Lex.Tok_Star then
+         raise O2c_Error with "TYPE export is not supported yet (M19; '"
+           & Name & "')";
+      end if;
       Expect (Lex.Tok_Equal, "'='");
       Next;
 
@@ -2165,6 +2428,7 @@ package body O2c_Compiler is
       Ret_Typ : EType := T_Int;
       Ret_UT  : Natural := 0;     --  pointer return user type (M11)
       Is_Function : Boolean := False;
+      Exported    : Boolean := False;
       Hdr   : Unbounded_String;
       Impl_Nm : Unbounded_String;  --  generated Ada name (methods, M13)
       POpen : array (1 .. Max_Params) of Boolean := (others => False);
@@ -2206,7 +2470,12 @@ package body O2c_Compiler is
          Impl_Nm := To_Unbounded_String (Name);
       end if;
       Seen_Proc := True;
-      Next;
+      Next;                       --  past the procedure name
+      Exported := False;
+      if Cur.Kind = Lex.Tok_Star then
+         Exported := True;        --  export mark (M19)
+         Next;
+      end if;
       if Cur.Kind = Lex.Tok_LParen then
          Next;
          loop
@@ -2369,6 +2638,41 @@ package body O2c_Compiler is
          Hdr := Hdr & " return "
            & (if Ret_UT /= 0 then To_String (UTypes (Ret_UT).Name)
               else Ada_Type (Ret_Typ));
+      end if;
+      if Exported then
+         --  M19: only scalar, non-method procedures/functions export.
+         if Recv_UT /= 0 then
+            raise O2c_Error with "type-bound procedures cannot be "
+              & "exported (M19; '" & Name & "')";
+         end if;
+         for I in 1 .. N_Par loop
+            if POpen (I) or else PUT (I) /= 0 or else PTyp (I) = T_Set then
+               raise O2c_Error with "exported procedure '" & Name
+                 & "' takes scalar INTEGER/LONGINT/REAL/CHAR/BOOLEAN "
+                 & "parameters only (M19)";
+            end if;
+         end loop;
+         if Is_Function and then
+           (Ret_UT /= 0 or else not Scalar_Exportable (Ret_Typ))
+         then
+            raise O2c_Error with "exported function '" & Name
+              & "' must return INTEGER/LONGINT/REAL/CHAR/BOOLEAN (M19)";
+         end if;
+         if Pkg_Mode then
+            Append_Spec (To_String (Hdr) & ";");
+            declare
+               E : X_Entry :=
+                 (Kind => S_Proc, Typ => Ret_Typ, Params => N_Par,
+                  Ret => Is_Function,
+                  Name => To_Unbounded_String (Name), others => <>);
+            begin
+               for I in 1 .. N_Par loop
+                  E.P (I) := (Name => PName (I), Typ => PTyp (I),
+                              UT => 0, By_Ref => PRef (I), Open => POpen (I));
+               end loop;
+               X_Add (To_String (Mod_Name), E);
+            end;
+         end if;
       end if;
       Append_Decl (To_String (Hdr) & " is");
       --  local declarations (M10): optional CONST/TYPE/VAR sections
@@ -3000,6 +3304,130 @@ package body O2c_Compiler is
                                   & ";");
                   end;
                end;
+            elsif Imported_Mod (Head (1 .. H_Len)) then
+               --  imported module member (M19): exported procedure call
+               --  or exported scalar VARIABLE write.
+               declare
+                  MNm  : constant String := Head (1 .. H_Len);
+                  MName : Unbounded_String;
+                  XI    : Natural;
+               begin
+                  Next;          --  past the module name
+                  Expect (Lex.Tok_Dot, "'.'");
+                  Next;
+                  Expect (Lex.Tok_Ident, "a member name");
+                  MName := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
+                  Next;
+                  XI := Find_X (MNm, To_String (MName));
+                  if XI = 0 then
+                     raise O2c_Error with "'" & MNm & "."
+                       & To_String (MName) & "' is not exported by module "
+                       & MNm;
+                  end if;
+                  if Xs (XI).Kind = S_Proc then
+                     if Xs (XI).Ret then
+                        raise O2c_Error with "'" & MNm & "."
+                          & To_String (MName)
+                          & "' is a function; use its value (line "
+                          & Natural'Image (Cur.Line) & ")";
+                     end if;
+                     if Cur.Kind = Lex.Tok_LParen then
+                        Next;
+                        declare
+                           Args : array (1 .. Max_Params)
+                             of Unbounded_String;
+                           N_A  : Natural := 0;
+                           Call : Unbounded_String;
+                        begin
+                           loop
+                              exit when Cur.Kind = Lex.Tok_RParen;
+                              N_A := N_A + 1;
+                              if N_A > Max_Params then
+                                 raise O2c_Error with "too many arguments";
+                              end if;
+                              declare
+                                 A : Expr_Rec :=
+                                   Parse_Actual (Xs (XI).P (N_A));
+                              begin
+                                 Args (N_A) := A.Text;
+                              end;
+                              exit when Cur.Kind /= Lex.Tok_Comma;
+                              Next;
+                           end loop;
+                           if N_A /= Xs (XI).Params then
+                              raise O2c_Error with MNm & "."
+                                & To_String (MName) & " expects "
+                                & Natural'Image (Xs (XI).Params)
+                                & " argument(s), got "
+                                & Natural'Image (N_A);
+                           end if;
+                           Expect (Lex.Tok_RParen, "')'");
+                           Next;
+                           Call := Call & MNm & "." & To_String (MName)
+                             & " (";
+                           for I in 1 .. N_A loop
+                              if I > 1 then
+                                 Call := Call & ", ";
+                              end if;
+                              Call := Call & Args (I);
+                           end loop;
+                           Call := Call & ");";
+                           Append_Body ("      " & To_String (Call));
+                        end;
+                     else
+                        if Xs (XI).Params /= 0 then
+                           raise O2c_Error with "'" & MNm & "."
+                             & To_String (MName) & "' needs arguments";
+                        end if;
+                        Append_Body ("      " & MNm & "."
+                                     & To_String (MName) & ";");
+                     end if;
+                  elsif Xs (XI).Kind = S_Var then
+                     if Cur.Kind /= Lex.Tok_Assign then
+                        raise O2c_Error with "'" & MNm & "."
+                          & To_String (MName)
+                          & "' is a VARIABLE; assign to it or read it in "
+                          & "an expression (line "
+                          & Natural'Image (Cur.Line) & ")";
+                     end if;
+                     Next;
+                     declare
+                        V : Expr_Rec := Parse_Expr;
+                     begin
+                        if Xs (XI).Typ = T_Real then
+                           if V.Typ = T_Int then
+                              Append_Body ("      " & MNm & "."
+                                           & To_String (MName)
+                                           & " := Float ("
+                                           & To_String (V.Text) & ");");
+                           elsif V.Typ = T_Real then
+                              Append_Body ("      " & MNm & "."
+                                           & To_String (MName)
+                                           & " := " & To_String (V.Text)
+                                           & ";");
+                           else
+                              raise O2c_Error with "type mismatch assigning "
+                                & MNm & "." & To_String (MName);
+                           end if;
+                        elsif V.Typ = T_Str
+                          or else (Xs (XI).Typ /= V.Typ
+                                   and then not (Xs (XI).Typ = T_Long
+                                                 and then V.Typ = T_Int
+                                                 and then V.Lit))
+                        then
+                           raise O2c_Error with "type mismatch assigning "
+                             & MNm & "." & To_String (MName);
+                        else
+                           Append_Body ("      " & MNm & "."
+                                        & To_String (MName) & " := "
+                                        & To_String (V.Text) & ";");
+                        end if;
+                     end;
+                  else
+                     raise O2c_Error with "cannot assign to the constant '"
+                       & MNm & "." & To_String (MName) & "'";
+                  end if;
+               end;
             else
             Idx := Find (Head (1 .. H_Len));
             Next;
@@ -3219,6 +3647,7 @@ package body O2c_Compiler is
                      raise O2c_Error with "M3 calls only module Out (found '"
                        & Head (1 .. H_Len) & "." & Member & "')";
                   end if;
+                  Used_Console := True;
                   Next;
                   if Member = "Ln" then
                      Append_Body ("      Aegir_User.Console.Put_Line ("""");");
@@ -3409,11 +3838,92 @@ package body O2c_Compiler is
 
    --  module --------------------------------------------------------
 
-   function Compile (Source : String) return String is
-      S : Unbounded_String;
+   procedure Compile_Module (Source : String; Is_Lib : Boolean;
+                             Main_Txt : out Unbounded_String;
+                             Spec_Txt : out Unbounded_String;
+                             Body_Txt : out Unbounded_String) is
+
+      --  Shared per-unit preamble items: open-array bases, the SET
+      --  type, and the O2c_Put_* console helpers (emitted inside the
+      --  declarative region of the main procedure or a package body).
+      procedure Emit_Helpers (S : in out Unbounded_String) is
+      begin
+         if Used_Int_Arr then
+            S := S & "   type O2c_Int_Arr is array (Integer range <>) of Integer;"
+              & ASCII.LF;
+         end if;
+         if Used_Bool_Arr then
+            S := S & "   type O2c_Bool_Arr is array (Integer range <>) of Boolean;"
+              & ASCII.LF;
+         end if;
+         if Used_Set then
+            S := S & "   type O2c_Set is mod 2**32;" & ASCII.LF;
+         end if;
+         if Used_Int then
+            S := S & "   procedure O2c_Put_Int (V : Integer) is" & ASCII.LF
+              & "      Img : constant String := Integer'Image (V);" & ASCII.LF
+              & "   begin" & ASCII.LF
+              & "      if Img (Img'First) = ' ' then" & ASCII.LF
+              & "         Aegir_User.Console.Put (Img" & ASCII.LF
+              & "           (Img'First + 1 .. Img'Last));" & ASCII.LF
+              & "      else" & ASCII.LF
+              & "         Aegir_User.Console.Put (Img);" & ASCII.LF
+              & "      end if;" & ASCII.LF
+              & "   end O2c_Put_Int;" & ASCII.LF;
+         end if;
+         if Used_CStr then
+            S := S & "   procedure O2c_Put_CStr (S : String) is" & ASCII.LF
+              & "   begin" & ASCII.LF
+              & "      for I in S'Range loop" & ASCII.LF
+              & "         if S (I) = ASCII.NUL then" & ASCII.LF
+              & "            Aegir_User.Console.Put (S (S'First .. I - 1));"
+              & ASCII.LF
+              & "            return;" & ASCII.LF
+              & "         end if;" & ASCII.LF
+              & "      end loop;" & ASCII.LF
+              & "      Aegir_User.Console.Put (S);" & ASCII.LF
+              & "   end O2c_Put_CStr;" & ASCII.LF;
+         end if;
+         if Used_Real then
+            S := S & "   procedure O2c_Put_Real (V : Float) is" & ASCII.LF
+              & "      IP : Integer;" & ASCII.LF
+              & "      FR : Integer;" & ASCII.LF
+              & "   begin" & ASCII.LF
+              & "      IP := Integer (V - 0.5);" & ASCII.LF
+              & "      if V < 0.0 then IP := IP + 1; end if;" & ASCII.LF
+              & "      FR := Integer (abs (V - Float (IP)) * 1000.0);"
+              & ASCII.LF
+              & "      declare" & ASCII.LF
+              & "         Img : constant String := Integer'Image (IP);"
+              & ASCII.LF
+              & "      begin" & ASCII.LF
+              & "         if Img (Img'First) = '-' then" & ASCII.LF
+              & "            Aegir_User.Console.Put (Img);" & ASCII.LF
+              & "         elsif Img (Img'First) = ' ' then" & ASCII.LF
+              & "            Aegir_User.Console.Put (Img" & ASCII.LF
+              & "              (Img'First + 1 .. Img'Last));" & ASCII.LF
+              & "         else" & ASCII.LF
+              & "            Aegir_User.Console.Put (Img);" & ASCII.LF
+              & "         end if;" & ASCII.LF
+              & "      end;" & ASCII.LF
+              & "      Aegir_User.Console.Put (""."");" & ASCII.LF
+              & "      declare" & ASCII.LF
+              & "         D3 : constant String := Character'Val (48 + FR / 100)"
+              & ASCII.LF
+              & "           & Character'Val (48 + (FR / 10) mod 10)"
+              & ASCII.LF
+              & "           & Character'Val (48 + FR mod 10);" & ASCII.LF
+              & "      begin" & ASCII.LF
+              & "         Aegir_User.Console.Put (D3);" & ASCII.LF
+              & "      end;" & ASCII.LF
+              & "   end O2c_Put_Real;" & ASCII.LF;
+         end if;
+      end Emit_Helpers;
+
    begin
       Decl_Buf := Null_Unbounded_String;
       Body_Buf := Null_Unbounded_String;
+      Spec_Buf := Null_Unbounded_String;
       Mod_Name := Null_Unbounded_String;
       N_Sym := 0;
       N_UT := 0;
@@ -3425,11 +3935,14 @@ package body O2c_Compiler is
       Used_Bool_Arr := False;
       Used_Set := False;
       Used_Real := False;
+      Used_Console := False;
       N_Bound := 0;
       Recv_UT := 0;
       G_N := 0;
       N_Dsp := 0;
+      N_Imp := 0;
       Seen_Proc := False;
+      Pkg_Mode := Is_Lib;
 
       Lex.Init (Source);
       Next;
@@ -3443,15 +3956,28 @@ package body O2c_Compiler is
 
       if Cur.Kind = Lex.Tok_Import then
          Next;
-         Expect (Lex.Tok_Ident, "an imported module name");
-         if Cur.Text (1 .. Cur.Len) /= "Out" then
-            raise O2c_Error with "M2 imports only Out (found '"
-              & Cur.Text (1 .. Cur.Len) & "')";
-         end if;
-         Next;
-         if Cur.Kind = Lex.Tok_Comma then
-            raise O2c_Error with "M2 imports only Out";
-         end if;
+         loop
+            Expect (Lex.Tok_Ident, "an imported module name");
+            declare
+               MN : constant String := Cur.Text (1 .. Cur.Len);
+            begin
+               if MN /= "Out"
+                 and then not (Multi_Ok and then Is_Provided (MN))
+               then
+                  raise O2c_Error with "M19 imports: only Out, plus "
+                    & "library modules provided earlier (found '" & MN
+                    & "')";
+               end if;
+               N_Imp := N_Imp + 1;
+               if N_Imp > Max_Imports then
+                  raise O2c_Error with "too many imports";
+               end if;
+               Imports (N_Imp) := (Name => To_Unbounded_String (MN));
+            end;
+            Next;
+            exit when Cur.Kind /= Lex.Tok_Comma;
+            Next;
+         end loop;
          Expect (Lex.Tok_Semi, "';'");
          Next;
       end if;
@@ -3552,91 +4078,120 @@ package body O2c_Compiler is
       Next;
       Expect (Lex.Tok_EOF, "end of file");
 
-      S := S & "with Aegir_User.Console;" & ASCII.LF;
-      if Used_Set then
-         S := S & "with Interfaces;" & ASCII.LF;
+      --  ---- unit assembly (M19) ----
+      if not Pkg_Mode then
+         --  command module: a standalone Ada main procedure
+         declare
+            S : Unbounded_String;
+         begin
+            S := S & "with Aegir_User.Console;" & ASCII.LF;
+            if Used_Set then
+               S := S & "with Interfaces;" & ASCII.LF;
+            end if;
+            for I in 1 .. N_Imp loop
+               if To_String (Imports (I).Name) /= "Out" then
+                  S := S & "with " & To_String (Imports (I).Name) & ";"
+                    & ASCII.LF;
+               end if;
+            end loop;
+            S := S & ASCII.LF;
+            S := S & "procedure " & To_String (Mod_Name) & " is" & ASCII.LF;
+            Emit_Helpers (S);
+            S := S & To_String (Decl_Buf);
+            S := S & "begin" & ASCII.LF;
+            S := S & "   Aegir_User.Console.Set_Endpoint (1);" & ASCII.LF;
+            S := S & To_String (Body_Buf);
+            S := S & "end " & To_String (Mod_Name) & ";" & ASCII.LF;
+            Main_Txt := S;
+         end;
+      else
+         --  library module: an Ada package spec plus body.  The body
+         --  carries the module state, private declarations, procedure
+         --  bodies and the module initialisation statements (Ada
+         --  elaboration runs them before the importer's body).
+         Spec_Txt := To_Unbounded_String
+           ("package " & To_String (Mod_Name) & " is" & ASCII.LF)
+           & Spec_Buf
+           & To_Unbounded_String
+             ("end " & To_String (Mod_Name) & ";" & ASCII.LF);
+         declare
+            S : Unbounded_String;
+         begin
+            if Used_Console then
+               S := S & "with Aegir_User.Console;" & ASCII.LF;
+            end if;
+            if Used_Set then
+               S := S & "with Interfaces;" & ASCII.LF;
+            end if;
+            for I in 1 .. N_Imp loop
+               if To_String (Imports (I).Name) /= "Out" then
+                  S := S & "with " & To_String (Imports (I).Name) & ";"
+                    & ASCII.LF;
+               end if;
+            end loop;
+            if Length (S) > 0 then
+               S := S & ASCII.LF;
+            end if;
+            S := S & "package body " & To_String (Mod_Name) & " is"
+              & ASCII.LF;
+            Emit_Helpers (S);
+            S := S & To_String (Decl_Buf);
+            if Length (Body_Buf) > 0 then
+               S := S & "begin" & ASCII.LF;
+               if Used_Console then
+                  S := S & "   Aegir_User.Console.Set_Endpoint (1);"
+                    & ASCII.LF;
+               end if;
+               S := S & To_String (Body_Buf);
+            end if;
+            S := S & "end " & To_String (Mod_Name) & ";" & ASCII.LF;
+            Body_Txt := S;
+         end;
       end if;
-      S := S & ASCII.LF;
-      S := S & "procedure " & To_String (Mod_Name) & " is" & ASCII.LF;
-      --  shared unconstrained array bases (M12): fixed numeric arrays
-      --  are emitted as constrained subtypes so they fit ARRAY OF
-      --  formals; ARRAY OF CHAR maps straight onto Ada String.
-      if Used_Int_Arr then
-         S := S & "   type O2c_Int_Arr is array (Integer range <>) of Integer;"
-           & ASCII.LF;
-      end if;
-      if Used_Bool_Arr then
-         S := S & "   type O2c_Bool_Arr is array (Integer range <>) of Boolean;"
-           & ASCII.LF;
-      end if;
-      if Used_Set then
-         S := S & "   type O2c_Set is mod 2**32;" & ASCII.LF;
-      end if;
-      if Used_Int then
-         S := S & "   procedure O2c_Put_Int (V : Integer) is" & ASCII.LF
-           & "      Img : constant String := Integer'Image (V);" & ASCII.LF
-           & "   begin" & ASCII.LF
-           & "      if Img (Img'First) = ' ' then" & ASCII.LF
-           & "         Aegir_User.Console.Put (Img" & ASCII.LF
-           & "           (Img'First + 1 .. Img'Last));" & ASCII.LF
-           & "      else" & ASCII.LF
-           & "         Aegir_User.Console.Put (Img);" & ASCII.LF
-           & "      end if;" & ASCII.LF
-           & "   end O2c_Put_Int;" & ASCII.LF;
-      end if;
-      if Used_CStr then
-         S := S & "   procedure O2c_Put_CStr (S : String) is" & ASCII.LF
-           & "   begin" & ASCII.LF
-           & "      for I in S'Range loop" & ASCII.LF
-           & "         if S (I) = ASCII.NUL then" & ASCII.LF
-           & "            Aegir_User.Console.Put (S (S'First .. I - 1));"
-           & ASCII.LF
-           & "            return;" & ASCII.LF
-           & "         end if;" & ASCII.LF
-           & "      end loop;" & ASCII.LF
-           & "      Aegir_User.Console.Put (S);" & ASCII.LF
-           & "   end O2c_Put_CStr;" & ASCII.LF;
-      end if;
-      if Used_Real then
-         S := S & "   procedure O2c_Put_Real (V : Float) is" & ASCII.LF
-           & "      IP : Integer;" & ASCII.LF
-           & "      FR : Integer;" & ASCII.LF
-           & "   begin" & ASCII.LF
-           & "      IP := Integer (V - 0.5);" & ASCII.LF
-           & "      if V < 0.0 then IP := IP + 1; end if;" & ASCII.LF
-           & "      FR := Integer (abs (V - Float (IP)) * 1000.0);"
-           & ASCII.LF
-           & "      declare" & ASCII.LF
-           & "         Img : constant String := Integer'Image (IP);"
-           & ASCII.LF
-           & "      begin" & ASCII.LF
-           & "         if Img (Img'First) = '-' then" & ASCII.LF
-           & "            Aegir_User.Console.Put (Img);" & ASCII.LF
-           & "         elsif Img (Img'First) = ' ' then" & ASCII.LF
-           & "            Aegir_User.Console.Put (Img" & ASCII.LF
-           & "              (Img'First + 1 .. Img'Last));" & ASCII.LF
-           & "         else" & ASCII.LF
-           & "            Aegir_User.Console.Put (Img);" & ASCII.LF
-           & "         end if;" & ASCII.LF
-           & "      end;" & ASCII.LF
-           & "      Aegir_User.Console.Put (""."");" & ASCII.LF
-           & "      declare" & ASCII.LF
-           & "         D3 : constant String := Character'Val (48 + FR / 100)"
-           & ASCII.LF
-           & "           & Character'Val (48 + (FR / 10) mod 10)"
-           & ASCII.LF
-           & "           & Character'Val (48 + FR mod 10);" & ASCII.LF
-           & "      begin" & ASCII.LF
-           & "         Aegir_User.Console.Put (D3);" & ASCII.LF
-           & "      end;" & ASCII.LF
-           & "   end O2c_Put_Real;" & ASCII.LF;
-      end if;
-      S := S & To_String (Decl_Buf);
-      S := S & "begin" & ASCII.LF;
-      S := S & "   Aegir_User.Console.Set_Endpoint (1);" & ASCII.LF;
-      S := S & To_String (Body_Buf);
-      S := S & "end " & To_String (Mod_Name) & ";" & ASCII.LF;
-      return To_String (S);
+   end Compile_Module;
+
+   function Compile (Source : String) return String is
+      Main_Txt, Spec_Txt, Body_Txt : Unbounded_String;
+   begin
+      N_X := 0;
+      N_Prov := 0;
+      Multi_Ok := False;
+      Compile_Module (Source, False, Main_Txt, Spec_Txt, Body_Txt);
+      return To_String (Main_Txt);
    end Compile;
+
+   function Compile_Multi (Main_Source : String; Libs : Lib_Array;
+                           N_Libs : Natural; Count : out Natural)
+                           return Unit_Array
+   is
+      Res : Unit_Array;
+      C   : Natural := 0;
+      M_T, S_T, B_T : Unbounded_String;
+
+      procedure Add (File : String; T : Unbounded_String) is
+      begin
+         C := C + 1;
+         if C > Res'Last then
+            raise O2c_Error with "too many generated units";
+         end if;
+         Res (C) := (File => To_Unbounded_String (File), Text => T);
+      end Add;
+   begin
+      N_X := 0;
+      N_Prov := 0;
+      Multi_Ok := True;
+      for I in 1 .. N_Libs loop
+         Compile_Module (To_String (Libs (I).Text), True,
+                         M_T, S_T, B_T);
+         Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
+         Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+         N_Prov := N_Prov + 1;
+         Provided (N_Prov) := Mod_Name;
+      end loop;
+      Compile_Module (Main_Source, False, M_T, S_T, B_T);
+      Add (Lower (To_String (Mod_Name)) & ".adb", M_T);
+      Count := C;
+      return Res;
+   end Compile_Multi;
 
 end O2c_Compiler;
