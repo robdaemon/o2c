@@ -1,5 +1,5 @@
 module Hello;
-import Out, Math, Geo, Strings;
+import Out, Math, Geo, Strings, Texts;
 
 type Vector = array 4 of integer;
 type Pair = record a, b: integer end;
@@ -24,6 +24,7 @@ var s2: set; l2: longint;
 var r: real;
 var m: integer;
 var a, b: Math.Point;
+var tw: Texts.Writer;
 var rg: Geo.Rect;
 var bx: Geo.Box;
 var hx, tx: Math.Node;
@@ -358,6 +359,10 @@ begin
   Out.Ln;
   Out.Int(Strings.Pos("lo", "hello") + 999, 0);
   Out.Ln;
+  Texts.OpenWriter(tw);
+  Texts.WriteString(tw, "tx:");
+  Texts.WriteInt(tw, 5, 0);
+  Texts.WriteLn(tw);
   bx.x := 10;
   bx.y := 20;
   bx.z := 9;

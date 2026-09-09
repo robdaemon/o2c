@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M38 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M39 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M38 status
+## M39 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,15 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M39 — Texts module (ETH-style, console-backed)**: a second builtin
+module implements the ETH `Texts` Writer idiom over the console: a
+`Writer*` record with `OpenWriter*`, `Write*` (CHAR), `WriteString*`,
+`WriteLn*`, `WriteInt*` and `WriteReal*` — the shape `Out` itself
+wraps in ETH Oberon.  It is embedded and auto-provided like Strings.
+  Demo: `Texts.WriteString(tw, "tx:")` + `WriteInt(tw, 5)` prints
+`tx:5`.  (Texts is an ETH facility, not an Oakwood basic module;
+documented deviation: no Text/Buffer/Log objects yet.)
 
 **M38 — Oakwood modules (Strings)**: the Oakwood `Strings` module
 (`Length`, `Pos`, `Cap`, `Delete` over NUL-terminated `ARRAY OF

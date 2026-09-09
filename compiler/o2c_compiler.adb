@@ -6372,6 +6372,47 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       return To_String (S);
    end Oak_Strings_Src;
 
+   --  M39: ETH-style Texts subset (console-backed Writer API; no
+   --  Text/Buffer/Log objects yet), embedded as a builtin module.
+   function Oak_Texts_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module Texts;" & ASCII.LF
+        & "import Out;" & ASCII.LF
+        & "type Writer* = record pos: integer end;" & ASCII.LF
+        & "type C2 = array 2 of char;" & ASCII.LF
+        & "procedure OpenWriter*(var w: Writer);" & ASCII.LF
+        & "begin" & ASCII.LF
+        & "  w.pos := 0" & ASCII.LF
+        & "end OpenWriter;" & ASCII.LF
+        & "procedure Write*(var w: Writer; ch: char);" & ASCII.LF
+        & "  var t: C2;" & ASCII.LF
+        & "begin" & ASCII.LF
+        & "  t[0] := ch;" & ASCII.LF
+        & "  t[1] := CHR(0);" & ASCII.LF
+        & "  Out.String(t)" & ASCII.LF
+        & "end Write;" & ASCII.LF
+        & "procedure WriteString*(var w: Writer; s: array of char);" & ASCII.LF
+        & "begin" & ASCII.LF
+        & "  Out.String(s)" & ASCII.LF
+        & "end WriteString;" & ASCII.LF
+        & "procedure WriteLn*(var w: Writer);" & ASCII.LF
+        & "begin" & ASCII.LF
+        & "  Out.Ln" & ASCII.LF
+        & "end WriteLn;" & ASCII.LF
+        & "procedure WriteInt*(var w: Writer; x: integer; n: integer);" & ASCII.LF
+        & "begin" & ASCII.LF
+        & "  Out.Int(x, 0)" & ASCII.LF
+        & "end WriteInt;" & ASCII.LF
+        & "procedure WriteReal*(var w: Writer; r: real; n: integer);" & ASCII.LF
+        & "begin" & ASCII.LF
+        & "  Out.Real(r, 0)" & ASCII.LF
+        & "end WriteReal;" & ASCII.LF
+        & "end Texts." & ASCII.LF
+        & "" & ASCII.LF ;
+      return To_String (S);
+   end Oak_Texts_Src;
+
    function Compile_Multi (Main_Source : String; Libs : Lib_Array;
                            N_Libs : Natural; Count : out Natural)
                            return Unit_Array
@@ -6408,6 +6449,14 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  M38: compile the builtin Oakwood modules first so that user
       --  modules and the main can import them
       Compile_Module (Oak_Strings_Src, True, M_T, S_T, B_T);
+      Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
+      if Length (B_T) > 0 then
+         Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+      end if;
+      N_Prov := N_Prov + 1;
+      Provided (N_Prov) := Mod_Name;
+
+      Compile_Module (Oak_Texts_Src, True, M_T, S_T, B_T);
       Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
