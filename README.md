@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M34 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M35 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M34 status
+## M35 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,15 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M35 — record aggregate literals**: a record-typed variable may be
+assigned a literal `{field = value, ...}` (whole-record copy RHS).
+  Components are emitted in declaration order; fields not named fall
+  back to their defaults (hidden/private components included), scalar
+  fields accept the usual literal widening (INTEGER into REAL etc),
+  and extension types are not yet supported.  Works for local records
+  and imported exported records (`a := {x = 61, y = 20}` on a
+  `Math.P`).  Verified natively: `11 9 7.000` and `81`.
 
 **M34 — SET ranges and CHAR elements**: set literals accept
 INTEGER-literal ranges (`{0 .. 5, 7, 9 .. 11}`) and CHAR elements;

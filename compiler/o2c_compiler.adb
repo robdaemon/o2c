@@ -5107,6 +5107,107 @@ package body O2c_Compiler is
                                      & " => ASCII.NUL);");
                      end if;
                      Next;
+                  elsif UTypes (U).Is_Rec
+                    and then Cur.Kind = Lex.Tok_LBrace
+                  then
+                     --  M35: record aggregate { f = value, ... }; all
+                     --  components are emitted in declaration order with
+                     --  defaults for the ones not named
+                     Next;   --  past '{'
+                     declare
+                        Val   : array (1 .. 16) of Unbounded_String :=
+                          (others => <>);
+                        Used  : array (1 .. 16) of Boolean :=
+                          (others => False);
+                        A     : Unbounded_String;
+                        First : Boolean := True;
+                     begin
+                        if UTypes (U).Parent /= 0 then
+                           raise O2c_Error with "record aggregates on "
+                             & "extension types are not supported (M35)";
+                        end if;
+                        loop
+                           exit when Cur.Kind = Lex.Tok_RBrace;
+                           if Cur.Kind /= Lex.Tok_Ident then
+                              raise O2c_Error with "a field name expected "
+                                & "in the record aggregate";
+                           end if;
+                           declare
+                              FId : Natural := 0;
+                              FNm : constant String :=
+                                Cur.Text (1 .. Cur.Len);
+                           begin
+                              for F in 1 .. UTypes (U).N_F loop
+                                 if To_String (UTypes (U).F (F).Name) = FNm
+                                 then
+                                    FId := F;
+                                 end if;
+                              end loop;
+                              if FId = 0 then
+                                 raise O2c_Error with "no field '" & FNm
+                                   & "' in " & To_String (UTypes (U).Name);
+                              end if;
+                              if UTypes (U).F (FId).UT /= 0 then
+                                 raise O2c_Error with "record aggregate "
+                                   & "fields must be scalar (M35; '"
+                                   & FNm & "')";
+                              end if;
+                              if Used (FId) then
+                                 raise O2c_Error with "field '" & FNm
+                                   & "' given twice in the aggregate";
+                              end if;
+                              Used (FId) := True;
+                              Next;               --  past the field name
+                              Expect (Lex.Tok_Equal, "'='");
+                              Next;
+                              declare
+                                 V : Expr_Rec := Parse_Expr;
+                              begin
+                                 if UTypes (U).F (FId).Typ = T_Real then
+                                    if V.Typ = T_Int then
+                                       V.Text := To_Unbounded_String
+                                         ("Float (" & To_String (V.Text)
+                                          & ")");
+                                    elsif V.Typ /= T_Real then
+                                       raise O2c_Error with "field '" & FNm
+                                         & "' expects a REAL value";
+                                    end if;
+                                 elsif V.Typ /= UTypes (U).F (FId).Typ
+                                   and then not
+                                     (UTypes (U).F (FId).Typ = T_Long
+                                      and then V.Typ = T_Int
+                                      and then V.Lit)
+                                 then
+                                    raise O2c_Error with "field '" & FNm
+                                      & "' has the wrong type";
+                                 end if;
+                                 Val (FId) := V.Text;
+                              end;
+                           end;
+                           exit when Cur.Kind /= Lex.Tok_Comma;
+                           Next;
+                        end loop;
+                        Expect (Lex.Tok_RBrace, "'}'");
+                        Next;
+                        for F in 1 .. UTypes (U).N_F loop
+                           if UTypes (U).F (F).UT /= 0 then
+                              raise O2c_Error with "record aggregate needs "
+                                & "scalar fields only (M35; '"
+                                & To_String (UTypes (U).Name) & "')";
+                           end if;
+                           if not First then
+                              A := A & ", ";
+                           end if;
+                           First := False;
+                           A := A & To_String (UTypes (U).F (F).Name)
+                             & " => "
+                             & (if Used (F)
+                                then To_String (Val (F))
+                                else Scalar_Init (UTypes (U).F (F).Typ));
+                        end loop;
+                        Append_Body ("      " & Head (1 .. H_Len)
+                                     & " := (" & To_String (A) & ");");
+                     end;
                   else
                      --  M28: whole copy from a same-typed local variable
                      --  or an exported module RECORD VARIABLE
