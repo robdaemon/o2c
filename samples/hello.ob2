@@ -321,5 +321,9 @@ begin
   Out.Ln;
   Math.Fill(w, 100);
   Out.Int(w[0] + w[3], 0);
+  Out.Ln;
+  Math.origin.x := 77;
+  Math.origin.y := 64;
+  Out.Int(Math.origin.x + Math.origin.y, 0);
   Out.Ln
 end Hello.

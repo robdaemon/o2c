@@ -6,6 +6,7 @@ type Node* = pointer to NodeDesc;
 type NodeDesc* = record v: integer; next: Node end;
 var base: integer;
 var count*: integer;
+var origin*: Point;
 procedure Fill*(var v: Vec; start: integer);
   var j: integer;
 begin

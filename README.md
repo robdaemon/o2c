@@ -102,6 +102,14 @@ designator engine and value initialisation behave like local arrays.
 The demo fills a `Math.Vec` via `Math.Fill`, printing `203` at the
 end.  Exported records may now carry fields of exported array types.
 
+**M20f — exported RECORD VARIABLEs**: a module-level VARIABLE
+whose type is an exported RECORD of the same module (`var origin*:
+Point`) is emitted into the package spec and exported through the
+catalog; importers read and write its fields with qualified designator
+chains (`Math.origin.x := 77`).  Its spec line is deferred until after
+the type's primitives so Ada keeps the method dispatchers primitive.
+The demo sets `Math.origin` and prints `141` at the end.
+
 **M20c — exported type-bound methods**: a procedure method
 marked `name*` on an exported RECORD type (`procedure (var p: Point)
 Scale*(k: integer)`) gets an exported dispatcher

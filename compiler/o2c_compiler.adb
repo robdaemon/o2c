@@ -118,6 +118,7 @@ package body O2c_Compiler is
       --  of a function result ("" when the slot is scalar).
       P_Nm   : Nm_Array := (others => <>);
       Ret_Nm : Unbounded_String;
+      VT_Nm  : Unbounded_String;   --  M20f: exported VARIABLE user type
    end record;
    Xs  : array (1 .. Max_X) of X_Entry := (others => <>);
    N_X : Natural := 0;
@@ -127,6 +128,8 @@ package body O2c_Compiler is
    Spec_Buf   : Unbounded_String;   --  package spec text (exports)
    Spec_Decl  : Boolean := False;   --  route Append_Decl to Spec_Buf (M20)
    Base_In_Spec : Boolean := False; --  O2c_*_Arr bases live in the spec
+   RVar_Specs : array (1 .. 16) of Unbounded_String := (others => <>);
+   RVar_N : Natural := 0; --  deferred exported RECORD VARIABLE specs (M20f)
    Used_Console : Boolean := False; --  module emits Console calls
 
    --  exported type catalog (M20): the visible TYPE declarations of
@@ -1713,14 +1716,54 @@ package body O2c_Compiler is
                               raise O2c_Error with "'" & FNm & "." & MName
                                 & "' is not exported by module " & FNm;
                            end if;
-                           if Xs (XI).Kind = S_Const or else
-                              Xs (XI).Kind = S_Var
+                           if Xs (XI).Kind = S_Const then
+                              R.Text := To_Unbounded_String
+                                (FNm & "." & MName);
+                              R.Typ := Xs (XI).Typ;
+                              R.Lit := False;
+                              return R;
+                           end if;
+                           if Xs (XI).Kind = S_Var
+                             and then Length (Xs (XI).VT_Nm) = 0
                            then
                               R.Text := To_Unbounded_String
                                 (FNm & "." & MName);
                               R.Typ := Xs (XI).Typ;
                               R.Lit := False;
                               return R;
+                           end if;
+                           if Xs (XI).Kind = S_Var then
+                              --  M20f: exported RECORD VARIABLE: reach a
+                              --  field through the designator chain
+                              declare
+                                 Q : constant String :=
+                                   To_String (Xs (XI).VT_Nm);
+                                 U : constant Natural :=
+                                   Import_Type (Q_Owner (Q), Q_Mem (Q));
+                              begin
+                                 if Cur.Kind /= Lex.Tok_Dot then
+                                    raise O2c_Error with "'" & FNm & "."
+                                      & MName
+                                      & "' is a RECORD VARIABLE; select a "
+                                      & "field with '.'";
+                                 end if;
+                                 declare
+                                    D : Desig := Parse_Rec_Ptr_Chain
+                                      (FNm & "." & MName, U);
+                                 begin
+                                    if D.K = D_Scalar then
+                                       R.Typ := D.Sc;
+                                    elsif D.K = D_Ptr then
+                                       R.Typ := T_Ptr;
+                                       R.Ptr_UT := D.UT;
+                                    else
+                                       R.Typ := T_Str;
+                                       R.CStr := True;
+                                    end if;
+                                    R.Text := D.Text;
+                                 end;
+                                 return R;
+                              end;
                            end if;
                            if not Xs (XI).Ret then
                               raise O2c_Error with "'" & FNm & "." & MName
@@ -2655,15 +2698,51 @@ package body O2c_Compiler is
             end if;
             for I in 1 .. N loop
                if Exps (I) then
-                  raise O2c_Error with "only scalar VARIABLEs can be "
-                    & "exported (M19; '" & To_String (Names (I)) & "')";
+                  --  M20f: only exported RECORD VARIABLEs export (whole
+                  --  module-level records; fields are reached with '.')
+                  if not (UTypes (UT).Is_Rec and then not UTypes (UT).Is_Ptr)
+                  then
+                     raise O2c_Error with "exported VARIABLEs: scalars or "
+                       & "exported RECORD types only (M20f; '"
+                       & To_String (Names (I)) & "')";
+                  end if;
+                  if not UTypes (UT).ExpT then
+                     raise O2c_Error with "exported VARIABLE '"
+                       & To_String (Names (I))
+                       & "': its RECORD type must be exported (M20f)";
+                  end if;
                end if;
                N_Sym := N_Sym + 1;
                Syms (N_Sym) := (Kind => S_Var, Typ => T_Int, UT => UT,
-                                Name => Names (I), others => <>);
-               Append_Decl ("   " & To_String (Names (I)) & " : "
-                            & To_String (UTypes (UT).Name) & " := "
-                            & To_String (Init_Txt) & ";");
+                                Name => Names (I), Exp => Exps (I),
+                                others => <>);
+               if Exps (I) and then Pkg_Mode then
+                  --  M20f: emit after the type's primitive operations so
+                  --  Ada keeps the dispatchers primitive (GNAT rule)
+                  RVar_N := RVar_N + 1;
+                  if RVar_N > RVar_Specs'Last then
+                     raise O2c_Error with "too many exported RECORD "
+                       & "VARIABLEs";
+                  end if;
+                  RVar_Specs (RVar_N) := To_Unbounded_String
+                    ("   " & To_String (Names (I)) & " : "
+                     & To_String (UTypes (UT).Name) & " := "
+                     & To_String (Init_Txt) & ";");
+                  declare
+                     E : X_Entry :=
+                       (Kind => S_Var, Typ => T_Int,
+                        Name => Names (I), others => <>);
+                  begin
+                     E.VT_Nm := To_Unbounded_String
+                       (QName (To_String (Mod_Name),
+                               To_String (UTypes (UT).Name)));
+                     X_Add (To_String (Mod_Name), E);
+                  end;
+               else
+                  Append_Decl ("   " & To_String (Names (I)) & " : "
+                               & To_String (UTypes (UT).Name) & " := "
+                               & To_String (Init_Txt) & ";");
+               end if;
             end loop;
          else
             for I in 1 .. N loop
@@ -4066,7 +4145,58 @@ package body O2c_Compiler is
                         Append_Body ("      " & MNm & "."
                                      & To_String (MName) & ";");
                      end if;
-                  elsif Xs (XI).Kind = S_Var then
+                  elsif Xs (XI).Kind = S_Var
+                    and then Length (Xs (XI).VT_Nm) > 0
+                  then
+                     --  M20f: exported RECORD VARIABLE: assign a field
+                     if Cur.Kind /= Lex.Tok_Dot then
+                        raise O2c_Error with "'" & MNm & "."
+                          & To_String (MName)
+                          & "' is a RECORD VARIABLE; whole-record "
+                          & "assignment is not supported yet (M20f)";
+                     end if;
+                     declare
+                        Q : constant String := To_String (Xs (XI).VT_Nm);
+                        U : constant Natural :=
+                          Import_Type (Q_Owner (Q), Q_Mem (Q));
+                        D : Desig := Parse_Rec_Ptr_Chain
+                          (MNm & "." & To_String (MName), U);
+                     begin
+                        Expect (Lex.Tok_Assign, "':='");
+                        Next;
+                        if D.K = D_Scalar then
+                           if D.Sc = T_Char
+                             and then Cur.Kind = Lex.Tok_String
+                             and then Cur.Len = 1
+                           then
+                              Append_Body ("      " & To_String (D.Text)
+                                           & " := '" & Cur.Text (1 .. 1)
+                                           & "';");
+                              Next;
+                           else
+                              declare
+                                 V : Expr_Rec := Parse_Expr;
+                              begin
+                                 if V.Typ /= D.Sc or else V.Typ = T_Str then
+                                    raise O2c_Error with "type mismatch "
+                                      & "assigning " & To_String (D.Text);
+                                 end if;
+                                 Append_Body ("      " & To_String (D.Text)
+                                              & " := " & To_String (V.Text)
+                                              & ";");
+                              end;
+                           end if;
+                        elsif D.K = D_Ptr then
+                           raise O2c_Error with "cannot assign a POINTER "
+                             & "field of a module VARIABLE here (M20f)";
+                        else
+                           raise O2c_Error with "cannot assign a whole "
+                             & "char-array field here (M20f)";
+                        end if;
+                     end;
+                  elsif Xs (XI).Kind = S_Var
+                    and then Length (Xs (XI).VT_Nm) = 0
+                  then
                      if Cur.Kind /= Lex.Tok_Assign then
                         raise O2c_Error with "'" & MNm & "."
                           & To_String (MName)
@@ -4850,6 +4980,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       Used_Real := False;
       Used_Console := False;
       Base_In_Spec := False;
+      RVar_N := 0;
       N_Bound := 0;
       Recv_UT := 0;
       G_N := 0;
@@ -4995,6 +5126,10 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       if Pkg_Mode then
          Capture_Types;           --  validate + register exported types
          Capture_Methods;         --  export type-bound method dispatchers
+         for I in 1 .. RVar_N loop
+            Append_Spec (To_String (RVar_Specs (I)));
+         end loop;
+         RVar_N := 0;
       end if;
 
       --  ---- unit assembly (M19) ----
