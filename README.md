@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M30 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M31 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M30 status
+## M31 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,17 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M31 — ambiguous multi-library overrides for widened dispatch**:
+shadows now chain instead of collapsing: each library's base-view
+shadow falls back to the previously-registered shadow for the same
+(base, method) rather than straight to the base module's dispatcher
+(adding the body `with` for it), and callers use the outermost
+shadow.  Two independent libraries can both override the same base
+method, and a single base-typed pointer dispatches to whichever
+override its object actually has.  In the A/B/C harness a Shape
+pointer prints `25` when it holds a B.Circle and `107` when it holds
+a C.Ball.
 
 **M30 — widened-pointer dispatch for method functions**: base-view
 shadows now cover method *functions* too: a library exporting a

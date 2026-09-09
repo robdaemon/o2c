@@ -132,6 +132,8 @@ package body O2c_Compiler is
    Spec_Decl  : Boolean := False;   --  route Append_Decl to Spec_Buf (M20)
    Spec_Withs : array (1 .. 16) of Unbounded_String := (others => <>);
    N_SW   : Natural := 0;          --  modules an exported shape references
+   Body_Withs : array (1 .. 16) of Unbounded_String := (others => <>);
+   N_BW   : Natural := 0;          --  extra body-only 'with's (shadows)
    Base_In_Spec : Boolean := False; --  O2c_*_Arr bases live in the spec
    RVar_Specs : array (1 .. 16) of Unbounded_String := (others => <>);
    RVar_N : Natural := 0; --  deferred exported RECORD VARIABLE specs (M20f)
@@ -297,6 +299,23 @@ package body O2c_Compiler is
       end if;
       Spec_Withs (N_SW) := To_Unbounded_String (Nm);
    end Add_SW;
+
+   procedure Add_BW (Nm : String) is
+   begin
+      if Nm = "" then
+         return;
+      end if;
+      for I in 1 .. N_BW loop
+         if To_String (Body_Withs (I)) = Nm then
+            return;
+         end if;
+      end loop;
+      N_BW := N_BW + 1;
+      if N_BW > Body_Withs'Last then
+         raise O2c_Error with "too many body dependencies";
+      end if;
+      Body_Withs (N_BW) := To_Unbounded_String (Nm);
+   end Add_BW;
 
    function Spec_With_Lines return String is
       R : Unbounded_String;
@@ -5282,14 +5301,6 @@ package body O2c_Compiler is
 
    procedure Sh_Add (Owner, BOwn, BRec, MName : String) is
    begin
-      for I in 1 .. N_Sh loop
-         if To_String (Shs (I).BOwn) = BOwn
-           and then To_String (Shs (I).BRec) = BRec
-           and then To_String (Shs (I).MName) = MName
-         then
-            return;                --  one shadow per (base, method)
-         end if;
-      end loop;
       N_Sh := N_Sh + 1;
       if N_Sh > Shs'Last then
          raise O2c_Error with "too many dispatch shadows";
@@ -5300,17 +5311,21 @@ package body O2c_Compiler is
                      MName => To_Unbounded_String (MName));
    end Sh_Add;
 
+   --  M31: the OUTERMOST (last-registered) shadow for a base/method:
+   --  shadows chain, each falling back to the one registered before
+   --  it, so the last one covers every override library.
    function Sh_Find (BOwn, BRec, MName : String) return Natural is
+      Last : Natural := 0;
    begin
       for I in 1 .. N_Sh loop
          if To_String (Shs (I).BOwn) = BOwn
            and then To_String (Shs (I).BRec) = BRec
            and then To_String (Shs (I).MName) = MName
          then
-            return I;
+            Last := I;
          end if;
       end loop;
-      return 0;
+      return Last;
    end Sh_Find;
 
    --  M20c exporter side: for every exported type-bound method of the
@@ -5459,6 +5474,8 @@ package body O2c_Compiler is
                   Cand  : array (1 .. Max_Bound) of Natural :=
                     (others => 0);
                   N_C   : Natural := 0;
+                  PrevSh : constant Natural := Sh_Find (BOwn, PSh, DN);
+                  FB    : Unbounded_String;
                   Rpre  : constant String :=
                     (if Syms (SIdx).Ret then "return " else "");
                   Knd   : constant String :=
@@ -5513,6 +5530,16 @@ package body O2c_Compiler is
                         end loop;
                      end if;
                   end loop;
+                  FB := To_Unbounded_String
+                    (BOwn & "." & DN & "_Disp_O2c_" & PSh);
+                  if PrevSh /= 0 then
+                     --  chain to the previously-registered shadow so
+                     --  multiple override libraries compose (M31)
+                     Add_BW (To_String (Shs (PrevSh).Owner));
+                     FB := To_Unbounded_String
+                       (To_String (Shs (PrevSh).Owner) & "." & DN
+                        & "_Any_Disp_O2c_" & PSh);
+                  end if;
                   Append_Spec ("   " & To_String (Hdr) & ";");
                   Append_Decl ("   " & To_String (Hdr) & " is");
                   Append_Decl ("   begin");
@@ -5547,8 +5574,8 @@ package body O2c_Compiler is
                                   then ", " & To_String (ArgL)
                                   else "") & ");");
                   Append_Decl ("         else");
-                  Append_Decl ("            " & Rpre & BOwn & "." & DN
-                               & "_Disp_O2c_" & PSh & " (" & RcvrN
+                  Append_Decl ("            " & Rpre & To_String (FB)
+                               & " (" & RcvrN
                                & (if Syms (SIdx).Params > 1
                                   then ", " & To_String (ArgL)
                                   else "") & ");");
@@ -5673,6 +5700,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       Base_In_Spec := False;
       RVar_N := 0;
       N_SW := 0;
+      N_BW := 0;
       N_Bound := 0;
       Recv_UT := 0;
       G_N := 0;
@@ -5893,6 +5921,10 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                   S := S & "with " & To_String (Imports (I).Name) & ";"
                     & ASCII.LF;
                end if;
+            end loop;
+            for I in 1 .. N_BW loop
+               S := S & "with " & To_String (Body_Withs (I)) & ";"
+                 & ASCII.LF;
             end loop;
             if Length (S) > 0 then
                S := S & ASCII.LF;
