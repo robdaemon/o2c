@@ -335,6 +335,13 @@ begin
   Math.origin := a;
   Out.Int(Math.origin.x + Math.origin.y, 0);
   Out.Ln;
+  Math.origin.x := 88;
+  Math.origin.y := 11;
+  a.x := 0;
+  a.y := 0;
+  a := Math.origin;
+  Out.Int(a.x + a.y, 0);
+  Out.Ln;
   px.x := 10;
   px.y := 4;
   px.z := 1;

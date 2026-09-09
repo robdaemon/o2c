@@ -4945,23 +4945,73 @@ package body O2c_Compiler is
                      end if;
                      Next;
                   else
-                     if Cur.Kind /= Lex.Tok_Ident then
-                        raise O2c_Error with "whole-value copy needs a"
-                          & " variable of the same type";
-                     end if;
+                     --  M28: whole copy from a same-typed local variable
+                     --  or an exported module RECORD VARIABLE
                      declare
-                        R : Natural := Find (Cur.Text (1 .. Cur.Len));
+                        Rhs : Unbounded_String;
                      begin
-                        if R = 0 or else Syms (R).Kind /= S_Var
-                          or else Syms (R).UT /= Syms (Idx).UT
+                        if Cur.Kind = Lex.Tok_Ident then
+                           declare
+                              R : constant Natural :=
+                                Find (Cur.Text (1 .. Cur.Len));
+                           begin
+                              if R /= 0 and then Syms (R).Kind = S_Var
+                                and then Syms (R).UT = Syms (Idx).UT
+                              then
+                                 Rhs := To_Unbounded_String
+                                   (Cur.Text (1 .. Cur.Len));
+                                 Next;
+                              end if;
+                           end;
+                        end if;
+                        if Length (Rhs) = 0 and then Cur.Kind = Lex.Tok_Ident
+                          and then Imported_Mod (Cur.Text (1 .. Cur.Len))
                         then
-                           raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
+                           declare
+                              MN2 : constant String :=
+                                Cur.Text (1 .. Cur.Len);
+                           begin
+                              Next;
+                              if Cur.Kind = Lex.Tok_Dot then
+                                 Next;
+                                 Expect (Lex.Tok_Ident,
+                                         "a module variable");
+                                 declare
+                                    XI2 : constant Natural :=
+                                      Find_X (MN2,
+                                              Cur.Text (1 .. Cur.Len));
+                                 begin
+                                    if XI2 /= 0
+                                      and then Xs (XI2).Kind = S_Var
+                                      and then Length (Xs (XI2).VT_Nm) > 0
+                                    then
+                                       declare
+                                          Q  : constant String :=
+                                            To_String (Xs (XI2).VT_Nm);
+                                          TY : constant Natural :=
+                                            Import_Type (Q_Owner (Q),
+                                                         Q_Mem (Q));
+                                       begin
+                                          if TY = Syms (Idx).UT then
+                                             Rhs := To_Unbounded_String
+                                               (MN2 & "."
+                                                & Cur.Text (1 .. Cur.Len));
+                                          end if;
+                                       end;
+                                    end if;
+                                    Next;
+                                 end;
+                              end if;
+                           end;
+                        end if;
+                        if Length (Rhs) = 0 then
+                           raise O2c_Error with "'"
+                             & Cur.Text (1 .. Cur.Len)
                              & "' is not a same-typed variable (copy of "
                              & Head (1 .. H_Len) & ")";
                         end if;
                         Append_Body ("      " & Head (1 .. H_Len) & " := "
-                                     & Cur.Text (1 .. Cur.Len) & ";");
-                        Next;
+                                     & To_String (Rhs) & ";");
                      end;
                   end if;
                end;
