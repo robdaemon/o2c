@@ -128,6 +128,8 @@ package body O2c_Compiler is
    Multi_Ok   : Boolean := False;   --  library imports are available
    Spec_Buf   : Unbounded_String;   --  package spec text (exports)
    Spec_Decl  : Boolean := False;   --  route Append_Decl to Spec_Buf (M20)
+   Spec_Withs : array (1 .. 16) of Unbounded_String := (others => <>);
+   N_SW   : Natural := 0;          --  modules an exported shape references
    Base_In_Spec : Boolean := False; --  O2c_*_Arr bases live in the spec
    RVar_Specs : array (1 .. 16) of Unbounded_String := (others => <>);
    RVar_N : Natural := 0; --  deferred exported RECORD VARIABLE specs (M20f)
@@ -255,6 +257,36 @@ package body O2c_Compiler is
    begin
       Spec_Buf := Spec_Buf & S & ASCII.LF;
    end Append_Spec;
+
+   --  M24: record that a package spec needs to 'with' module Nm.
+   procedure Add_SW (Nm : String) is
+   begin
+      if Nm = "" or else Nm = "Out"
+        or else Nm = To_String (Mod_Name)
+      then
+         return;
+      end if;
+      for I in 1 .. N_SW loop
+         if To_String (Spec_Withs (I)) = Nm then
+            return;
+         end if;
+      end loop;
+      N_SW := N_SW + 1;
+      if N_SW > Spec_Withs'Last then
+         raise O2c_Error with "too many spec dependencies";
+      end if;
+      Spec_Withs (N_SW) := To_Unbounded_String (Nm);
+   end Add_SW;
+
+   function Spec_With_Lines return String is
+      R : Unbounded_String;
+   begin
+      for I in 1 .. N_SW loop
+         R := R & "with " & To_String (Spec_Withs (I)) & ";"
+           & ASCII.LF;
+      end loop;
+      return To_String (R);
+   end Spec_With_Lines;
 
    function Is_Provided (Nm : String) return Boolean is
    begin
@@ -464,6 +496,18 @@ package body O2c_Compiler is
       return Owner & "." & Mem;
    end QName;
 
+   --  Qualified Ada name of a user type in this module: imported shapes
+   --  already carry their Owner.Name form; local ones get the current
+   --  module prefix (M24 cross-module composition).
+   function Qual_UT (UT : Natural) return String is
+      N : constant String := To_String (UTypes (UT).Name);
+   begin
+      if UTypes (UT).Imported then
+         return N;
+      end if;
+      return QName (To_String (Mod_Name), N);
+   end Qual_UT;
+
    function XT_Find (Owner : String; Mem : String) return Natural is
    begin
       for I in 1 .. N_XT loop
@@ -511,12 +555,15 @@ package body O2c_Compiler is
                   Fld : UField renames UTypes (U).F (F);
                begin
                   if Fld.UT /= 0 then
-                     if not UTypes (Fld.UT).ExpT then
+                     if not UTypes (Fld.UT).ExpT
+                       and then not UTypes (Fld.UT).Imported
+                     then
                         raise O2c_Error with "exported RECORD '"
                           & To_String (UTypes (U).Name)
                           & "': field '" & To_String (Fld.Name)
-                          & "' must be scalar or an exported type of the "
-                          & "same module";
+                          & "' must be scalar, an exported type of the "
+                          & "same module or an imported exported type "
+                          & "(M24)";
                      end if;
                   end if;
                end;
@@ -524,11 +571,14 @@ package body O2c_Compiler is
          else
             --  exported fixed ARRAY type (M20e)
             if UTypes (U).Elem_UT /= 0 then
-               if not UTypes (UTypes (U).Elem_UT).ExpT then
+               if not UTypes (UTypes (U).Elem_UT).ExpT
+                 and then not UTypes (UTypes (U).Elem_UT).Imported
+               then
                   raise O2c_Error with "exported ARRAY type '"
                     & To_String (UTypes (U).Name)
-                    & "': element type must be scalar or an exported type "
-                    & "of the same module";
+                    & "': element type must be scalar, an exported type "
+                    & "of the same module or an imported exported type "
+                    & "(M24)";
                end if;
             elsif UTypes (U).Elem = T_Set then
                raise O2c_Error with "exported ARRAY type '"
@@ -553,13 +603,11 @@ package body O2c_Compiler is
                others => <>);
             if UTypes (U).Is_Ptr then
                XT_Tab (N_XT).Ptr_Nm := To_Unbounded_String
-                 (QName (To_String (Mod_Name),
-                         To_String (UTypes (UTypes (U).Ptr_Tgt).Name)));
+                 (Qual_UT (UTypes (U).Ptr_Tgt));
             end if;
             if UTypes (U).Is_Ext then
                XT_Tab (N_XT).Par_Nm := To_Unbounded_String
-                 (QName (To_String (Mod_Name),
-                         To_String (UTypes (UTypes (U).Parent).Name)));
+                 (Qual_UT (UTypes (U).Parent));
             end if;
             if UTypes (U).Is_Rec then
                XT_Tab (N_XT).N_F := UTypes (U).N_F;
@@ -571,8 +619,7 @@ package body O2c_Compiler is
                      XT_Tab (N_XT).F (F).Exp := Fld.ExpF;
                      if Fld.UT /= 0 then
                         XT_Tab (N_XT).F (F).UT_Nm := To_Unbounded_String
-                          (QName (To_String (Mod_Name),
-                                  To_String (UTypes (Fld.UT).Name)));
+                          (Qual_UT (Fld.UT));
                      else
                         XT_Tab (N_XT).F (F).Typ := Fld.Typ;
                      end if;
@@ -584,9 +631,22 @@ package body O2c_Compiler is
                XT_Tab (N_XT).Elem := UTypes (U).Elem;
                if UTypes (U).Elem_UT /= 0 then
                   XT_Tab (N_XT).Elem_Nm := To_Unbounded_String
-                    (QName (To_String (Mod_Name),
-                            To_String (UTypes (UTypes (U).Elem_UT).Name)));
+                    (Qual_UT (UTypes (U).Elem_UT));
                end if;
+            end if;
+         end if;
+      end loop;
+      --  M24: exported shapes may reference another module's exported
+      --  types; their package specs need 'with' clauses.
+      for I in 1 .. N_XT loop
+         if To_String (XT_Tab (I).Owner) = To_String (Mod_Name) then
+            for F in 1 .. XT_Tab (I).N_F loop
+               if Length (XT_Tab (I).F (F).UT_Nm) > 0 then
+                  Add_SW (Q_Owner (To_String (XT_Tab (I).F (F).UT_Nm)));
+               end if;
+            end loop;
+            if Length (XT_Tab (I).Elem_Nm) > 0 then
+               Add_SW (Q_Owner (To_String (XT_Tab (I).Elem_Nm)));
             end if;
          end if;
       end loop;
@@ -609,6 +669,20 @@ package body O2c_Compiler is
          end loop;
          return 0;
       end UT_By_Name;
+
+      --  Resolve a qualified type reference from an imported shape,
+      --  importing its module's types on demand (M24 composition).
+      function UT_Ref (Nm : String) return Natural is
+         R : Natural := UT_By_Name (Nm);
+         D : Natural;
+      begin
+         if R /= 0 then
+            return R;
+         end if;
+         D := Q_Dot (Nm);
+         return Import_Type (Nm (Nm'First .. D - 1),
+                             Nm (D + 1 .. Nm'Last));
+      end UT_Ref;
 
       Idx : array (1 .. Max_XT) of Natural := (others => 0);
       Nn  : Natural := 0;
@@ -649,11 +723,11 @@ package body O2c_Compiler is
          begin
             if XT_Tab (X).Is_Ptr then
                UTypes (U).Ptr_Tgt :=
-                 UT_By_Name (To_String (XT_Tab (X).Ptr_Nm));
+                 UT_Ref (To_String (XT_Tab (X).Ptr_Nm));
             end if;
             if XT_Tab (X).Is_Ext then
                UTypes (U).Parent :=
-                 UT_By_Name (To_String (XT_Tab (X).Par_Nm));
+                 UT_Ref (To_String (XT_Tab (X).Par_Nm));
             end if;
             if XT_Tab (X).Is_Rec then
                UTypes (U).N_F := XT_Tab (X).N_F;
@@ -663,7 +737,7 @@ package body O2c_Compiler is
                      Typ => XT_Tab (X).F (F).Typ,
                      UT => (if Length (XT_Tab (X).F (F).UT_Nm) = 0
                             then 0
-                            else UT_By_Name
+                            else UT_Ref
                               (To_String (XT_Tab (X).F (F).UT_Nm))),
                      ExpF => XT_Tab (X).F (F).Exp);
                end loop;
@@ -672,7 +746,7 @@ package body O2c_Compiler is
                UTypes (U).Arr_Len := XT_Tab (X).Arr_Len;
                UTypes (U).Elem := XT_Tab (X).Elem;
                if Length (XT_Tab (X).Elem_Nm) > 0 then
-                  UTypes (U).Elem_UT := UT_By_Name
+                  UTypes (U).Elem_UT := UT_Ref
                     (To_String (XT_Tab (X).Elem_Nm));
                end if;
             end if;
@@ -2764,9 +2838,7 @@ package body O2c_Compiler is
                        (Kind => S_Var, Typ => T_Int,
                         Name => Names (I), others => <>);
                   begin
-                     E.VT_Nm := To_Unbounded_String
-                       (QName (To_String (Mod_Name),
-                               To_String (UTypes (UT).Name)));
+                     E.VT_Nm := To_Unbounded_String (Qual_UT (UT));
                      X_Add (To_String (Mod_Name), E);
                   end;
                else
@@ -3007,17 +3079,34 @@ package body O2c_Compiler is
                declare
                   TN : constant String := Cur.Text (1 .. Cur.Len);
                begin
-                  FT := Builtin_Type_Of (TN);
-                  if FT = T_Str then
-                     FUT := Find_UT (TN);
-                     if FUT = 0 then
-                        raise O2c_Error with "field types: INTEGER/BOOLEAN/"
-                          & "CHAR or an earlier user type ('" & TN & "')";
+                  if Imported_Mod (TN)
+                    and then Lex.Peek_Token.Kind = Lex.Tok_Dot
+                  then
+                     --  M24: field of an imported exported type
+                     declare
+                        Own : constant String := TN;
+                     begin
+                        Next;          --  past the module name
+                        Next;          --  past '.'
+                        Expect (Lex.Tok_Ident, "an exported type name");
+                        FUT := Import_Type (Own, Cur.Text (1 .. Cur.Len));
+                        FT := T_Int;
+                        Next;
+                     end;
+                  else
+                     FT := Builtin_Type_Of (TN);
+                     if FT = T_Str then
+                        FUT := Find_UT (TN);
+                        if FUT = 0 then
+                           raise O2c_Error with "field types: INTEGER/"
+                             & "BOOLEAN/CHAR or an earlier user type ('"
+                             & TN & "')";
+                        end if;
+                        FT := T_Int;  --  scalar slot unused for user types
                      end if;
-                     FT := T_Int;      --  scalar slot unused for user types
+                     Next;
                   end if;
                end;
-               Next;
                if Cur.Kind = Lex.Tok_Semi then
                   Next;             --  optional separator before END
                end if;
@@ -3479,15 +3568,11 @@ package body O2c_Compiler is
                                       else T_Int),
                               UT => 0, By_Ref => PRef (I), Open => POpen (I));
                   if PUT (I) /= 0 then
-                     E.P_Nm (I) := To_Unbounded_String
-                       (QName (To_String (Mod_Name),
-                               To_String (UTypes (PUT (I)).Name)));
+                     E.P_Nm (I) := To_Unbounded_String (Qual_UT (PUT (I)));
                   end if;
                end loop;
                if Ret_UT /= 0 then
-                  E.Ret_Nm := To_Unbounded_String
-                    (QName (To_String (Mod_Name),
-                            To_String (UTypes (Ret_UT).Name)));
+                  E.Ret_Nm := To_Unbounded_String (Qual_UT (Ret_UT));
                end if;
                X_Add (To_String (Mod_Name), E);
             end;
@@ -4940,16 +5025,12 @@ package body O2c_Compiler is
                      E.P (I - 1).UT := 0;
                      if Syms (SIdx).P (I).UT /= 0 then
                         E.P_Nm (I - 1) := To_Unbounded_String
-                          (QName (To_String (Mod_Name),
-                                  To_String
-                                    (UTypes (Syms (SIdx).P (I).UT).Name)));
+                          (Qual_UT (Syms (SIdx).P (I).UT));
                         E.P (I - 1).Typ := T_Int;
                      end if;
                   end loop;
                   if Syms (SIdx).Ret and then Syms (SIdx).UT /= 0 then
-                     E.Ret_Nm := To_Unbounded_String
-                       (QName (To_String (Mod_Name),
-                               To_String (UTypes (Syms (SIdx).UT).Name)));
+                     E.Ret_Nm := To_Unbounded_String (Qual_UT (Syms (SIdx).UT));
                   end if;
                   E.Owner := To_Unbounded_String (To_String (Mod_Name));
                   XM_Add (E);
@@ -5138,6 +5219,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       Used_Console := False;
       Base_In_Spec := False;
       RVar_N := 0;
+      N_SW := 0;
       N_Bound := 0;
       Recv_UT := 0;
       G_N := 0;
@@ -5327,6 +5409,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
            (if Multi_Ok
             then "with O2c_Types; use O2c_Types;" & ASCII.LF
             else "")
+           & (if Multi_Ok then Spec_With_Lines else "")
            & (if not Multi_Ok and then Base_In_Spec and then Used_Int_Arr
               then "   type O2c_Int_Arr is array (Integer range <>)"
                 & " of Integer;" & ASCII.LF
@@ -5374,7 +5457,11 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                S := S & To_String (Body_Buf);
             end if;
             S := S & "end " & To_String (Mod_Name) & ";" & ASCII.LF;
-            Body_Txt := S;
+            if Length (Decl_Buf) = 0 and then Length (Body_Buf) = 0 then
+               Body_Txt := Null_Unbounded_String;   --  spec-only library
+            else
+               Body_Txt := S;
+            end if;
          end;
       end if;
    end Compile_Module;
@@ -5426,7 +5513,9 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
          Compile_Module (To_String (Libs (I).Text), True,
                          M_T, S_T, B_T);
          Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
-         Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+         if Length (B_T) > 0 then
+            Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+         end if;
          N_Prov := N_Prov + 1;
          Provided (N_Prov) := Mod_Name;
       end loop;

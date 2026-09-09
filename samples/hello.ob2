@@ -1,5 +1,5 @@
 module Hello;
-import Out, Math;
+import Out, Math, Geo;
 
 type Vector = array 4 of integer;
 type Pair = record a, b: integer end;
@@ -24,6 +24,7 @@ var s2: set; l2: longint;
 var r: real;
 var m: integer;
 var a, b: Math.Point;
+var rg: Geo.Rect;
 var hx, tx: Math.Node;
 var w: Math.Vec;
 var px: P3;
@@ -339,6 +340,13 @@ begin
   px.Scale(2);
   px.AddZ(3);
   Out.Int(px.x + px.y + px.z, 0);
+  Out.Ln;
+  rg.p.x := 5;
+  rg.p.y := 6;
+  rg.q.x := 1;
+  rg.q.y := 2;
+  rg.w := 3;
+  Out.Int(rg.p.x + rg.p.y + rg.q.x + rg.q.y + rg.w, 0);
   Out.Ln;
   Math.marks := {1, 3};
   if 2 IN Math.marks then Out.Int(26, 0) else Out.Int(27, 0) end;

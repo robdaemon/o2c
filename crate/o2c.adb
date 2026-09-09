@@ -63,6 +63,7 @@ procedure O2c is
    Libs  : O2c_Compiler.Lib_Array;
    Res   : O2c_Compiler.Unit_Array;
    Count : Natural;
+   N_Libs : constant Natural := 2;
 
 begin
    Aegir_User.Console.Set_Endpoint (1);
@@ -71,9 +72,12 @@ begin
    Libs (1) := (Name => To_Unbounded_String ("Math"),
                 Text => To_Unbounded_String
                   (Read_Module ("RD0:Tests/O2cLib/Math.ob2")));
+   Libs (2) := (Name => To_Unbounded_String ("Geo"),
+                Text => To_Unbounded_String
+                  (Read_Module ("RD0:Tests/O2cLib/Geo.ob2")));
    Res := O2c_Compiler.Compile_Multi
      (Main_Source => Read_Module (Demo_Main), Libs => Libs,
-      N_Libs => 1, Count => Count);
+      N_Libs => N_Libs, Count => Count);
    for I in 1 .. Count loop
       Aegir_User.Console.Put_Line ("--- unit "
                                    & To_String (Res (I).File) & " ---");

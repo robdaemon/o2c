@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M23 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M24 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M23 status
+## M24 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,18 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M24 — cross-module type composition**: exported shapes may now
+reference another module's exported types.  Record fields accept a
+qualified imported type (`Rect* = record p*, q*: Math.Point ...` in a
+module that imports Math), the export catalog stores the reference
+under its true owner, and the importer's type synthesis imports the
+foreign module's shapes on demand, so a `Geo.Rect` variable in Hello
+gives field access through to `Math.Point` with export marks
+enforced.  Package specs that reference other modules get the needed
+`with` clauses, and libraries that only export types emit a spec-only
+unit (no package body).  The demo prints `17` for a composed
+`Geo.Rect` built from two `Math.Point`s.
 
 **M23 — extend an imported RECORD type**: an importer can now
 write `type P3 = record (Math.Point) z: integer end;` — the parent
@@ -267,10 +279,9 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 accepted.
 
 The module/import epic plus importer-side RECORD extension is shipped
-(M19-M23).  Remaining: cross-module type composition (exported shapes
-may only reference same-module types), opaque pointers, exported-method
-overrides with dynamic dispatch across packages (M24), whole-record
-copies out of module VARIABLEs, and the standard predeclared functions.
+(M19-M23).  Remaining: opaque pointers, exported-method overrides with dynamic
+dispatch across packages, whole-record copies out of module VARIABLEs,
+and the standard predeclared functions.
 declaring procedures inside procedures, multi-dimensional arrays,
 `SET` and other Oberon-2 types.
 
