@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M11 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M12 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,12 +12,13 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M11 status
+## M12 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
 `VAR` (by-reference) parameters — including **user types (records,
-arrays, pointers) as parameters and returns (M11)** — plus **local
+arrays, pointers) as parameters and returns (M11)** and **open array
+(`ARRAY OF`) parameters (M12)** — plus **local
 `const`/`type`/`var` declarations inside procedures (M10)**, full
 expressions with Oberon
 precedence (`+ - * DIV MOD & OR ~ = # < <= > >=`, parens), typed
@@ -74,6 +75,20 @@ builds its linked list through `Push(var l: Node; v: integer)`,
 `Last(l: Node): Node` and `Sum(l: Node): integer`, and swaps a record
 with `SwapPair(var r: Pair)`.
 
+**M12 — open arrays**: a formal `ARRAY OF INTEGER|BOOLEAN|CHAR`
+accepts any array of that element type — fixed numeric arrays are
+emitted as constrained subtypes of a shared unconstrained Ada base
+(`type O2c_Int_Arr is array (Integer range <>) of Integer;` etc., so
+Ada's nominal matching works), and `ARRAY OF CHAR` maps straight onto
+Ada `String` (char arrays are already `String` subtypes).  The length
+of any array is `LEN(a)` (`'Length`); a value open-array parameter is
+read-only (element writes are rejected), a `VAR` open array allows
+element writes, and a `VAR` open-array actual must be writable (a
+value open-array parameter or a string literal is rejected).  The
+demo fills and sums integer arrays of any length
+(`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
+and measures char arrays with `CLen(s: array of char)`.
+
 **Deviation from the Oberon-2 spec (project decision): keywords and
 standard type names are case-insensitive** (`module`/`MODULE`,
 `integer`/`INTEGER` in type position, `var`/`VAR`, `Begin`… all
@@ -83,10 +98,10 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 `new`, `nil`, `pointer to`, …) so they are easy to type; any case is
 accepted.
 
-Not yet in M11: nested modules and other imports (only `Out`),
-declaring procedures inside procedures, open-array (`ARRAY OF`)
-parameters, record-typed fields/nested arrays, `WITH`/type
-extension/type-bound procedures, `SET` and other Oberon-2 types.
+Not yet in M12: nested modules and other imports (only `Out`),
+declaring procedures inside procedures, multi-dimensional arrays,
+record-typed fields/nested arrays, `WITH`/type extension/type-bound
+procedures, `SET` and other Oberon-2 types.
 
 ## Build
 

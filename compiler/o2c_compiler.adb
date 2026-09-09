@@ -59,6 +59,7 @@ package body O2c_Compiler is
       Typ    : EType := T_Int;
       By_Ref : Boolean := False;
       UT     : Natural := 0;      --  user type (record/array/pointer) index
+      Open   : Boolean := False;  --  ARRAY OF formal (M12)
    end record;
 
    type Param_Array is array (1 .. Max_Params) of Param_Rec;
@@ -70,6 +71,8 @@ package body O2c_Compiler is
       Params : Natural := 0;
       Ret    : Boolean := False;   --  procedure is a function (returns Typ)
       UT     : Natural := 0;       --  user type index (0 = scalar Typ)
+      Open_Arr : Boolean := False; --  ARRAY OF parameter (M12); Typ = elem
+      By_Ref   : Boolean := False; --  formal VAR parameter
       P      : Param_Array := (others => <>);
    end record;
 
@@ -89,6 +92,8 @@ package body O2c_Compiler is
    Ctrl_Depth   : Natural := 0;    --  open IF/WHILE/REPEAT/FOR/LOOP nesting
    Func_Return_Ok : Boolean := False;
    Used_CStr : Boolean := False;
+   Used_Int_Arr  : Boolean := False;  --  need O2c_Int_Arr base (M12)
+   Used_Bool_Arr : Boolean := False;  --  need O2c_Bool_Arr base (M12)
    Loop_Depth : Natural := 0;      --  open LOOP statements (EXIT target)
    Loop_N     : Natural := 0;      --  LOOP counter for generated labels
    Loop_Lbl   : array (1 .. 64) of Unbounded_String;  --  per-depth label
@@ -395,6 +400,56 @@ package body O2c_Compiler is
    function Parse_Actual (Formal : Param_Rec) return Expr_Rec is
       A : Expr_Rec;
    begin
+      if Formal.Open then
+         --  ARRAY OF actual (M12): a string literal (value CHAR formals
+         --  only) or an array variable whose element type matches.
+         if Formal.Typ = T_Char and then not Formal.By_Ref
+           and then Cur.Kind = Lex.Tok_String
+         then
+            A := Parse_Expr;       --  string literal actual
+            return A;
+         end if;
+         if Cur.Kind /= Lex.Tok_Ident then
+            raise O2c_Error with "an array argument expected for an ARRAY "
+              & "OF parameter (line " & Natural'Image (Cur.Line) & ")";
+         end if;
+         declare
+            Id : constant Natural := Find (Cur.Text (1 .. Cur.Len));
+         begin
+            if Id = 0 or else Syms (Id).Kind /= S_Var
+              or else not ((Syms (Id).UT /= 0
+                            and then not UTypes (Syms (Id).UT).Is_Rec
+                            and then not UTypes (Syms (Id).UT).Is_Ptr)
+                           or else Syms (Id).Open_Arr)
+            then
+               raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
+                 & "' is not an array variable (line "
+                 & Natural'Image (Cur.Line) & ")";
+            end if;
+            declare
+               Elem : constant EType :=
+                 (if Syms (Id).UT /= 0
+                  then UTypes (Syms (Id).UT).Elem
+                  else Syms (Id).Typ);
+            begin
+               if Elem /= Formal.Typ then
+                  raise O2c_Error with "array element type mismatch for an "
+                    & "ARRAY OF argument (line "
+                    & Natural'Image (Cur.Line) & ")";
+               end if;
+            end;
+            if Formal.By_Ref and then Syms (Id).Open_Arr
+              and then not Syms (Id).By_Ref
+            then
+               raise O2c_Error with "a VAR ARRAY OF parameter needs a "
+                 & "writable array, not a value ARRAY OF parameter (line "
+                 & Natural'Image (Cur.Line) & ")";
+            end if;
+            A.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
+            Next;
+            return A;
+         end;
+      end if;
       if Formal.UT /= 0 and then not UTypes (Formal.UT).Is_Ptr then
          --  record/array VAR actual: a variable of exactly this type
          if Cur.Kind /= Lex.Tok_Ident then
@@ -507,6 +562,37 @@ package body O2c_Compiler is
                R.Text := (if Neg then "-" else "") & "(" & R.Text & ")";
             end;
          when Lex.Tok_Ident =>
+            if Eq_No_Case (Cur.Text (1 .. Cur.Len), "LEN") then
+               --  LEN(array): predeclared length (M12)
+               Next;             --  past LEN
+               Expect (Lex.Tok_LParen, "'(' after LEN");
+               Next;
+               if Cur.Kind /= Lex.Tok_Ident then
+                  raise O2c_Error with "LEN needs an array variable "
+                    & "(line " & Natural'Image (Cur.Line) & ")";
+               end if;
+               declare
+                  LId : constant Natural := Find (Cur.Text (1 .. Cur.Len));
+                  LNm : constant String := Cur.Text (1 .. Cur.Len);
+               begin
+                  if LId = 0 or else Syms (LId).Kind /= S_Var
+                    or else not ((Syms (LId).UT /= 0
+                                  and then not UTypes (Syms (LId).UT).Is_Rec
+                                  and then not UTypes (Syms (LId).UT).Is_Ptr)
+                                 or else Syms (LId).Open_Arr)
+                  then
+                     raise O2c_Error with "LEN needs an ARRAY variable "
+                       & "('" & LNm & "' is not one) (line "
+                       & Natural'Image (Cur.Line) & ")";
+                  end if;
+                  R.Text := To_Unbounded_String (LNm) & "'Length";
+                  R.Typ := T_Int;
+                  Next;
+                  Expect (Lex.Tok_RParen, "')' after the LEN argument");
+                  Next;
+               end;
+               return R;
+            end if;
             Id := Find (Cur.Text (1 .. Cur.Len));
             if Id = 0 then
                raise O2c_Error with "unknown variable or constant '"
@@ -636,10 +722,57 @@ package body O2c_Compiler is
                   Next;
                   return R;
                end;
+            elsif Syms (Id).Kind = S_Var and then Syms (Id).Open_Arr then
+               --  ARRAY OF parameter: index (or the whole CHAR value),
+               --  like a fixed array of the parameter's element type.
+               declare
+                  Nm : constant String := Cur.Text (1 .. Cur.Len);
+               begin
+                  Next;              --  past the parameter name
+                  if Syms (Id).Typ = T_Char then
+                     if Cur.Kind /= Lex.Tok_LBracket then
+                        R.Text := To_Unbounded_String (Nm);
+                        R.Typ := T_Str;
+                        R.CStr := True;
+                        return R;
+                     end if;
+                     Next;      --  past '['
+                     declare
+                        Ix : Expr_Rec := Parse_Expr;
+                     begin
+                        if Ix.Typ /= T_Int then
+                           raise O2c_Error
+                             with "string index must be INTEGER";
+                        end if;
+                        R.Text := To_Unbounded_String (Nm) & " ("
+                          & Ix.Text & " + 1)";
+                        R.Typ := T_Char;
+                     end;
+                     Expect (Lex.Tok_RBracket, "']'");
+                     Next;
+                     return R;
+                  end if;
+                  Expect (Lex.Tok_LBracket, "'[' to index an array");
+                  Next;
+                  declare
+                     Ix : Expr_Rec := Parse_Expr;
+                  begin
+                     if Ix.Typ /= T_Int then
+                        raise O2c_Error with "array index must be INTEGER";
+                     end if;
+                     R.Text := To_Unbounded_String (Nm) & " ("
+                       & Ix.Text & ")";
+                     R.Typ := Syms (Id).Typ;
+                  end;
+                  Expect (Lex.Tok_RBracket, "']'");
+                  Next;
+                  return R;
+               end;
+            else
+               R.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
+               R.Typ := Syms (Id).Typ;
+               Next;
             end if;
-            R.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
-            R.Typ := Syms (Id).Typ;
-            Next;
          when others =>
             raise O2c_Error with "expression expected at line "
               & Natural'Image (Cur.Line);
@@ -987,9 +1120,19 @@ package body O2c_Compiler is
             Append_Decl ("   subtype " & Name & " is String (1 .. "
                          & Integer'Image (UTypes (UTI).Arr_Len) & ");");
          else
-            Append_Decl ("   type " & Name & " is array (0 .. "
-                         & Integer'Image (UTypes (UTI).Arr_Len - 1)
-                         & ") of " & Ada_Type (UTypes (UTI).Elem) & ";");
+            --  numeric fixed arrays are constrained subtypes of the
+            --  shared open-array base so they also fit ARRAY OF formals
+            if UTypes (UTI).Elem = T_Int then
+               Used_Int_Arr := True;
+            else
+               Used_Bool_Arr := True;
+            end if;
+            Append_Decl ("   subtype " & Name & " is "
+                         & (if UTypes (UTI).Elem = T_Int
+                           then "O2c_Int_Arr"
+                           else "O2c_Bool_Arr")
+                         & " (0 .. "
+                         & Integer'Image (UTypes (UTI).Arr_Len - 1) & ");");
          end if;
       elsif Cur.Kind = Lex.Tok_Pointer then
          --  POINTER TO <record type> (M8).  The classic idiom
@@ -1139,6 +1282,27 @@ package body O2c_Compiler is
       Ret_UT  : Natural := 0;     --  pointer return user type (M11)
       Is_Function : Boolean := False;
       Hdr   : Unbounded_String;
+      POpen : array (1 .. Max_Params) of Boolean := (others => False);
+
+      --  Ada type name for formal parameter I (M12): open arrays map to
+      --  the unconstrained String / shared numeric base; named user
+      --  types use their Ada name; otherwise the scalar Ada type.
+      function Formal_Ada_Type (I : Natural) return String is
+      begin
+         if POpen (I) then
+            if PTyp (I) = T_Char then
+               return "String";
+            elsif PTyp (I) = T_Int then
+               return "O2c_Int_Arr";
+            else
+               return "O2c_Bool_Arr";
+            end if;
+         elsif PUT (I) /= 0 then
+            return To_String (UTypes (PUT (I)).Name);
+         else
+            return Ada_Type (PTyp (I));
+         end if;
+      end Formal_Ada_Type;
    begin
       Seen_Proc := True;
       Next;
@@ -1160,31 +1324,54 @@ package body O2c_Compiler is
                Next;
                Expect (Lex.Tok_Colon, "':' in a parameter");
                Next;
-               if Cur.Kind /= Lex.Tok_Ident then
-                  raise O2c_Error with "a type name expected (line "
-                    & Natural'Image (Cur.Line) & ")";
-               end if;
-               declare
-                  TN : constant String := Cur.Text (1 .. Cur.Len);
-               begin
-                  PTyp (N_Par) := Builtin_Type_Of (TN);
+               if Cur.Kind = Lex.Tok_Array then
+                  --  open array formal: ARRAY OF <scalar> (M12)
+                  Next;             --  past ARRAY
+                  Expect (Lex.Tok_Of, "'OF'");
+                  Next;
+                  if Cur.Kind /= Lex.Tok_Ident then
+                     raise O2c_Error with "an element type expected after "
+                       & "ARRAY OF (line " & Natural'Image (Cur.Line) & ")";
+                  end if;
+                  PTyp (N_Par) := Builtin_Type_Of (Cur.Text (1 .. Cur.Len));
                   if PTyp (N_Par) = T_Str then
-                     PUT (N_Par) := Find_UT (TN);
-                     if PUT (N_Par) = 0 then
-                        raise O2c_Error with "unknown type '" & TN
-                          & "' (line " & Natural'Image (Cur.Line) & ")";
-                     end if;
-                     if not UTypes (PUT (N_Par)).Is_Ptr then
-                        --  records and arrays are VAR-only (M11): the
-                        --  Oberon-2 report has no structured value params
-                        if not By_Ref then
-                           raise O2c_Error with "record/array parameters "
-                             & "must be declared VAR ('" & TN & "', line "
-                             & Natural'Image (Cur.Line) & ")";
+                     raise O2c_Error with "open array element types: INTEGER/"
+                       & "BOOLEAN/CHAR only ('"
+                       & Cur.Text (1 .. Cur.Len) & "')";
+                  end if;
+                  POpen (N_Par) := True;
+                  if PTyp (N_Par) = T_Int then
+                     Used_Int_Arr := True;
+                  elsif PTyp (N_Par) = T_Bool then
+                     Used_Bool_Arr := True;
+                  end if;
+               else
+                  if Cur.Kind /= Lex.Tok_Ident then
+                     raise O2c_Error with "a type name expected (line "
+                       & Natural'Image (Cur.Line) & ")";
+                  end if;
+                  declare
+                     TN : constant String := Cur.Text (1 .. Cur.Len);
+                  begin
+                     PTyp (N_Par) := Builtin_Type_Of (TN);
+                     if PTyp (N_Par) = T_Str then
+                        PUT (N_Par) := Find_UT (TN);
+                        if PUT (N_Par) = 0 then
+                           raise O2c_Error with "unknown type '" & TN
+                             & "' (line " & Natural'Image (Cur.Line) & ")";
+                        end if;
+                        if not UTypes (PUT (N_Par)).Is_Ptr then
+                           --  records and arrays are VAR-only (M11): the
+                           --  Oberon-2 report has no structured value params
+                           if not By_Ref then
+                              raise O2c_Error with "record/array parameters "
+                                & "must be declared VAR ('" & TN & "', line "
+                                & Natural'Image (Cur.Line) & ")";
+                           end if;
                         end if;
                      end if;
-                  end if;
-               end;
+                  end;
+               end if;
                Next;
                PRef (N_Par) := By_Ref;
             end;
@@ -1236,7 +1423,7 @@ package body O2c_Compiler is
       for I in 1 .. N_Par loop
          Syms (N_Sym).P (I) :=
            (Name => PName (I), Typ => PTyp (I), By_Ref => PRef (I),
-            UT => PUT (I));
+            UT => PUT (I), Open => POpen (I));
       end loop;
 
       --  parameters are in scope for the body (popped after it)
@@ -1244,6 +1431,7 @@ package body O2c_Compiler is
       for I in 1 .. N_Par loop
          N_Sym := N_Sym + 1;
          Syms (N_Sym) := (Kind => S_Var, Typ => PTyp (I), UT => PUT (I),
+                          Open_Arr => POpen (I), By_Ref => PRef (I),
                           Name => PName (I), others => <>);
       end loop;
 
@@ -1257,8 +1445,7 @@ package body O2c_Compiler is
             end if;
             Hdr := Hdr & To_String (PName (I))
               & (if PRef (I) then " : in out " else " : ")
-              & (if PUT (I) /= 0 then To_String (UTypes (PUT (I)).Name)
-                 else Ada_Type (PTyp (I)));
+              & Formal_Ada_Type (I);
          end loop;
          Hdr := Hdr & ")";
       end if;
@@ -1850,6 +2037,57 @@ package body O2c_Compiler is
                end;
             elsif Cur.Kind = Lex.Tok_LBracket and then Idx /= 0
               and then Syms (Idx).Kind = S_Var
+              and then Syms (Idx).Open_Arr
+            then
+               --  element write through an ARRAY OF parameter (M12)
+               if not Syms (Idx).By_Ref then
+                  raise O2c_Error with "cannot assign elements of a value "
+                    & "ARRAY OF parameter ('" & Head (1 .. H_Len)
+                    & "', line " & Natural'Image (Cur.Line) & ")";
+               end if;
+               Next;                --  past '['
+               declare
+                  Ix : Expr_Rec := Parse_Expr;
+                  V  : Expr_Rec;
+               begin
+                  if Ix.Typ /= T_Int then
+                     raise O2c_Error with "array index must be INTEGER";
+                  end if;
+                  Expect (Lex.Tok_RBracket, "']'");
+                  Next;
+                  Expect (Lex.Tok_Assign, "':='");
+                  Next;
+                  if Syms (Idx).Typ = T_Char then
+                     --  string element: CHAR, Ada index i + 1
+                     if Cur.Kind = Lex.Tok_String and then Cur.Len = 1 then
+                        Append_Body ("      " & Head (1 .. H_Len) & " ("
+                                     & To_String (Ix.Text) & " + 1) := '"
+                                     & Cur.Text (1 .. 1) & "';");
+                        Next;
+                     else
+                        V := Parse_Expr;
+                        if V.Typ /= T_Char then
+                           raise O2c_Error with "string elements are CHAR"
+                             & " (assign a character to "
+                             & Head (1 .. H_Len) & ")";
+                        end if;
+                        Append_Body ("      " & Head (1 .. H_Len) & " ("
+                                     & To_String (Ix.Text) & " + 1) := "
+                                     & To_String (V.Text) & ";");
+                     end if;
+                  else
+                     V := Parse_Expr;
+                     if V.Typ /= Syms (Idx).Typ then
+                        raise O2c_Error with "element type mismatch assigning "
+                          & Head (1 .. H_Len);
+                     end if;
+                     Append_Body ("      " & Head (1 .. H_Len) & " ("
+                                  & To_String (Ix.Text) & ") := "
+                                  & To_String (V.Text) & ";");
+                  end if;
+               end;
+            elsif Cur.Kind = Lex.Tok_LBracket and then Idx /= 0
+              and then Syms (Idx).Kind = S_Var
               and then Syms (Idx).UT /= 0
               and then not UTypes (Syms (Idx).UT).Is_Rec
               and then not UTypes (Syms (Idx).UT).Is_Ptr
@@ -2179,6 +2417,9 @@ package body O2c_Compiler is
       Loop_Depth := 0;
       Loop_N := 0;
       Used_Int := False;
+      Used_CStr := False;
+      Used_Int_Arr := False;
+      Used_Bool_Arr := False;
       Seen_Proc := False;
 
       Lex.Init (Source);
@@ -2266,6 +2507,17 @@ package body O2c_Compiler is
 
       S := S & "with Aegir_User.Console;" & ASCII.LF & ASCII.LF;
       S := S & "procedure " & To_String (Mod_Name) & " is" & ASCII.LF;
+      --  shared unconstrained array bases (M12): fixed numeric arrays
+      --  are emitted as constrained subtypes so they fit ARRAY OF
+      --  formals; ARRAY OF CHAR maps straight onto Ada String.
+      if Used_Int_Arr then
+         S := S & "   type O2c_Int_Arr is array (Integer range <>) of Integer;"
+           & ASCII.LF;
+      end if;
+      if Used_Bool_Arr then
+         S := S & "   type O2c_Bool_Arr is array (Integer range <>) of Boolean;"
+           & ASCII.LF;
+      end if;
       if Used_Int then
          S := S & "   procedure O2c_Put_Int (V : Integer) is" & ASCII.LF
            & "      Img : constant String := Integer'Image (V);" & ASCII.LF

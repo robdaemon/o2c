@@ -116,6 +116,29 @@ procedure O2c is
     "  return t" & ASCII.LF &
     "end Sum;" & ASCII.LF &
     ASCII.LF &
+    "procedure FillArr(var a: array of integer; start: integer);" & ASCII.LF &
+    "  var j: integer;" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  for j := 0 to len(a) - 1 do" & ASCII.LF &
+    "    a[j] := start + j" & ASCII.LF &
+    "  end" & ASCII.LF &
+    "end FillArr;" & ASCII.LF &
+    ASCII.LF &
+    "procedure SumArr(a: array of integer): integer;" & ASCII.LF &
+    "  var j, t: integer;" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  t := 0;" & ASCII.LF &
+    "  for j := 0 to len(a) - 1 do" & ASCII.LF &
+    "    t := t + a[j]" & ASCII.LF &
+    "  end;" & ASCII.LF &
+    "  return t" & ASCII.LF &
+    "end SumArr;" & ASCII.LF &
+    ASCII.LF &
+    "procedure CLen(s: array of char): integer;" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  return len(s)" & ASCII.LF &
+    "end CLen;" & ASCII.LF &
+    ASCII.LF &
     ASCII.LF &
     "begin" & ASCII.LF &
     "  n := 0;" & ASCII.LF &
@@ -185,6 +208,13 @@ procedure O2c is
     "  Out.Int(cur^.v, 0);" & ASCII.LF &
     "  Out.Ln;" & ASCII.LF &
     "  Out.Int(Sum(head), 0);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  FillArr(v, 5);" & ASCII.LF &
+    "  Out.Int(SumArr(v), 0);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  Out.Int(len(v), 0);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  Out.Int(CLen(msg), 0);" & ASCII.LF &
     "  Out.Ln;" & ASCII.LF &
     "  UpTo12;" & ASCII.LF &
     "  Dot" & ASCII.LF &

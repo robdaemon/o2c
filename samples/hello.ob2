@@ -101,6 +101,29 @@ begin
   return t
 end Sum;
 
+procedure FillArr(var a: array of integer; start: integer);
+  var j: integer;
+begin
+  for j := 0 to len(a) - 1 do
+    a[j] := start + j
+  end
+end FillArr;
+
+procedure SumArr(a: array of integer): integer;
+  var j, t: integer;
+begin
+  t := 0;
+  for j := 0 to len(a) - 1 do
+    t := t + a[j]
+  end;
+  return t
+end SumArr;
+
+procedure CLen(s: array of char): integer;
+begin
+  return len(s)
+end CLen;
+
 
 begin
   n := 0;
@@ -170,6 +193,13 @@ begin
   Out.Int(cur^.v, 0);
   Out.Ln;
   Out.Int(Sum(head), 0);
+  Out.Ln;
+  FillArr(v, 5);
+  Out.Int(SumArr(v), 0);
+  Out.Ln;
+  Out.Int(len(v), 0);
+  Out.Ln;
+  Out.Int(CLen(msg), 0);
   Out.Ln;
   UpTo12;
   Dot
