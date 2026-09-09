@@ -84,9 +84,12 @@ package body O2c_Compiler is
    In_Proc   : Boolean := False;   --  parsing inside a procedure body
    Cur_Proc_Ret : Boolean := False;
    Cur_Ret_Type : EType := T_Int;
-   Ctrl_Depth   : Natural := 0;    --  open IF/WHILE/REPEAT/FOR nesting
+   Ctrl_Depth   : Natural := 0;    --  open IF/WHILE/REPEAT/FOR/LOOP nesting
    Func_Return_Ok : Boolean := False;
    Used_CStr : Boolean := False;
+   Loop_Depth : Natural := 0;      --  open LOOP statements (EXIT target)
+   Loop_N     : Natural := 0;      --  LOOP counter for generated labels
+   Loop_Lbl   : array (1 .. 64) of Unbounded_String;  --  per-depth label
 
    procedure Append_Decl (S : String) is
    begin
@@ -1338,6 +1341,54 @@ package body O2c_Compiler is
       Append_Body ("      end loop;");
    end Parse_Repeat;
 
+   procedure Parse_Loop is
+      --  Oberon-2 LOOP ... END: an infinite loop; EXIT leaves it.  The
+      --  Ada loop gets a generated label so that EXIT always leaves the
+      --  LOOP even from inside a nested WHILE/REPEAT/FOR (a bare Ada
+      --  'exit' would leave the innermost Ada loop instead).
+   begin
+      Next;                          --  LOOP
+      Loop_Depth := Loop_Depth + 1;
+      if Loop_Depth > Loop_Lbl'Last then
+         Loop_Depth := Loop_Depth - 1;
+         raise O2c_Error with "LOOP nesting too deep (line "
+           & Natural'Image (Cur.Line) & ")";
+      end if;
+      Loop_N := Loop_N + 1;
+      declare
+         Img : constant String := Natural'Image (Loop_N);
+         Lbl : constant String := "O2c_Loop_"
+           & Img (Img'First + 1 .. Img'Last);
+      begin
+         Loop_Lbl (Loop_Depth) := To_Unbounded_String (Lbl);
+         Append_Body ("      " & Lbl & " : loop");
+         declare
+            Before : constant Natural := Length (Body_Buf);
+         begin
+            Ctrl_Depth := Ctrl_Depth + 1;
+            Statement_Seq;              --  until END
+            Ctrl_Depth := Ctrl_Depth - 1;
+            if Length (Body_Buf) = Before then
+               Append_Body ("         null;");
+            end if;
+         end;
+         Expect (Lex.Tok_End, "'END' closing the LOOP");
+         Next;
+         Append_Body ("      end loop " & Lbl & ";");
+      end;
+      Loop_Depth := Loop_Depth - 1;
+   end Parse_Loop;
+
+   procedure Parse_Exit is
+   begin
+      if Loop_Depth = 0 then
+         raise O2c_Error with "EXIT is only allowed inside a LOOP "
+           & "statement (line " & Natural'Image (Cur.Line) & ")";
+      end if;
+      Next;                          --  past EXIT
+      Append_Body ("      exit " & To_String (Loop_Lbl (Loop_Depth)) & ";");
+   end Parse_Exit;
+
    procedure Parse_For is
       V_Name : String (1 .. 64);
       V_Len  : Natural;
@@ -1558,6 +1609,10 @@ package body O2c_Compiler is
             Parse_Repeat;
          elsif Cur.Kind = Lex.Tok_For then
             Parse_For;
+         elsif Cur.Kind = Lex.Tok_Loop then
+            Parse_Loop;
+         elsif Cur.Kind = Lex.Tok_Exit then
+            Parse_Exit;
          elsif Cur.Kind = Lex.Tok_Ident then
             H_Len := Cur.Len;
             Head (1 .. H_Len) := Cur.Text (1 .. H_Len);
@@ -1975,6 +2030,8 @@ package body O2c_Compiler is
       Mod_Name := Null_Unbounded_String;
       N_Sym := 0;
       N_UT := 0;
+      Loop_Depth := 0;
+      Loop_N := 0;
       Used_Int := False;
       Seen_Proc := False;
 

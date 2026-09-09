@@ -34,6 +34,14 @@ begin
   return x * x
 end Square;
 
+procedure UpTo12(var k: integer);
+begin
+  LOOP
+    k := k + 1;
+    IF k = 12 THEN EXIT END
+  END
+end UpTo12;
+
 
 begin
   n := 0;
@@ -107,5 +115,9 @@ begin
     cur := cur^.next
   end;
   Out.Int(s, 0);
+  Out.Ln;
+  i := 9;
+  UpTo12(i);
+  Out.Int(i, 0);
   Out.Ln
 end Hello.

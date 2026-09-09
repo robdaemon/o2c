@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M8 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M9 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,14 +12,15 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M8 status
+## M9 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
 `VAR` (by-reference) parameters, full expressions with Oberon
 precedence (`+ - * DIV MOD & OR ~ = # < <= > >=`, parens), typed
 assignment, control flow (`IF/ELSIF/ELSE`, `WHILE/DO`, `REPEAT/UNTIL`,
-`FOR/TO/BY`, `CASE` with comma label lists and optional `ELSE`),
+`FOR/TO/BY`, `CASE` with comma label lists and optional `ELSE`,
+`LOOP`/`EXIT`),
 type declarations (`ARRAY n OF` scalar element types and `RECORD` of
 scalar or pointer-typed fields) with index/field designators,
 whole-value copies, procedures and **functions** (`: T` return types
@@ -40,15 +41,23 @@ sentinel.  Pointers are module-level only: no `DISPOSE`, no pointer
 parameters/return types, and record fields are scalars or pointers
 (no nested records/arrays).
 
+**M9 — LOOP/EXIT**: `LOOP` statement sequences run until an `EXIT`
+leaves the innermost enclosing `LOOP`.  The Ada mapping emits a
+generated label per LOOP (`O2c_Loop_N : loop ... exit O2c_Loop_N;
+... end loop O2c_Loop_N;`), so `EXIT` leaves the right loop even when
+written inside a nested `WHILE`/`REPEAT`/`FOR`; `EXIT` outside any
+`LOOP` is a compile error.  The demo walks a counter to 12 with
+`LOOP`/`EXIT`.
+
 **Deviation from the Oberon-2 spec (project decision): keywords and
 standard type names are case-insensitive** (`module`/`MODULE`,
 `integer`/`INTEGER` in type position, `var`/`VAR`, `Begin`… all
 accepted; `NEW` is recognized case-insensitively in statement
 position). Ordinary identifiers stay case-sensitive.
 
-Not yet in M8: nested modules and other imports (only `Out`), local
+Not yet in M9: nested modules and other imports (only `Out`), local
 declarations inside procedures, record-typed fields/nested arrays,
-`WITH`/type extension/type-bound procedures, `LOOP`/`EXIT`, `SET`
+`WITH`/type extension/type-bound procedures, `SET`
 and other Oberon-2 types.
 
 ## Build

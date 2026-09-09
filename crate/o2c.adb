@@ -46,6 +46,13 @@ procedure O2c is
     "begin" & ASCII.LF &
     "  return x * x" & ASCII.LF &
     "end Square;" & ASCII.LF &
+    "procedure UpTo12(var k: integer);" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  LOOP" & ASCII.LF &
+    "    k := k + 1;" & ASCII.LF &
+    "    IF k = 12 THEN EXIT END" & ASCII.LF &
+    "  END" & ASCII.LF &
+    "end UpTo12;" & ASCII.LF &
     ASCII.LF &
     "begin" & ASCII.LF &
     "  n := 0;" & ASCII.LF &
@@ -116,6 +123,10 @@ procedure O2c is
     "    cur := cur^.next" & ASCII.LF &
     "  end;" & ASCII.LF &
     "  Out.Int(s, 0);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  i := 9;" & ASCII.LF &
+    "  UpTo12(i);" & ASCII.LF &
+    "  Out.Int(i, 0);" & ASCII.LF &
     "  Out.Ln" & ASCII.LF &
     "end Hello.";
 
