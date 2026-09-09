@@ -1,11 +1,11 @@
 module Hello;
 import Out;
 
-type Vector = ARRAY 4 OF integer;
-type Pair = RECORD a, b: integer END;
-type Line = ARRAY 8 OF char;
-type Node = POINTER TO NodeDesc;
-type NodeDesc = RECORD v: integer; next: Node END;
+type Vector = array 4 of integer;
+type Pair = record a, b: integer end;
+type Line = array 8 of char;
+type Node = pointer to NodeDesc;
+type NodeDesc = record v: integer; next: Node end;
 
 var n: integer;
 var v: Vector; p: Pair; q: Pair; i: integer;
@@ -36,10 +36,10 @@ end Square;
 
 procedure UpTo12(var k: integer);
 begin
-  LOOP
+  loop
     k := k + 1;
-    IF k = 12 THEN EXIT END
-  END
+    if k = 12 then exit end
+  end
 end UpTo12;
 
 
@@ -96,21 +96,21 @@ begin
   end;
   Out.Ln
   CountTo(21, n);
-  head := NIL;
-  NEW(head);
+  head := nil;
+  new(head);
   head^.v := 1;
-  head^.next := NIL;
-  NEW(cur);
+  head^.next := nil;
+  new(cur);
   cur^.v := 2;
   cur^.next := head;
   head := cur;
-  NEW(cur);
+  new(cur);
   cur^.v := 3;
   cur^.next := head;
   head := cur;
   cur := head;
   s := 0;
-  while cur # NIL do
+  while cur # nil do
     s := s + cur^.v;
     cur := cur^.next
   end;

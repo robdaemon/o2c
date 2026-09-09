@@ -53,7 +53,10 @@ written inside a nested `WHILE`/`REPEAT`/`FOR`; `EXIT` outside any
 standard type names are case-insensitive** (`module`/`MODULE`,
 `integer`/`INTEGER` in type position, `var`/`VAR`, `Begin`… all
 accepted; `NEW` is recognized case-insensitively in statement
-position). Ordinary identifiers stay case-sensitive.
+position). Ordinary identifiers stay case-sensitive.  Sample modules
+(`samples/`) spell every reserved word in lowercase (`loop`, `exit`,
+`new`, `nil`, `pointer to`, …) so they are easy to type; any case is
+accepted.
 
 Not yet in M9: nested modules and other imports (only `Out`), local
 declarations inside procedures, record-typed fields/nested arrays,

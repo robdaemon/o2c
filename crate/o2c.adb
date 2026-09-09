@@ -16,12 +16,13 @@ procedure O2c is
     "module Hello;" & ASCII.LF &
     "import Out;" & ASCII.LF &
     ASCII.LF &
+    "type Vector = array 4 of integer;" & ASCII.LF &
+    "type Pair = record a, b: integer end;" & ASCII.LF &
+    "type Line = array 8 of char;" & ASCII.LF &
+    "type Node = pointer to NodeDesc;" & ASCII.LF &
+    "type NodeDesc = record v: integer; next: Node end;" & ASCII.LF &
+    ASCII.LF &
     "var n: integer;" & ASCII.LF &
-    "type Vector = ARRAY 4 OF integer;" & ASCII.LF &
-    "type Pair = RECORD a, b: integer END;" & ASCII.LF &
-    "type Line = ARRAY 8 OF char;" & ASCII.LF &
-    "type Node = POINTER TO NodeDesc;" & ASCII.LF &
-    "type NodeDesc = RECORD v: integer; next: Node END;" & ASCII.LF &
     "var v: Vector; p: Pair; q: Pair; i: integer;" & ASCII.LF &
     "var msg: Line; ch: char;" & ASCII.LF &
     "var head, cur: Node; s: integer;" & ASCII.LF &
@@ -42,17 +43,20 @@ procedure O2c is
     "    Out.Ln" & ASCII.LF &
     "  end" & ASCII.LF &
     "end CountTo;" & ASCII.LF &
+    ASCII.LF &
     "procedure Square(x: integer): integer;" & ASCII.LF &
     "begin" & ASCII.LF &
     "  return x * x" & ASCII.LF &
     "end Square;" & ASCII.LF &
+    ASCII.LF &
     "procedure UpTo12(var k: integer);" & ASCII.LF &
     "begin" & ASCII.LF &
-    "  LOOP" & ASCII.LF &
+    "  loop" & ASCII.LF &
     "    k := k + 1;" & ASCII.LF &
-    "    IF k = 12 THEN EXIT END" & ASCII.LF &
-    "  END" & ASCII.LF &
+    "    if k = 12 then exit end" & ASCII.LF &
+    "  end" & ASCII.LF &
     "end UpTo12;" & ASCII.LF &
+    ASCII.LF &
     ASCII.LF &
     "begin" & ASCII.LF &
     "  n := 0;" & ASCII.LF &
@@ -66,6 +70,9 @@ procedure O2c is
     "  for n := 4 to 5 do" & ASCII.LF &
     "    Out.Int(n, 0)" & ASCII.LF &
     "  end;" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    ASCII.LF &
+    "  Out.Int(Square(3), 0);" & ASCII.LF &
     "  Out.Ln;" & ASCII.LF &
     "  i := 0;" & ASCII.LF &
     "  while i < 4 do" & ASCII.LF &
@@ -104,21 +111,21 @@ procedure O2c is
     "  end;" & ASCII.LF &
     "  Out.Ln" & ASCII.LF &
     "  CountTo(21, n);" & ASCII.LF &
-    "  head := NIL;" & ASCII.LF &
-    "  NEW(head);" & ASCII.LF &
+    "  head := nil;" & ASCII.LF &
+    "  new(head);" & ASCII.LF &
     "  head^.v := 1;" & ASCII.LF &
-    "  head^.next := NIL;" & ASCII.LF &
-    "  NEW(cur);" & ASCII.LF &
+    "  head^.next := nil;" & ASCII.LF &
+    "  new(cur);" & ASCII.LF &
     "  cur^.v := 2;" & ASCII.LF &
     "  cur^.next := head;" & ASCII.LF &
     "  head := cur;" & ASCII.LF &
-    "  NEW(cur);" & ASCII.LF &
+    "  new(cur);" & ASCII.LF &
     "  cur^.v := 3;" & ASCII.LF &
     "  cur^.next := head;" & ASCII.LF &
     "  head := cur;" & ASCII.LF &
     "  cur := head;" & ASCII.LF &
     "  s := 0;" & ASCII.LF &
-    "  while cur # NIL do" & ASCII.LF &
+    "  while cur # nil do" & ASCII.LF &
     "    s := s + cur^.v;" & ASCII.LF &
     "    cur := cur^.next" & ASCII.LF &
     "  end;" & ASCII.LF &
