@@ -2257,10 +2257,27 @@ package body O2c_Compiler is
                                           Next;   --  past method name
                                           Expect (Lex.Tok_LParen, "'('");
                                           Next;
-                                          Call := Call & Ownr & "."
-                                            & Mb (1 .. M_Len)
-                                            & "_Disp_O2c_" & RNm & " ("
-                                            & Rcv;
+                                          declare
+                                             SI : constant Natural :=
+                                               Sh_Find (Ownr, RNm,
+                                                        Mb (1 .. M_Len));
+                                          begin
+                                             if SI /= 0 then
+                                                --  M29/M30: widened-pointer
+                                                --  dispatch (function)
+                                                Call := Call
+                                                  & To_String (Shs (SI).Owner)
+                                                  & "." & Mb (1 .. M_Len)
+                                                  & "_Any_Disp_O2c_"
+                                                  & To_String (Shs (SI).BRec)
+                                                  & " (" & Rcv;
+                                             else
+                                                Call := Call & Ownr & "."
+                                                  & Mb (1 .. M_Len)
+                                                  & "_Disp_O2c_" & RNm
+                                                  & " (" & Rcv;
+                                             end if;
+                                          end;
                                           loop
                                              exit when
                                                Cur.Kind = Lex.Tok_RParen;
@@ -5426,7 +5443,6 @@ package body O2c_Compiler is
             DN   : constant String := To_String (Bounds (Bd).Name);
          begin
             if Syms (SIdx).Exp and then UTypes (R).ExpT
-              and then not Syms (SIdx).Ret
               and then UTypes (R).Parent /= 0
               and then UTypes (UTypes (R).Parent).Imported
               and then XM_Chain (UTypes (R).Parent, DN) /= 0
@@ -5443,8 +5459,18 @@ package body O2c_Compiler is
                   Cand  : array (1 .. Max_Bound) of Natural :=
                     (others => 0);
                   N_C   : Natural := 0;
+                  Rpre  : constant String :=
+                    (if Syms (SIdx).Ret then "return " else "");
+                  Knd   : constant String :=
+                    (if Syms (SIdx).Ret then "function " else "procedure ");
+                  RetT  : constant String :=
+                    (if Syms (SIdx).Ret then
+                        (if Syms (SIdx).UT /= 0
+                           then Qual_UT (Syms (SIdx).UT)
+                           else Ada_Type (Syms (SIdx).Typ))
+                     else "");
                begin
-                  Hdr := Hdr & "procedure " & DN & "_Any_Disp_O2c_"
+                  Hdr := Hdr & Knd & DN & "_Any_Disp_O2c_"
                     & PSh & " (" & RcvrN
                     & (if Syms (SIdx).P (1).By_Ref
                        then " : in out " else " : ")
@@ -5460,6 +5486,9 @@ package body O2c_Compiler is
                      ArgL := ArgL & To_String (Syms (SIdx).P (I).Name);
                   end loop;
                   Hdr := Hdr & ")";
+                  if Syms (SIdx).Ret then
+                     Hdr := Hdr & " return " & RetT;
+                  end if;
                   for X in 1 .. N_UT loop
                      if UTypes (X).Is_Rec and then X /= R
                        and then Rec_Descends (X, R)
@@ -5494,7 +5523,7 @@ package body O2c_Compiler is
                                      & RcvrN & " in "
                                      & To_String (UTypes (Cand (I)).Name)
                                      & "'Class then");
-                        Append_Decl ("         "
+                        Append_Decl ("         " & Rpre
                                      & Method_Impl_Name (DN, Cand (I))
                                      & " (" & To_String
                                          (UTypes (Cand (I)).Name) & " ("
@@ -5510,7 +5539,7 @@ package body O2c_Compiler is
                   Append_Decl ("         if " & RcvrN & " in "
                                & To_String (UTypes (R).Name)
                                & "'Class then");
-                  Append_Decl ("            "
+                  Append_Decl ("            " & Rpre
                                & Method_Impl_Name (DN, R) & " ("
                                & To_String (UTypes (R).Name) & " (" & RcvrN
                                & ")"
@@ -5518,7 +5547,7 @@ package body O2c_Compiler is
                                   then ", " & To_String (ArgL)
                                   else "") & ");");
                   Append_Decl ("         else");
-                  Append_Decl ("            " & BOwn & "." & DN
+                  Append_Decl ("            " & Rpre & BOwn & "." & DN
                                & "_Disp_O2c_" & PSh & " (" & RcvrN
                                & (if Syms (SIdx).Params > 1
                                   then ", " & To_String (ArgL)

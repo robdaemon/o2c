@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M29 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M30 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M29 status
+## M30 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,16 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M30 — widened-pointer dispatch for method functions**: base-view
+shadows now cover method *functions* too: a library exporting a
+function-method override on a subtype of an imported type also exports
+a `function M_Any_Disp_O2c_<Base> ... return T` shadow whose body
+returns the library override for its subtree and otherwise returns the
+base module's dispatcher; expression call sites through base-typed
+pointers route through it.  In the A/B/C harness a Circle reached via
+a Shape pointer prints `25` for `.Val()` (override `x*10+r`) while a
+plain Shape prints `3`.
 
 **M29 — widened-pointer dispatch across packages**: when a library
 exports a procedure-method override on a subtype of an imported
@@ -328,9 +338,9 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 accepted.
 
 The module/import epic and the whole README-tracked follow-up list are
-shipped (M19-M29).  Remaining: function-method shadows and ambiguous
-multi-library overrides for widened dispatch, plus the documented
-deviations (case-insensitive keywords; LONGINT/INTEGER mixing).
+shipped (M19-M29).  Remaining: ambiguous multi-library overrides for widened dispatch,
+plus the documented deviations (case-insensitive keywords;
+LONGINT/INTEGER mixing).
 
 ## Build
 
