@@ -1760,32 +1760,85 @@ package body O2c_Compiler is
             R.Typ := T_Nil;
             Next;
          when Lex.Tok_LBrace =>
-            --  SET literal: { e1, e2, ... } (M17), elements 0..31
+            --  SET literal (M17/M34): { e1, e2, ... } with INTEGER or
+            --  CHAR elements and INTEGER-literal ranges a..b (0..31)
             Used_Set := True;
             Next;              --  past '{'
             R.Typ := T_Set;
             declare
                Bit   : Unbounded_String;
                First : Boolean := True;
+
+               procedure Add (Ix : String) is
+               begin
+                  if First then
+                     First := False;
+                  else
+                     Bit := Bit & " or ";
+                  end if;
+                  Bit := Bit
+                    & "O2c_Set (Interfaces.Shift_Left "
+                    & "(Interfaces.Unsigned_32 (1), " & Ix & "))";
+               end Add;
             begin
                loop
                   exit when Cur.Kind = Lex.Tok_RBrace;
                   declare
                      E : Expr_Rec := Parse_Expr;
                   begin
-                     if E.Typ /= T_Int then
-                        raise O2c_Error with "set elements must be INTEGER "
-                          & "(line " & Natural'Image (Cur.Line) & ")";
-                     end if;
-                     if First then
-                        First := False;
+                     if E.Typ = T_Char then
+                        Add ("Character'Pos (" & To_String (E.Text) & ")");
+                     elsif E.Typ = T_Int then
+                        if Cur.Kind = Lex.Tok_Dot then
+                           --  range element a .. b (M34); '..' lexes as
+                           --  two Tok_Dot, detected here by peeking
+                           declare
+                              T2 : Lex.Token := Lex.Peek_Token;
+                           begin
+                              if T2.Kind /= Lex.Tok_Dot then
+                                 raise O2c_Error with "a lone '.' in a SET "
+                                   & "literal (use '..' for ranges, line "
+                                   & Natural'Image (Cur.Line) & ")";
+                              end if;
+                           end;
+                           Next;              --  first '.'
+                           Next;              --  second '.'
+
+                           declare
+                              F : Expr_Rec := Parse_Expr;
+                           begin
+                              if F.Typ /= T_Int
+                                or else not (E.Lit and then F.Lit)
+                              then
+                                 raise O2c_Error with "SET range endpoints "
+                                   & "must be INTEGER literals (line "
+                                   & Natural'Image (Cur.Line) & ")";
+                              end if;
+                              declare
+                                 Lo : constant Integer :=
+                                   Integer'Value (To_String (E.Text));
+                                 Hi : constant Integer :=
+                                   Integer'Value (To_String (F.Text));
+                              begin
+                                 if Lo < 0 or else Hi > 31 or else Lo > Hi
+                                 then
+                                    raise O2c_Error with "SET ranges must "
+                                      & "lie in 0 .. 31 (line "
+                                      & Natural'Image (Cur.Line) & ")";
+                                 end if;
+                                 for K in Lo .. Hi loop
+                                    Add (Integer'Image (K));
+                                 end loop;
+                              end;
+                           end;
+                        else
+                           Add (To_String (E.Text));
+                        end if;
                      else
-                        Bit := Bit & " or ";
+                        raise O2c_Error with "set elements must be INTEGER "
+                          & "or CHAR (line " & Natural'Image (Cur.Line)
+                          & ")";
                      end if;
-                     Bit := Bit
-                       & "O2c_Set (Interfaces.Shift_Left "
-                       & "(Interfaces.Unsigned_32 (1), "
-                       & To_String (E.Text) & "))";
                   end;
                   exit when Cur.Kind /= Lex.Tok_Comma;
                   Next;
@@ -2667,15 +2720,20 @@ package body O2c_Compiler is
          declare
             X : Expr_Rec := Parse_Simple;
          begin
-            if R.Typ /= T_Int or else X.Typ /= T_Set then
-               raise O2c_Error with "IN needs an INTEGER element and a SET "
-                 & "operand (line " & Natural'Image (Cur.Line) & ")";
+            if (R.Typ /= T_Int and then R.Typ /= T_Char)
+              or else X.Typ /= T_Set
+            then
+               raise O2c_Error with "IN needs an INTEGER/CHAR element and "
+                 & "a SET operand (line " & Natural'Image (Cur.Line) & ")";
             end if;
             Used_Set := True;
             R.Text := To_Unbounded_String
               ("((" & To_String (X.Text)
                & " and O2c_Set (Interfaces.Shift_Left "
-               & "(Interfaces.Unsigned_32 (1), " & To_String (R.Text)
+               & "(Interfaces.Unsigned_32 (1), "
+               & (if R.Typ = T_Char
+                  then "Character'Pos (" & To_String (R.Text) & ")"
+                  else To_String (R.Text))
                & "))) /= 0)");
             R.Typ := T_Bool;
             R.Lit := False;

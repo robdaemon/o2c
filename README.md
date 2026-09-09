@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M33 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M34 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M33 status
+## M34 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,15 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M34 — SET ranges and CHAR elements**: set literals accept
+INTEGER-literal ranges (`{0 .. 5, 7, 9 .. 11}`) and CHAR elements;
+`IN` accepts a CHAR left operand too.  CHAR operands are converted
+with `Character'Pos` into the 0..31 bit space, so the classic
+set-of-CHAR idiom works for ordinals that fit (`CHR(3) IN s`,
+`c IN s`) and out-of-range ordinals like `CHR(65)` are simply never
+members.  Ranges must lie in 0..31.  Verified natively:
+`11 22 33 44 55`.
 
 **M33 — string equality and ordering**: whole string values compare
 with `= # < <= > >=`.  A generated `O2c_S_Cmp` helper compares the
