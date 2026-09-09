@@ -1,9 +1,9 @@
 module Math;
 const Pi* = 3.14159;
-type Point* = record x, y: integer end;
+type Point* = record x*, y*: integer; tag: integer end;
 type Vec* = array 4 of integer;
 type Node* = pointer to NodeDesc;
-type NodeDesc* = record v: integer; next: Node end;
+type NodeDesc* = record v*: integer; next*: Node end;
 var base: integer;
 var count*: integer;
 var origin*: Point;

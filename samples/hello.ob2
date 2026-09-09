@@ -322,8 +322,9 @@ begin
   Math.Fill(w, 100);
   Out.Int(w[0] + w[3], 0);
   Out.Ln;
-  Math.origin.x := 77;
-  Math.origin.y := 64;
+  a.x := 30;
+  a.y := 25;
+  Math.origin := a;
   Out.Int(Math.origin.x + Math.origin.y, 0);
   Out.Ln;
   Math.marks := {1, 3};

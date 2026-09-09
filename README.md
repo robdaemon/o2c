@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M21 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M22 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M21 status
+## M22 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,15 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M22 — field export marks, whole-record module vars, SET
+fields**: fields of exported RECORD types may now carry `name*`
+export marks; the record still emits whole into the spec (Ada has no
+component hiding) but the compiler gates importer `.field` access on
+the mark, so modules keep private fields (`tag`) and exported types
+may carry SET fields.  Whole-record assignment to an exported module
+VARIABLE now works from a same-typed local variable or another
+module VARIABLE (`Math.origin := a`); the demo prints `55` for it.
 
 **M21 — shared support types, open arrays, SET vars**: every
 multi-module build now emits a small `O2c_Types` package
@@ -245,10 +254,9 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 `new`, `nil`, `pointer to`, …) so they are easy to type; any case is
 accepted.
 
-Exported records expose all their fields to importers (field-level
-`*` marks are not enforced yet); whole-record assignment to exported
-module VARIABLEs is not supported.  Everything else in the module/
-import epic is shipped (M19-M21).
+Field-level export marks are enforced (M22); whole-record assignment
+to exported module VARIABLEs works.  The module/import epic is
+feature-complete (M19-M22).
 declaring procedures inside procedures, multi-dimensional arrays,
 `SET` and other Oberon-2 types.
 

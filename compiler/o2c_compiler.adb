@@ -30,6 +30,7 @@ package body O2c_Compiler is
       Typ  : EType := T_Int;
       UT   : Natural := 0;         --  pointer user-type index for the
                                    --  field (M8); 0 = builtin scalar
+      ExpF : Boolean := False;     --  exported field mark 'name*' (M22)
    end record;
 
    type UField_Array is array (1 .. Max_Fields) of UField;
@@ -140,6 +141,7 @@ package body O2c_Compiler is
       Name   : Unbounded_String;
       Typ    : EType := T_Int;      --  scalar field type (UT_Nm = "")
       UT_Nm  : Unbounded_String;    --  qualified user type name, if any
+      Exp    : Boolean := False;    --  exported field mark (M22)
    end record;
    type XT_Field_Arr is array (1 .. 16) of XT_Field;
    type XT_Entry is record
@@ -494,10 +496,6 @@ package body O2c_Compiler is
                           & "' must be scalar or an exported type of the "
                           & "same module";
                      end if;
-                  elsif Fld.Typ = T_Set then
-                     raise O2c_Error with "exported RECORD '"
-                       & To_String (UTypes (U).Name)
-                       & "': SET fields are not exportable (M20a)";
                   end if;
                end;
             end loop;
@@ -548,6 +546,7 @@ package body O2c_Compiler is
                      Fld : UField renames UTypes (U).F (F);
                   begin
                      XT_Tab (N_XT).F (F).Name := Fld.Name;
+                     XT_Tab (N_XT).F (F).Exp := Fld.ExpF;
                      if Fld.UT /= 0 then
                         XT_Tab (N_XT).F (F).UT_Nm := To_Unbounded_String
                           (QName (To_String (Mod_Name),
@@ -643,7 +642,8 @@ package body O2c_Compiler is
                      UT => (if Length (XT_Tab (X).F (F).UT_Nm) = 0
                             then 0
                             else UT_By_Name
-                              (To_String (XT_Tab (X).F (F).UT_Nm))));
+                              (To_String (XT_Tab (X).F (F).UT_Nm))),
+                     ExpF => XT_Tab (X).F (F).Exp);
                end loop;
             elsif not XT_Tab (X).Is_Ptr then
                --  fixed array shape (M20e)
@@ -1158,6 +1158,13 @@ package body O2c_Compiler is
                if F = 0 then
                   raise O2c_Error with "no field '" & Cur.Text (1 .. Cur.Len)
                     & "' in record " & To_String (UTypes (UT).Name);
+               end if;
+               if UTypes (FO).Imported and then not UTypes (FO).F (F).ExpF
+               then
+                  --  M22: field-level export marks gate importer access
+                  raise O2c_Error with "field '" & Cur.Text (1 .. Cur.Len)
+                    & "' of " & To_String (UTypes (FO).Name)
+                    & " is not exported";
                end if;
                D.Text := D.Text & "." & To_String (UTypes (FO).F (F).Name);
                if UTypes (FO).F (F).UT = 0 then
@@ -2932,6 +2939,7 @@ package body O2c_Compiler is
             exit when Cur.Kind = Lex.Tok_End;
             declare
                FNames : array (1 .. 16) of Unbounded_String;
+               FExp   : array (1 .. 16) of Boolean := (others => False);
                NF     : Natural := 0;
                FT     : EType;
                FUT    : Natural := 0;  --  pointer user type (M8), 0 = scalar
@@ -2943,6 +2951,10 @@ package body O2c_Compiler is
                   end if;
                   FNames (NF) := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
                   Next;
+                  if Cur.Kind = Lex.Tok_Star then
+                     FExp (NF) := True;   --  exported field mark (M22)
+                     Next;
+                  end if;
                   exit when Cur.Kind /= Lex.Tok_Comma;
                   Next;
                end loop;
@@ -2988,7 +3000,8 @@ package body O2c_Compiler is
                      raise O2c_Error with "too many record fields";
                   end if;
                   UTypes (UTI).F (UTypes (UTI).N_F) :=
-                    (Name => FNames (I), Typ => FT, UT => FUT);
+                    (Name => FNames (I), Typ => FT, UT => FUT,
+                     ExpF => FExp (I));
                end loop;
             end;
          end loop;
@@ -4148,50 +4161,133 @@ package body O2c_Compiler is
                   elsif Xs (XI).Kind = S_Var
                     and then Length (Xs (XI).VT_Nm) > 0
                   then
-                     --  M20f: exported RECORD VARIABLE: assign a field
-                     if Cur.Kind /= Lex.Tok_Dot then
+                     --  M20f/M22: exported RECORD VARIABLE: assign a
+                     --  field through the designator chain, or the whole
+                     --  record from a same-typed variable (local or an
+                     --  exported module VARIABLE of the same type).
+                     if Cur.Kind /= Lex.Tok_Dot
+                       and then Cur.Kind /= Lex.Tok_Assign
+                     then
                         raise O2c_Error with "'" & MNm & "."
                           & To_String (MName)
-                          & "' is a RECORD VARIABLE; whole-record "
-                          & "assignment is not supported yet (M20f)";
+                          & "' is a RECORD VARIABLE; select a field with "
+                          & "'.' or assign the whole record (M22)";
                      end if;
                      declare
                         Q : constant String := To_String (Xs (XI).VT_Nm);
                         U : constant Natural :=
                           Import_Type (Q_Owner (Q), Q_Mem (Q));
-                        D : Desig := Parse_Rec_Ptr_Chain
-                          (MNm & "." & To_String (MName), U);
                      begin
-                        Expect (Lex.Tok_Assign, "':='");
-                        Next;
-                        if D.K = D_Scalar then
-                           if D.Sc = T_Char
-                             and then Cur.Kind = Lex.Tok_String
-                             and then Cur.Len = 1
-                           then
-                              Append_Body ("      " & To_String (D.Text)
-                                           & " := '" & Cur.Text (1 .. 1)
-                                           & "';");
+                        if Cur.Kind = Lex.Tok_Assign then
+                           --  whole-record assignment (M22)
+                           declare
+                              Rhs : Unbounded_String;
+                           begin
                               Next;
-                           else
-                              declare
-                                 V : Expr_Rec := Parse_Expr;
-                              begin
-                                 if V.Typ /= D.Sc or else V.Typ = T_Str then
-                                    raise O2c_Error with "type mismatch "
-                                      & "assigning " & To_String (D.Text);
-                                 end if;
-                                 Append_Body ("      " & To_String (D.Text)
-                                              & " := " & To_String (V.Text)
-                                              & ";");
-                              end;
-                           end if;
-                        elsif D.K = D_Ptr then
-                           raise O2c_Error with "cannot assign a POINTER "
-                             & "field of a module VARIABLE here (M20f)";
+                              if Cur.Kind = Lex.Tok_Ident then
+                                 declare
+                                    RId : constant Natural :=
+                                      Find (Cur.Text (1 .. Cur.Len));
+                                 begin
+                                    if RId /= 0 and then
+                                      Syms (RId).Kind = S_Var
+                                      and then Syms (RId).UT = U
+                                    then
+                                       Rhs := To_Unbounded_String
+                                         (Cur.Text (1 .. Cur.Len));
+                                       Next;
+                                    end if;
+                                 end;
+                              end if;
+                              if Rhs = "" and then Cur.Kind = Lex.Tok_Ident
+                                and then Imported_Mod
+                                  (Cur.Text (1 .. Cur.Len))
+                              then
+                                 declare
+                                    MN2 : constant String :=
+                                      Cur.Text (1 .. Cur.Len);
+                                 begin
+                                    Next;
+                                    if Cur.Kind = Lex.Tok_Dot then
+                                       Next;
+                                       Expect (Lex.Tok_Ident,
+                                               "a module variable");
+                                       declare
+                                          XI2 : constant Natural :=
+                                            Find_X
+                                              (MN2,
+                                               Cur.Text (1 .. Cur.Len));
+                                       begin
+                                          if XI2 /= 0
+                                            and then Xs (XI2).Kind = S_Var
+                                            and then
+                                              To_String (Xs (XI2).VT_Nm)
+                                              = To_String (Xs (XI).VT_Nm)
+                                          then
+                                             Rhs := To_Unbounded_String
+                                               (MN2 & "."
+                                                & Cur.Text (1 .. Cur.Len));
+                                          end if;
+                                          Next;
+                                       end;
+                                    end if;
+                                 end;
+                              end if;
+                              if Length (Rhs) = 0 then
+                                 raise O2c_Error with "whole-record "
+                                   & "assignment to '" & MNm & "."
+                                   & To_String (MName)
+                                   & "' needs a variable of the same "
+                                   & "record type (M22)";
+                              end if;
+                              Append_Body ("      " & MNm & "."
+                                           & To_String (MName) & " := "
+                                           & To_String (Rhs) & ";");
+                           end;
                         else
-                           raise O2c_Error with "cannot assign a whole "
-                             & "char-array field here (M20f)";
+                           declare
+                              D : Desig := Parse_Rec_Ptr_Chain
+                                (MNm & "." & To_String (MName), U);
+                           begin
+                              Expect (Lex.Tok_Assign, "':='");
+                              Next;
+                              if D.K = D_Scalar then
+                                 if D.Sc = T_Char
+                                   and then Cur.Kind = Lex.Tok_String
+                                   and then Cur.Len = 1
+                                 then
+                                    Append_Body ("      "
+                                                 & To_String (D.Text)
+                                                 & " := '"
+                                                 & Cur.Text (1 .. 1) & "';");
+                                    Next;
+                                 else
+                                    declare
+                                       V : Expr_Rec := Parse_Expr;
+                                    begin
+                                       if V.Typ /= D.Sc
+                                         or else V.Typ = T_Str
+                                       then
+                                          raise O2c_Error with
+                                            "type mismatch assigning "
+                                            & To_String (D.Text);
+                                       end if;
+                                       Append_Body ("      "
+                                                    & To_String (D.Text)
+                                                    & " := "
+                                                    & To_String (V.Text)
+                                                    & ";");
+                                    end;
+                                 end if;
+                              elsif D.K = D_Ptr then
+                                 raise O2c_Error with "cannot assign a "
+                                   & "POINTER field of a module VARIABLE "
+                                   & "here (M20f)";
+                              else
+                                 raise O2c_Error with "cannot assign a "
+                                   & "whole char-array field here (M20f)";
+                              end if;
+                           end;
                         end if;
                      end;
                   elsif Xs (XI).Kind = S_Var
