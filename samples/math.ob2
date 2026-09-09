@@ -5,6 +5,15 @@ type Node* = pointer to NodeDesc;
 type NodeDesc* = record v: integer; next: Node end;
 var base: integer;
 var count*: integer;
+procedure Translate*(var p: Point; dx: integer; dy: integer);
+begin
+  p.x := p.x + dx;
+  p.y := p.y + dy
+end Translate;
+procedure Next*(l: Node): Node;
+begin
+  return l^.next
+end Next;
 procedure Sqr*(x: integer): integer;
 begin
   return x * x

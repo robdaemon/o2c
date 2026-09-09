@@ -300,5 +300,11 @@ begin
   tx^.next := hx;
   hx := tx;
   Out.Int(hx^.v + hx^.next^.v, 0);
+  Out.Ln;
+  Math.Translate(a, 1, 2);
+  Out.Int(a.x + a.y, 0);
+  Out.Ln;
+  tx := Math.Next(hx);
+  Out.Int(tx^.v, 0);
   Out.Ln
 end Hello.

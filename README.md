@@ -91,6 +91,17 @@ demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
 
+**M20b — exported procedures on exported types**: library
+procedures marked `name*` may now take VAR RECORD parameters and
+POINTER parameters of the exported types of the same module, and
+return exported POINTER types (`Translate*(var p: Point; ...)`,
+`Next*(l: Node): Node`).  Importers call `Math.Translate(a, 1, 2)`
+and `tx := Math.Next(hx)`; the catalog records formal and result
+types as qualified names and the call site imports them, so VAR
+checks and pointer typing behave like local calls.  Type-bound
+procedures (methods) across modules, open-ARRAY and fixed-ARRAY
+exports, and SET or record-typed exported VARIABLEs remain M20c.
+
 **M20a — cross-module data types**: library `TYPE`
 declarations marked `name*` are emitted into the package spec and
 recorded in a name-based catalog.  `RECORD` (scalar/exported-record or
@@ -100,8 +111,9 @@ work.  An importer writes `var p: Math.Point` (or a POINTER such as
 `Math.Node`); the compiler synthesises the exported shapes into its
 type table, so `NEW`, `^` deref, `.field` chains, whole-record copies
 and pointer sharing behave like local types.  The demo builds and
-walks a `Math.Node` list and copies a `Math.Point`, printing `100`
-twice at the end.
+walks a `Math.Node` list, copies a `Math.Point`, calls `Math.Translate`
+(VAR record) and `Math.Next` (pointer result), printing
+`100 100 103 60` at the end.
 
 **M19 — modules**: `module M; import Out, Other;` compiles from
 separate source files: `O2c_Compiler.Compile_Multi` turns each library

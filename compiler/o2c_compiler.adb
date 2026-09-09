@@ -71,6 +71,8 @@ package body O2c_Compiler is
 
    type Param_Array is array (1 .. Max_Params) of Param_Rec;
 
+   type Nm_Array is array (1 .. Max_Params) of Unbounded_String;
+
    type Sym is record
       Kind   : Sym_Kind := S_Var;
       Typ    : EType := T_Int;
@@ -112,6 +114,10 @@ package body O2c_Compiler is
       Params : Natural := 0;
       Ret    : Boolean := False;
       P      : Param_Array := (others => <>);
+      --  M20b: qualified exported-type names of formal parameters and
+      --  of a function result ("" when the slot is scalar).
+      P_Nm   : Nm_Array := (others => <>);
+      Ret_Nm : Unbounded_String;
    end record;
    Xs  : array (1 .. Max_X) of X_Entry := (others => <>);
    N_X : Natural := 0;
@@ -145,6 +151,9 @@ package body O2c_Compiler is
    end record;
    XT_Tab : array (1 .. Max_XT) of XT_Entry := (others => <>);
    N_XT   : Natural := 0;
+
+   --  forward (body defined with the other M20 import machinery)
+   function Import_Type (Owner, Mem : String) return Natural;
 
    --  type-bound procedures (M13): method name, the record type it is
    --  bound to, and its S_Proc symbol (params 1.. include the receiver).
@@ -266,6 +275,61 @@ package body O2c_Compiler is
       Xs (N_X) := E;
       Xs (N_X).Owner := To_Unbounded_String (Owner);
    end X_Add;
+
+   --  Split a qualified "Owner.Member" name (first '.').
+   function Q_Dot (Q : String) return Natural is
+   begin
+      for C in Q'Range loop
+         if Q (C) = '.' then
+            return C;
+         end if;
+      end loop;
+      raise O2c_Error with "internal: expected a qualified name in the "
+        & "export catalog";
+   end Q_Dot;
+
+   function Q_Owner (Q : String) return String is
+   begin
+      return Q (Q'First .. Q_Dot (Q) - 1);
+   end Q_Owner;
+
+   function Q_Mem (Q : String) return String is
+      D : constant Natural := Q_Dot (Q);
+   begin
+      return Q (D + 1 .. Q'Last);
+   end Q_Mem;
+
+   --  M20b call site: the formal for catalog argument XI slot I.  User
+   --  typed formals import the exported type into this module, so
+   --  Parse_Actual can type-check arguments against the local shape.
+   function X_Formal (XI, I : Natural) return Param_Rec is
+      F : Param_Rec := Xs (XI).P (I);
+   begin
+      if Length (Xs (XI).P_Nm (I)) > 0 then
+         declare
+            Q : constant String := To_String (Xs (XI).P_Nm (I));
+         begin
+            F.UT := Import_Type (Q_Owner (Q), Q_Mem (Q));
+            F.Typ := T_Int;
+            F.Open := False;
+         end;
+      end if;
+      return F;
+   end X_Formal;
+
+   --  M20b: import the exported POINTER result type of catalog
+   --  function XI (0 when the result is scalar).
+   function X_Ret_UT (XI : Natural) return Natural is
+   begin
+      if Length (Xs (XI).Ret_Nm) > 0 then
+         declare
+            Q : constant String := To_String (Xs (XI).Ret_Nm);
+         begin
+            return Import_Type (Q_Owner (Q), Q_Mem (Q));
+         end;
+      end if;
+      return 0;
+   end X_Ret_UT;
 
    --  M19: exportable scalar kinds.  SET stays module-private because
    --  each Ada unit declares its own O2c_Set type; user types and open
@@ -1529,7 +1593,14 @@ package body O2c_Compiler is
                               raise O2c_Error with "'" & FNm & "." & MName
                                 & "' is a proper procedure, not a function";
                            end if;
-                           R.Typ := Xs (XI).Typ;
+                           --  result: scalar, or an exported POINTER type
+                           --  of the module (M20b)
+                           if Length (Xs (XI).Ret_Nm) > 0 then
+                              R.Typ := T_Ptr;
+                              R.Ptr_UT := X_Ret_UT (XI);
+                           else
+                              R.Typ := Xs (XI).Typ;
+                           end if;
                            if Cur.Kind = Lex.Tok_LParen then
                               Next;
                               declare
@@ -1547,7 +1618,7 @@ package body O2c_Compiler is
                                     end if;
                                     declare
                                        A : Expr_Rec :=
-                                         Parse_Actual (Xs (XI).P (N_A));
+                                         Parse_Actual (X_Formal (XI, N_A));
                                     begin
                                        Args (N_A) := A.Text;
                                     end;
@@ -2896,23 +2967,65 @@ package body O2c_Compiler is
               else Ada_Type (Ret_Typ));
       end if;
       if Exported then
-         --  M19: only scalar, non-method procedures/functions export.
+         --  M19/M20b: exported procedures may take scalars and this
+         --  module's exported RECORD (VAR) / POINTER types, and return
+         --  scalars or an exported POINTER type.
          if Recv_UT /= 0 then
             raise O2c_Error with "type-bound procedures cannot be "
-              & "exported (M19; '" & Name & "')";
+              & "exported (M20b; '" & Name & "')";
          end if;
          for I in 1 .. N_Par loop
-            if POpen (I) or else PUT (I) /= 0 or else PTyp (I) = T_Set then
+            if POpen (I) then
                raise O2c_Error with "exported procedure '" & Name
-                 & "' takes scalar INTEGER/LONGINT/REAL/CHAR/BOOLEAN "
-                 & "parameters only (M19)";
+                 & "': open ARRAY parameters are not exportable yet "
+                 & "(M20c)";
+            end if;
+            if PTyp (I) = T_Set then
+               raise O2c_Error with "exported procedure '" & Name
+                 & "': SET parameters are not exportable (M20b)";
+            end if;
+            if PUT (I) /= 0 then
+               if UTypes (PUT (I)).Imported then
+                  raise O2c_Error with "exported procedure '" & Name
+                    & "': parameters may use only this module's exported "
+                    & "types (M20b)";
+               end if;
+               if not UTypes (PUT (I)).ExpT then
+                  raise O2c_Error with "exported procedure '" & Name
+                    & "': parameter type '" & To_String (UTypes (PUT (I)).Name)
+                    & "' is not exported";
+               end if;
+               if UTypes (PUT (I)).Is_Rec and then not PRef (I) then
+                  raise O2c_Error with "exported procedure '" & Name
+                    & "': RECORD parameters must be declared VAR";
+               end if;
+               if not (UTypes (PUT (I)).Is_Rec
+                       or else UTypes (PUT (I)).Is_Ptr)
+               then
+                  raise O2c_Error with "exported procedure '" & Name
+                    & "': ARRAY parameters are not exportable yet (M20c)";
+               end if;
             end if;
          end loop;
-         if Is_Function and then
-           (Ret_UT /= 0 or else not Scalar_Exportable (Ret_Typ))
-         then
-            raise O2c_Error with "exported function '" & Name
-              & "' must return INTEGER/LONGINT/REAL/CHAR/BOOLEAN (M19)";
+         if Is_Function then
+            if Ret_UT /= 0 then
+               if UTypes (Ret_UT).Imported
+                 or else not UTypes (Ret_UT).ExpT
+               then
+                  raise O2c_Error with "exported function '" & Name
+                    & "' must return a scalar or this module's exported "
+                    & "POINTER type (M20b)";
+               end if;
+               if not UTypes (Ret_UT).Is_Ptr then
+                  raise O2c_Error with "function return types: "
+                    & "INTEGER/BOOLEAN/CHAR or a POINTER type ('" & Name
+                    & "')";
+               end if;
+            elsif not Scalar_Exportable (Ret_Typ) then
+               raise O2c_Error with "exported function '" & Name
+                 & "' must return INTEGER/LONGINT/REAL/CHAR/BOOLEAN "
+                 & "or an exported POINTER (M19)";
+            end if;
          end if;
          if Pkg_Mode then
             Append_Spec (To_String (Hdr) & ";");
@@ -2923,9 +3036,21 @@ package body O2c_Compiler is
                   Name => To_Unbounded_String (Name), others => <>);
             begin
                for I in 1 .. N_Par loop
-                  E.P (I) := (Name => PName (I), Typ => PTyp (I),
-                              UT => 0, By_Ref => PRef (I), Open => POpen (I));
+                  E.P (I) := (Name => PName (I),
+                              Typ => (if PUT (I) = 0 then PTyp (I)
+                                      else T_Int),
+                              UT => 0, By_Ref => PRef (I), Open => False);
+                  if PUT (I) /= 0 then
+                     E.P_Nm (I) := To_Unbounded_String
+                       (QName (To_String (Mod_Name),
+                               To_String (UTypes (PUT (I)).Name)));
+                  end if;
                end loop;
+               if Ret_UT /= 0 then
+                  E.Ret_Nm := To_Unbounded_String
+                    (QName (To_String (Mod_Name),
+                            To_String (UTypes (Ret_UT).Name)));
+               end if;
                X_Add (To_String (Mod_Name), E);
             end;
          end if;
@@ -3603,7 +3728,7 @@ package body O2c_Compiler is
                               end if;
                               declare
                                  A : Expr_Rec :=
-                                   Parse_Actual (Xs (XI).P (N_A));
+                                   Parse_Actual (X_Formal (XI, N_A));
                               begin
                                  Args (N_A) := A.Text;
                               end;
