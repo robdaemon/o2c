@@ -89,6 +89,8 @@ package body O2c_Lexer is
          when Tok_True      => return "keyword TRUE";
          when Tok_False     => return "keyword FALSE";
          when Tok_Nil       => return "keyword NIL";
+         when Tok_Is        => return "keyword IS";
+         when Tok_With      => return "keyword WITH";
          when Tok_Div       => return "keyword DIV";
          when Tok_Mod       => return "keyword MOD";
          when Tok_And       => return "keyword AND";
@@ -157,6 +159,8 @@ package body O2c_Lexer is
       elsif Folded = "TRUE" then return Tok_True;
       elsif Folded = "FALSE" then return Tok_False;
       elsif Folded = "NIL" then return Tok_Nil;
+      elsif Folded = "IS" then return Tok_Is;
+      elsif Folded = "WITH" then return Tok_With;
       elsif Folded = "DIV" then return Tok_Div;
       elsif Folded = "MOD" then return Tok_Mod;
       elsif Folded = "AND" then return Tok_And;

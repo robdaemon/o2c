@@ -6,11 +6,16 @@ type Pair = record a, b: integer end;
 type Line = array 8 of char;
 type Node = pointer to NodeDesc;
 type NodeDesc = record v: integer; next: Node end;
+type Shape = record x: integer end;
+type Circle = record (Shape) r: integer end;
+type PShape = pointer to Shape;
+type PCircle = pointer to Circle;
 
 var n: integer;
 var v: Vector; p: Pair; q: Pair; i: integer;
 var msg: Line; ch: char;
 var head, cur: Node;
+var shp: PShape; circ: PCircle;
 
 const Greeting = "hello from Oberon-2";
 
@@ -124,6 +129,16 @@ begin
   return len(s)
 end CLen;
 
+procedure (var s: Shape) Widen (k: integer);
+begin
+  s.x := s.x + k
+end Widen;
+
+procedure (var c: Circle) Widen (k: integer);
+begin
+  c.r := c.r + k
+end Widen;
+
 
 begin
   n := 0;
@@ -202,5 +217,23 @@ begin
   Out.Int(CLen(msg), 0);
   Out.Ln;
   UpTo12;
-  Dot
+  Dot;
+  new(shp);
+  shp^.x := 0;
+  new(circ);
+  circ^.x := 10;
+  circ^.r := 1;
+  shp.Widen(7);
+  Out.Int(shp^.x, 0);
+  Out.Ln;
+  circ.Widen(4);
+  Out.Int(circ^.r, 0);
+  Out.Ln;
+  if circ IS Circle then
+    with circ: Circle do
+      circ^.r := circ^.r + 2
+    end;
+    Out.Int(circ^.r, 0);
+    Out.Ln
+  end
 end Hello.

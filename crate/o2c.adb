@@ -21,11 +21,16 @@ procedure O2c is
     "type Line = array 8 of char;" & ASCII.LF &
     "type Node = pointer to NodeDesc;" & ASCII.LF &
     "type NodeDesc = record v: integer; next: Node end;" & ASCII.LF &
+    "type Shape = record x: integer end;" & ASCII.LF &
+    "type Circle = record (Shape) r: integer end;" & ASCII.LF &
+    "type PShape = pointer to Shape;" & ASCII.LF &
+    "type PCircle = pointer to Circle;" & ASCII.LF &
     ASCII.LF &
     "var n: integer;" & ASCII.LF &
     "var v: Vector; p: Pair; q: Pair; i: integer;" & ASCII.LF &
     "var msg: Line; ch: char;" & ASCII.LF &
     "var head, cur: Node;" & ASCII.LF &
+    "var shp: PShape; circ: PCircle;" & ASCII.LF &
     ASCII.LF &
     "const Greeting = ""hello from Oberon-2"";" & ASCII.LF &
     ASCII.LF &
@@ -139,6 +144,16 @@ procedure O2c is
     "  return len(s)" & ASCII.LF &
     "end CLen;" & ASCII.LF &
     ASCII.LF &
+    "procedure (var s: Shape) Widen (k: integer);" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  s.x := s.x + k" & ASCII.LF &
+    "end Widen;" & ASCII.LF &
+    ASCII.LF &
+    "procedure (var c: Circle) Widen (k: integer);" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  c.r := c.r + k" & ASCII.LF &
+    "end Widen;" & ASCII.LF &
+    ASCII.LF &
     ASCII.LF &
     "begin" & ASCII.LF &
     "  n := 0;" & ASCII.LF &
@@ -217,7 +232,25 @@ procedure O2c is
     "  Out.Int(CLen(msg), 0);" & ASCII.LF &
     "  Out.Ln;" & ASCII.LF &
     "  UpTo12;" & ASCII.LF &
-    "  Dot" & ASCII.LF &
+    "  Dot;" & ASCII.LF &
+    "  new(shp);" & ASCII.LF &
+    "  shp^.x := 0;" & ASCII.LF &
+    "  new(circ);" & ASCII.LF &
+    "  circ^.x := 10;" & ASCII.LF &
+    "  circ^.r := 1;" & ASCII.LF &
+    "  shp.Widen(7);" & ASCII.LF &
+    "  Out.Int(shp^.x, 0);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  circ.Widen(4);" & ASCII.LF &
+    "  Out.Int(circ^.r, 0);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  if circ IS Circle then" & ASCII.LF &
+    "    with circ: Circle do" & ASCII.LF &
+    "      circ^.r := circ^.r + 2" & ASCII.LF &
+    "    end;" & ASCII.LF &
+    "    Out.Int(circ^.r, 0);" & ASCII.LF &
+    "    Out.Ln" & ASCII.LF &
+    "  end" & ASCII.LF &
     "end Hello.";
 
 

@@ -36,6 +36,8 @@ package body O2c_Compiler is
       Name    : Unbounded_String;
       Is_Rec  : Boolean := True;
       Is_Ptr  : Boolean := False;   --  POINTER TO (target in Ptr_Tgt)
+      Is_Ext  : Boolean := False;   --  RECORD (T0) extension (M13)
+      Parent  : Natural := 0;       --  parent record UT (when Is_Ext)
       Ptr_Tgt : Natural := 0;       --  record UT a pointer designates
       Pend    : Boolean := False;   --  POINTER TO a not-yet-declared
                                     --  target (buffer its access decl)
@@ -78,6 +80,28 @@ package body O2c_Compiler is
 
    Syms  : array (1 .. Max_Syms) of Sym := (others => <>);
    N_Sym : Natural := 0;
+
+   --  type-bound procedures (M13): method name, the record type it is
+   --  bound to, and its S_Proc symbol (params 1.. include the receiver).
+   Max_Bound : constant := 64;
+   type Bound_Rec is record
+      Name   : Unbounded_String;
+      RecUT  : Natural := 0;
+      SymIdx : Natural := 0;
+   end record;
+   Bounds : array (1 .. Max_Bound) of Bound_Rec := (others => <>);
+   N_Bound : Natural := 0;
+
+   --  receiver context while parsing a type-bound procedure
+   Recv_UT  : Natural := 0;      --  record type the method binds to
+   Recv_Var : Boolean := False;  --  VAR receiver
+   Recv_Nm  : Unbounded_String;  --  receiver variable name
+
+   --  active WITH guards (M13): variable name -> guard record type
+   Max_Guards : constant := 32;
+   G_Nm : array (1 .. Max_Guards) of Unbounded_String;
+   G_Rec : array (1 .. Max_Guards) of Natural := (others => 0);
+   G_N   : Natural := 0;
 
    Decl_Buf  : Unbounded_String;
    Body_Buf  : Unbounded_String;
@@ -154,15 +178,62 @@ package body O2c_Compiler is
       return 0;
    end Find_UT;
 
-   function Field_Of (UT : Natural; Name : String) return Natural is
+   --  Find a record field across the extension chain (M13): searches
+   --  UT's own fields then its parents.  Returns the index within the
+   --  declaring record and that record's UT in Owner (0 when absent).
+   function Field_Of (UT : Natural; Name : String;
+                      Owner : out Natural) return Natural is
+      U : Natural := UT;
    begin
-      for I in 1 .. UTypes (UT).N_F loop
-         if To_String (UTypes (UT).F (I).Name) = Name then
-            return I;
-         end if;
+      while U /= 0 loop
+         for I in 1 .. UTypes (U).N_F loop
+            if To_String (UTypes (U).F (I).Name) = Name then
+               Owner := U;
+               return I;
+            end if;
+         end loop;
+         U := UTypes (U).Parent;    --  walk the extension chain
       end loop;
+      Owner := 0;
       return 0;
    end Field_Of;
+
+   --  True when record type T is Anc or a (direct/indirect) extension of
+   --  it; used for pointer widening (M13).
+   function Rec_Descends (T : Natural; Anc : Natural) return Boolean is
+      U : Natural := T;
+   begin
+      while U /= 0 loop
+         if U = Anc then
+            return True;
+         end if;
+         U := UTypes (U).Parent;
+      end loop;
+      return False;
+   end Rec_Descends;
+
+   --  Nearest type-bound method named Name visible on record type UT:
+   --  searches UT then its ancestors (M13); returns a Bounds index.
+   function Bound_Find (UT : Natural; Name : String) return Natural is
+      U : Natural := UT;
+   begin
+      while U /= 0 loop
+         for I in 1 .. N_Bound loop
+            if Bounds (I).RecUT = U
+              and then To_String (Bounds (I).Name) = Name
+            then
+               return I;
+            end if;
+         end loop;
+         U := UTypes (U).Parent;
+      end loop;
+      return 0;
+   end Bound_Find;
+
+   function Method_Impl_Name (Name : String; UT : Natural) return String is
+   begin
+      return Name & "_O2c_" & To_String (UTypes (UT).Name);
+   end Method_Impl_Name;
 
    function Starts_Expr (K : Lex.Token_Kind) return Boolean is
      (K = Lex.Tok_Ident or else K = Lex.Tok_Number
@@ -238,6 +309,29 @@ package body O2c_Compiler is
       return Scalar_Init (F.Typ);
    end Field_Init;
 
+   --  Named aggregate initializer for a record variable: lists every
+   --  component, ancestors first (Ada rejects partial aggregates of
+   --  record extensions in a declarative part).
+   function Record_Init (UT : Natural) return String is
+      function All_But (U : Natural) return String is
+         S : Unbounded_String;
+      begin
+         if U /= 0 then
+            S := S & All_But (UTypes (U).Parent);
+            for F in 1 .. UTypes (U).N_F loop
+               if Length (S) > 0 then
+                  S := S & ", ";
+               end if;
+               S := S & To_String (UTypes (U).F (F).Name) & " => "
+                 & Field_Init (UTypes (U).F (F));
+            end loop;
+         end if;
+         return To_String (S);
+      end All_But;
+   begin
+      return "(" & All_But (UT) & ")";
+   end Record_Init;
+
    function Ada_String_Literal (S : String) return String is
       R : Unbounded_String;
    begin
@@ -290,6 +384,25 @@ package body O2c_Compiler is
    begin
       D.Text := To_Unbounded_String (Base_Name);
       K := not UTypes (UT).Is_Ptr;
+      --  WITH guard (M13): a guarded pointer variable dereferences to
+      --  its guard record type, emitted through a view conversion
+      --  (only when a member selector actually follows).
+      if not K and then (Cur.Kind = Lex.Tok_Caret
+                         or else Cur.Kind = Lex.Tok_Dot)
+      then
+         for Gi in 1 .. G_N loop
+            if To_String (G_Nm (Gi)) = Base_Name then
+               K := True;
+               UT := G_Rec (Gi);
+               D.Text := To_Unbounded_String (To_String (UTypes (UT).Name)
+                                              & " (" & Base_Name & ".all)");
+               if Cur.Kind = Lex.Tok_Caret then
+                  Next;              --  the guard supplies the deref
+               end if;
+               exit;
+            end if;
+         end loop;
+      end if;
       loop
          if Cur.Kind = Lex.Tok_Caret then
             if K then
@@ -312,21 +425,23 @@ package body O2c_Compiler is
             Next;
             Expect (Lex.Tok_Ident, "a field name");
             declare
-               F : constant Natural := Field_Of (UT, Cur.Text (1 .. Cur.Len));
+               FO : Natural;
+               F  : constant Natural :=
+                 Field_Of (UT, Cur.Text (1 .. Cur.Len), FO);
             begin
                if F = 0 then
                   raise O2c_Error with "no field '" & Cur.Text (1 .. Cur.Len)
                     & "' in record " & To_String (UTypes (UT).Name);
                end if;
-               D.Text := D.Text & "." & To_String (UTypes (UT).F (F).Name);
-               if UTypes (UT).F (F).UT /= 0 then
+               D.Text := D.Text & "." & To_String (UTypes (FO).F (F).Name);
+               if UTypes (FO).F (F).UT /= 0 then
                   --  pointer-typed field: the designator value is now
                   --  a pointer that may itself be deref'd further
                   K := False;
-                  UT := UTypes (UT).F (F).UT;
+                  UT := UTypes (FO).F (F).UT;
                else
                   D.K := D_Scalar;
-                  D.Sc := UTypes (UT).F (F).Typ;
+                  D.Sc := UTypes (FO).F (F).Typ;
                   Next;           --  past the field name
                   return D;
                end if;
@@ -487,26 +602,109 @@ package body O2c_Compiler is
                  & "variable, not NIL (line "
                  & Natural'Image (Cur.Line) & ")";
             end if;
-         elsif A.Typ /= T_Ptr or else A.Ptr_UT /= Formal.UT then
+         elsif A.Typ /= T_Ptr then
             raise O2c_Error with "argument must be a pointer of type "
               & To_String (UTypes (Formal.UT).Name) & " or NIL (line "
               & Natural'Image (Cur.Line) & ")";
+         elsif A.Ptr_UT /= Formal.UT then
+            --  widening for VALUE pointer formals only (M13)
+            if Formal.By_Ref
+              or else not UTypes (A.Ptr_UT).Is_Ptr
+              or else not UTypes (Formal.UT).Is_Ptr
+              or else not Rec_Descends (UTypes (A.Ptr_UT).Ptr_Tgt,
+                                        UTypes (Formal.UT).Ptr_Tgt)
+            then
+               raise O2c_Error with "argument must be a pointer of type "
+                 & To_String (UTypes (Formal.UT).Name) & " or NIL (line "
+                 & Natural'Image (Cur.Line) & ")";
+            end if;
+            A.Text := To_Unbounded_String
+              (To_String (UTypes (Formal.UT).Name) & " (" & To_String (A.Text)
+               & ")");
          end if;
       end if;
       return A;
    end Parse_Actual;
 
+   --  Emit a type-bound procedure call (M13).  Cur is just past the
+   --  method name; Recv is the Ada receiver expression (a record
+   --  variable or p.all).  Formal #1 is the receiver, so the actual
+   --  count must be Params - 1.
+   procedure Emit_Method_Call (BI : Natural; Recv : String) is
+      SIdx : constant Natural := Bounds (BI).SymIdx;
+      NPar : constant Natural := Syms (SIdx).Params;
+      Exp  : constant Natural := NPar - 1;
+      Call : Unbounded_String;
+   begin
+      Call := Call & Method_Impl_Name (To_String (Bounds (BI).Name),
+                                       Bounds (BI).RecUT)
+        & " (" & Recv;
+      if Cur.Kind = Lex.Tok_LParen then
+         Next;
+         declare
+            N_A : Natural := 0;
+         begin
+            loop
+               exit when Cur.Kind = Lex.Tok_RParen;
+               N_A := N_A + 1;
+               declare
+                  A : Expr_Rec :=
+                    Parse_Actual (Syms (SIdx).P (N_A + 1));
+               begin
+                  Call := Call & ", " & To_String (A.Text);
+               end;
+               exit when Cur.Kind /= Lex.Tok_Comma;
+               Next;
+            end loop;
+            if N_A /= Exp then
+               raise O2c_Error with "method '"
+                 & To_String (Bounds (BI).Name) & "' expects "
+                 & Natural'Image (Exp)
+                 & " argument(s), got " & Natural'Image (N_A);
+            end if;
+         end;
+         Expect (Lex.Tok_RParen, "')'");
+         Next;
+      else
+         if Exp /= 0 then
+            raise O2c_Error with "method '"
+              & To_String (Bounds (BI).Name) & "' expects "
+              & Natural'Image (Exp) & " argument(s)";
+         end if;
+      end if;
+      Append_Body ("      " & To_String (Call) & ");");
+   end Emit_Method_Call;
+
    --  Assign a POINTER value (designator or NIL) to an Ada LHS whose
    --  pointer user type is LHS_UT; type-check the value first (M8).
    procedure Assign_Pointer (LHS : String; LHS_UT : Natural) is
-      R : Expr_Rec := Parse_Expr;
+      R    : Expr_Rec := Parse_Expr;
+      Conv : Boolean := False;
    begin
-      if R.Typ /= T_Nil and then
-        (R.Typ /= T_Ptr or else R.Ptr_UT /= LHS_UT)
-      then
+      if R.Typ = T_Nil then
+         null;
+      elsif R.Typ = T_Ptr then
+         if R.Ptr_UT /= LHS_UT then
+            --  widening: assign a pointer to an extension into a
+            --  pointer to its ancestor (M13)
+            if not UTypes (LHS_UT).Is_Ptr or else not UTypes (R.Ptr_UT).Is_Ptr
+              or else not Rec_Descends (UTypes (R.Ptr_UT).Ptr_Tgt,
+                                        UTypes (LHS_UT).Ptr_Tgt)
+            then
+               raise O2c_Error with "pointer type mismatch assigning " & LHS;
+            end if;
+            Conv := True;
+         end if;
+      else
          raise O2c_Error with "pointer type mismatch assigning " & LHS;
       end if;
-      Append_Body ("      " & LHS & " := " & To_String (R.Text) & ";");
+      if Conv then
+         Append_Body ("      " & LHS & " := "
+                      & To_String (UTypes (LHS_UT).Name) & " ("
+                      & To_String (R.Text) & ");");
+      else
+         Append_Body ("      " & LHS & " := " & To_String (R.Text) & ";");
+      end if;
    end Assign_Pointer;
 
    function Parse_Factor return Expr_Rec is
@@ -665,6 +863,31 @@ package body O2c_Compiler is
                   U  : constant Natural := Syms (Id).UT;
                begin
                   Next;              --  past the variable name
+                  if UTypes (U).Is_Ptr and then Cur.Kind = Lex.Tok_Is then
+                     --  p IS T: class-wide membership test (M13)
+                     Next;
+                     Expect (Lex.Tok_Ident, "a record type after IS");
+                     declare
+                        TT  : constant Natural := Find_UT (Cur.Text (1 .. Cur.Len));
+                        Trc : constant Natural := UTypes (U).Ptr_Tgt;
+                     begin
+                        if TT = 0 or else not UTypes (TT).Is_Rec
+                          or else not (Rec_Descends (TT, Trc)
+                                       or else Rec_Descends (Trc, TT))
+                        then
+                           raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
+                             & "' is not in the record hierarchy of this "
+                             & "POINTER type (line "
+                             & Natural'Image (Cur.Line) & ")";
+                        end if;
+                        R.Text := To_Unbounded_String
+                          ("(" & Nm & ".all in "
+                           & To_String (UTypes (TT).Name) & "'Class)");
+                        R.Typ := T_Bool;
+                        Next;
+                     end;
+                     return R;
+                  end if;
                   if UTypes (U).Is_Ptr or else UTypes (U).Is_Rec then
                      --  POINTER/record designator: '^' deref and
                      --  '.field' selectors end on a scalar or pointer.
@@ -1038,15 +1261,7 @@ package body O2c_Compiler is
             if UTypes (UT).Is_Ptr then
                Init_Txt := Init_Txt & "null";
             elsif UTypes (UT).Is_Rec then
-               Init_Txt := Init_Txt & "(";
-               for F in 1 .. UTypes (UT).N_F loop
-                  if F > 1 then
-                     Init_Txt := Init_Txt & ", ";
-                  end if;
-                  Init_Txt := Init_Txt & To_String (UTypes (UT).F (F).Name)
-                    & " => " & Field_Init (UTypes (UT).F (F));
-               end loop;
-               Init_Txt := Init_Txt & ")";
+               Init_Txt := Init_Txt & Record_Init (UT);
             else
                Init_Txt := Init_Txt & "(others => "
                  & Scalar_Init (UTypes (UT).Elem) & ")";
@@ -1165,11 +1380,38 @@ package body O2c_Compiler is
                     & Natural'Image (Cur.Line) & ")";
                end if;
                UTypes (UTI).Ptr_Tgt := TGT;
-               Append_Decl ("   type " & Name & " is access " & TName & ";");
+               Append_Decl ("   type " & Name & " is access all " & TName
+                         & "'Class;");
             end if;
          end;
       elsif Cur.Kind = Lex.Tok_Record then
          Next;
+         --  optional extension clause: RECORD (Parent) ... (M13)
+         if Cur.Kind = Lex.Tok_LParen then
+            Next;
+            Expect (Lex.Tok_Ident, "the parent record type after '('");
+            declare
+               PT : constant Natural := Find_UT (Cur.Text (1 .. Cur.Len));
+            begin
+               if PT = 0 then
+                  raise O2c_Error with "unknown parent record type '"
+                    & Cur.Text (1 .. Cur.Len) & "' (line "
+                    & Natural'Image (Cur.Line) & ")";
+               end if;
+               if not UTypes (PT).Is_Rec or else UTypes (PT).Is_Ext
+                 or else UTypes (PT).Is_Ptr
+               then
+                  raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
+                    & "' is not an extensible RECORD type (line "
+                    & Natural'Image (Cur.Line) & ")";
+               end if;
+               UTypes (UTI).Is_Ext := True;
+               UTypes (UTI).Parent := PT;
+            end;
+            Next;
+            Expect (Lex.Tok_RParen, "')' after the parent record type");
+            Next;
+         end if;
          loop
             exit when Cur.Kind = Lex.Tok_End;
             declare
@@ -1215,6 +1457,20 @@ package body O2c_Compiler is
                   Next;             --  optional separator before END
                end if;
                for I in 1 .. NF loop
+                  if UTypes (UTI).Parent /= 0 then
+                     declare
+                        Own : Natural;
+                     begin
+                        if Field_Of (UTypes (UTI).Parent,
+                                     To_String (FNames (I)), Own) /= 0 then
+                           raise O2c_Error with "field '"
+                             & To_String (FNames (I))
+                             & "' redefines a field of the parent record "
+                             & To_String
+                               (UTypes (UTypes (UTI).Parent).Name);
+                        end if;
+                     end;
+                  end if;
                   UTypes (UTI).N_F := UTypes (UTI).N_F + 1;
                   if UTypes (UTI).N_F > Max_Fields then
                      raise O2c_Error with "too many record fields";
@@ -1243,11 +1499,16 @@ package body O2c_Compiler is
                   UTypes (P).Ptr_Tgt := UTI;
                   UTypes (P).Pend := False;
                   Append_Decl ("   type " & To_String (UTypes (P).Name)
-                               & " is access " & Name & ";");
+                               & " is access all " & Name & "'Class;");
                end if;
             end loop;
          end;
-         Append_Decl ("   type " & Name & " is record");
+         Append_Decl ("   type " & Name
+                      & (if UTypes (UTI).Is_Ext then
+                           " is new " & To_String
+                             (UTypes (UTypes (UTI).Parent).Name)
+                           & " with record"
+                         else " is tagged record"));
          for F in 1 .. UTypes (UTI).N_F loop
             declare
                Fl : UField renames UTypes (UTI).F (F);
@@ -1282,6 +1543,7 @@ package body O2c_Compiler is
       Ret_UT  : Natural := 0;     --  pointer return user type (M11)
       Is_Function : Boolean := False;
       Hdr   : Unbounded_String;
+      Impl_Nm : Unbounded_String;  --  generated Ada name (methods, M13)
       POpen : array (1 .. Max_Params) of Boolean := (others => False);
 
       --  Ada type name for formal parameter I (M12): open arrays map to
@@ -1289,6 +1551,10 @@ package body O2c_Compiler is
       --  types use their Ada name; otherwise the scalar Ada type.
       function Formal_Ada_Type (I : Natural) return String is
       begin
+         if I = 1 and then Recv_UT /= 0 then
+            --  method receiver: class-wide view of the bound record (M13)
+            return To_String (UTypes (Recv_UT).Name) & "'Class";
+         end if;
          if POpen (I) then
             if PTyp (I) = T_Char then
                return "String";
@@ -1304,6 +1570,18 @@ package body O2c_Compiler is
          end if;
       end Formal_Ada_Type;
    begin
+      if Recv_UT /= 0 then
+         --  type-bound procedure: receiver is formal parameter #1
+         Impl_Nm := To_Unbounded_String (Method_Impl_Name (Name, Recv_UT));
+         N_Par := 1;
+         PName (1) := Recv_Nm;
+         PTyp (1) := T_Int;
+         PUT (1) := Recv_UT;
+         PRef (1) := Recv_Var;
+         POpen (1) := False;
+      else
+         Impl_Nm := To_Unbounded_String (Name);
+      end if;
       Seen_Proc := True;
       Next;
       if Cur.Kind = Lex.Tok_LParen then
@@ -1388,6 +1666,10 @@ package body O2c_Compiler is
       Ret_Typ := T_Int;
       Ret_UT := 0;
       if Cur.Kind = Lex.Tok_Colon then
+         if Recv_UT /= 0 then
+            raise O2c_Error with "type-bound procedures cannot return "
+              & "values (M13) (line " & Natural'Image (Cur.Line) & ")";
+         end if;
          Next;
          if Cur.Kind /= Lex.Tok_Ident then
             raise O2c_Error with "a return type name expected (line "
@@ -1425,6 +1707,21 @@ package body O2c_Compiler is
            (Name => PName (I), Typ => PTyp (I), By_Ref => PRef (I),
             UT => PUT (I), Open => POpen (I));
       end loop;
+      if Recv_UT /= 0 then
+         for B in 1 .. N_Bound loop
+            if Bounds (B).RecUT = Recv_UT
+              and then To_String (Bounds (B).Name) = Name
+            then
+               raise O2c_Error with "method '" & Name
+                 & "' is already declared on type "
+                 & To_String (UTypes (Recv_UT).Name);
+            end if;
+         end loop;
+         N_Bound := N_Bound + 1;
+         Bounds (N_Bound) :=
+           (Name => To_Unbounded_String (Name), RecUT => Recv_UT,
+            SymIdx => N_Sym);
+      end if;
 
       --  parameters are in scope for the body (popped after it)
       Param_Base := N_Sym;
@@ -1436,7 +1733,7 @@ package body O2c_Compiler is
       end loop;
 
       Hdr := Hdr & "   " & (if Is_Function then "function " else "procedure ")
-        & Name;
+        & To_String (Impl_Nm);
       if N_Par > 0 then
          Hdr := Hdr & " (";
          for I in 1 .. N_Par loop
@@ -1535,7 +1832,7 @@ package body O2c_Compiler is
       Next;
       Expect (Lex.Tok_Semi, "';' after END");
       Next;
-      Append_Decl ("   end " & Name & ";");
+      Append_Decl ("   end " & To_String (Impl_Nm) & ";");
 
       N_Sym := Param_Base;        --  drop parameters and locals
       N_UT := Local_N_UT;         --  drop procedure-local types (M10)
@@ -1718,6 +2015,65 @@ package body O2c_Compiler is
       Next;                          --  past EXIT
       Append_Body ("      exit " & To_String (Loop_Lbl (Loop_Depth)) & ";");
    end Parse_Exit;
+
+   procedure Parse_With is
+      --  WITH p: T DO ... END (M13): narrows a POINTER variable's
+      --  guarded member access to record type T (a view conversion is
+      --  emitted per member use; a mismatched tag raises at runtime).
+      VName : String (1 .. 64);
+      V_Len : Natural;
+      Idx   : Natural;
+      GT    : Natural;
+   begin
+      Next;                       --  WITH
+      if Cur.Kind /= Lex.Tok_Ident then
+         raise O2c_Error with "a guarded POINTER variable expected after "
+           & "WITH (line " & Natural'Image (Cur.Line) & ")";
+      end if;
+      V_Len := Cur.Len;
+      VName (1 .. V_Len) := Cur.Text (1 .. V_Len);
+      Idx := Find (VName (1 .. V_Len));
+      if Idx = 0 or else Syms (Idx).Kind /= S_Var
+        or else Syms (Idx).UT = 0
+        or else not UTypes (Syms (Idx).UT).Is_Ptr
+      then
+         raise O2c_Error with "WITH guards a POINTER variable ('"
+           & VName (1 .. V_Len) & "' is not one) (line "
+           & Natural'Image (Cur.Line) & ")";
+      end if;
+      Next;
+      Expect (Lex.Tok_Colon, "':' in the WITH guard");
+      Next;
+      if Cur.Kind /= Lex.Tok_Ident then
+         raise O2c_Error with "a record type expected in the WITH guard "
+           & "(line " & Natural'Image (Cur.Line) & ")";
+      end if;
+      GT := Find_UT (Cur.Text (1 .. Cur.Len));
+      if GT = 0 or else not UTypes (GT).Is_Rec
+        or else not Rec_Descends (GT, UTypes (Syms (Idx).UT).Ptr_Tgt)
+      then
+         raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
+           & "' is not an extension of the POINTER's record type "
+           & To_String (UTypes (UTypes (Syms (Idx).UT).Ptr_Tgt).Name);
+      end if;
+      Next;
+      Expect (Lex.Tok_Do, "'DO'");
+      Next;
+      G_N := G_N + 1;
+      G_Nm (G_N) := To_Unbounded_String (VName (1 .. V_Len));
+      G_Rec (G_N) := GT;
+      declare
+         Before : constant Natural := Length (Body_Buf);
+      begin
+         Statement_Seq;              --  until END
+         if Length (Body_Buf) = Before then
+            Append_Body ("         null;");
+         end if;
+      end;
+      G_N := G_N - 1;
+      Expect (Lex.Tok_End, "'END' closing the WITH");
+      Next;
+   end Parse_With;
 
    procedure Parse_For is
       V_Name : String (1 .. 64);
@@ -1950,6 +2306,8 @@ package body O2c_Compiler is
             Parse_Loop;
          elsif Cur.Kind = Lex.Tok_Exit then
             Parse_Exit;
+         elsif Cur.Kind = Lex.Tok_With then
+            Parse_With;
          elsif Cur.Kind = Lex.Tok_Ident then
             H_Len := Cur.Len;
             Head (1 .. H_Len) := Cur.Text (1 .. H_Len);
@@ -2138,46 +2496,66 @@ package body O2c_Compiler is
               and then Syms (Idx).Kind = S_Var
               and then Syms (Idx).UT /= 0
             then
-               --  record field assignment: r.f := e (scalar or POINTER
-               --  field in M8); other user arrays get an error here.
+               --  member access: r.f := e, r.M(...) / p.M(...) method
+               --  calls (M13), or an error for pointer field selectors.
                declare
                   U     : constant Natural := Syms (Idx).UT;
+                  Urec  : constant Natural :=
+                    (if UTypes (U).Is_Ptr then UTypes (U).Ptr_Tgt else U);
                   FName : String (1 .. 64);
                   F_Len : Natural;
-                  F     : Natural;
-                  V     : Expr_Rec;
+                  BI    : Natural;
                begin
-                  if UTypes (U).Is_Ptr then
+                  Next;          --  past '.'
+                  Expect (Lex.Tok_Ident, "a field or method name");
+                  FName (1 .. Cur.Len) := Cur.Text (1 .. Cur.Len);
+                  F_Len := Cur.Len;
+                  BI := Bound_Find (Urec, FName (1 .. F_Len));
+                  if BI /= 0 then
+                     --  type-bound procedure call on the receiver
+                     declare
+                        Rtxt : constant String :=
+                          (if UTypes (U).Is_Ptr
+                           then Head (1 .. H_Len) & ".all"
+                           else Head (1 .. H_Len));
+                     begin
+                        Next;      --  past the method name
+                        Emit_Method_Call (BI, Rtxt);
+                     end;
+                  elsif UTypes (U).Is_Ptr then
                      raise O2c_Error with "'.' selects a record field; "
                        & "deref the POINTER with '^' first (line "
                        & Natural'Image (Cur.Line) & ")";
                   elsif UTypes (U).Is_Rec then
-                     Next;          --  past '.'
-                     Expect (Lex.Tok_Ident, "a field name");
-                     FName (1 .. Cur.Len) := Cur.Text (1 .. Cur.Len);
-                     F_Len := Cur.Len;
-                     F := Field_Of (U, FName (1 .. F_Len));
-                     if F = 0 then
-                        raise O2c_Error with "no field '" & FName (1 .. F_Len)
-                          & "' in record " & To_String (UTypes (U).Name);
-                     end if;
-                     Next;
-                     Expect (Lex.Tok_Assign, "':='");
-                     Next;
-                     if UTypes (U).F (F).UT /= 0 then
-                        Assign_Pointer (Head (1 .. H_Len) & "."
-                                        & FName (1 .. F_Len),
-                                        UTypes (U).F (F).UT);
-                     else
-                        V := Parse_Expr;
-                        if V.Typ /= UTypes (U).F (F).Typ then
-                           raise O2c_Error with "field type mismatch assigning "
-                             & Head (1 .. H_Len) & "." & FName (1 .. F_Len);
+                     declare
+                        FO : Natural;
+                        F  : Natural := Field_Of (U, FName (1 .. F_Len), FO);
+                        V  : Expr_Rec;
+                     begin
+                        if F = 0 then
+                           raise O2c_Error with "no field '"
+                             & FName (1 .. F_Len) & "' in record "
+                             & To_String (UTypes (U).Name);
                         end if;
-                        Append_Body ("      " & Head (1 .. H_Len) & "."
-                                     & FName (1 .. F_Len) & " := "
-                                     & To_String (V.Text) & ";");
-                     end if;
+                        Next;
+                        Expect (Lex.Tok_Assign, "':='");
+                        Next;
+                        if UTypes (FO).F (F).UT /= 0 then
+                           Assign_Pointer (Head (1 .. H_Len) & "."
+                                           & FName (1 .. F_Len),
+                                           UTypes (FO).F (F).UT);
+                        else
+                           V := Parse_Expr;
+                           if V.Typ /= UTypes (FO).F (F).Typ then
+                              raise O2c_Error with "field type mismatch "
+                                & "assigning " & Head (1 .. H_Len) & "."
+                                & FName (1 .. F_Len);
+                           end if;
+                           Append_Body ("      " & Head (1 .. H_Len) & "."
+                                        & FName (1 .. F_Len) & " := "
+                                        & To_String (V.Text) & ";");
+                        end if;
+                     end;
                   else
                      raise O2c_Error with "array '" & Head (1 .. H_Len)
                        & "' needs an index";
@@ -2420,6 +2798,9 @@ package body O2c_Compiler is
       Used_CStr := False;
       Used_Int_Arr := False;
       Used_Bool_Arr := False;
+      N_Bound := 0;
+      Recv_UT := 0;
+      G_N := 0;
       Seen_Proc := False;
 
       Lex.Init (Source);
@@ -2479,7 +2860,42 @@ package body O2c_Compiler is
             end loop;
          elsif Cur.Kind = Lex.Tok_Procedure then
             Next;
+            if Cur.Kind = Lex.Tok_LParen then
+               --  type-bound procedure (M13): PROCEDURE (VAR r: T) Name
+               Next;             --  past '('
+               Recv_Var := False;
+               if Cur.Kind = Lex.Tok_Var then
+                  Recv_Var := True;
+                  Next;
+               end if;
+               if Cur.Kind /= Lex.Tok_Ident then
+                  raise O2c_Error with "a receiver variable expected "
+                    & "(line " & Natural'Image (Cur.Line) & ")";
+               end if;
+               Recv_Nm := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
+               Next;
+               Expect (Lex.Tok_Colon, "':' in the receiver clause");
+               Next;
+               if Cur.Kind /= Lex.Tok_Ident then
+                  raise O2c_Error with "a receiver type expected (line "
+                    & Natural'Image (Cur.Line) & ")";
+               end if;
+               Recv_UT := Find_UT (Cur.Text (1 .. Cur.Len));
+               if Recv_UT = 0 or else not UTypes (Recv_UT).Is_Rec
+                 or else UTypes (Recv_UT).Is_Ptr
+               then
+                  raise O2c_Error with "the receiver type must be a RECORD "
+                    & "type ('" & Cur.Text (1 .. Cur.Len) & "', line "
+                    & Natural'Image (Cur.Line) & ")";
+               end if;
+               Next;
+               Expect (Lex.Tok_RParen, "')' after the receiver clause");
+               Next;
+            else
+               Recv_UT := 0;
+            end if;
             Decl_Procedure;
+            Recv_UT := 0;
          else
             raise O2c_Error with "expected CONST/VAR/TYPE/PROCEDURE/BEGIN/END"
               & " at line " & Natural'Image (Cur.Line);
