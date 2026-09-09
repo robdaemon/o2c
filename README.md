@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M9 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M10 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,11 +12,12 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M9 status
+## M10 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
-`VAR` (by-reference) parameters, full expressions with Oberon
+`VAR` (by-reference) parameters and **local `const`/`type`/`var`
+declarations inside procedures** (M10), full expressions with Oberon
 precedence (`+ - * DIV MOD & OR ~ = # < <= > >=`, parens), typed
 assignment, control flow (`IF/ELSIF/ELSE`, `WHILE/DO`, `REPEAT/UNTIL`,
 `FOR/TO/BY`, `CASE` with comma label lists and optional `ELSE`,
@@ -49,6 +50,16 @@ written inside a nested `WHILE`/`REPEAT`/`FOR`; `EXIT` outside any
 `LOOP` is a compile error.  The demo walks a counter to 12 with
 `LOOP`/`EXIT`.
 
+**M10 — local declarations**: procedures may declare `const`, `type`
+and `var` sections between the header and `BEGIN`.  Locals shadow
+parameters and module names (and are dropped at the procedure's
+`END`); procedure-local types — including `POINTER TO` a local record
+— live only inside the procedure, a local `POINTER TO` must resolve
+before the body begins, and a type name may not be redeclared (module
+or local).  The demo's `UpTo12` counts to 12 with a local
+`const Goal` and local `var k`, and `Dot` builds a record through a
+procedure-local pointer type.
+
 **Deviation from the Oberon-2 spec (project decision): keywords and
 standard type names are case-insensitive** (`module`/`MODULE`,
 `integer`/`INTEGER` in type position, `var`/`VAR`, `Begin`… all
@@ -58,9 +69,9 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 `new`, `nil`, `pointer to`, …) so they are easy to type; any case is
 accepted.
 
-Not yet in M9: nested modules and other imports (only `Out`), local
-declarations inside procedures, record-typed fields/nested arrays,
-`WITH`/type extension/type-bound procedures, `SET`
+Not yet in M10: nested modules and other imports (only `Out`),
+declaring procedures inside procedures, record-typed fields/nested
+arrays, `WITH`/type extension/type-bound procedures, `SET`
 and other Oberon-2 types.
 
 ## Build

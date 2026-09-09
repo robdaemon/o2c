@@ -49,13 +49,31 @@ procedure O2c is
     "  return x * x" & ASCII.LF &
     "end Square;" & ASCII.LF &
     ASCII.LF &
-    "procedure UpTo12(var k: integer);" & ASCII.LF &
+    "procedure UpTo12;" & ASCII.LF &
+    "  const Goal = 12;" & ASCII.LF &
+    "  var k: integer;" & ASCII.LF &
     "begin" & ASCII.LF &
+    "  k := 9;" & ASCII.LF &
     "  loop" & ASCII.LF &
     "    k := k + 1;" & ASCII.LF &
-    "    if k = 12 then exit end" & ASCII.LF &
-    "  end" & ASCII.LF &
+    "    if k = Goal then exit end" & ASCII.LF &
+    "  end;" & ASCII.LF &
+    "  Out.Int(k, 0);" & ASCII.LF &
+    "  Out.Ln" & ASCII.LF &
     "end UpTo12;" & ASCII.LF &
+    ASCII.LF &
+    "procedure Dot;" & ASCII.LF &
+    "  type Pt = pointer to Point;" & ASCII.LF &
+    "  type Point = record x, y: integer end;" & ASCII.LF &
+    "  var q: Pt; d: integer;" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  new(q);" & ASCII.LF &
+    "  q^.x := 3;" & ASCII.LF &
+    "  q^.y := 4;" & ASCII.LF &
+    "  d := q^.x + q^.y;" & ASCII.LF &
+    "  Out.Int(d, 0);" & ASCII.LF &
+    "  Out.Ln" & ASCII.LF &
+    "end Dot;" & ASCII.LF &
     ASCII.LF &
     ASCII.LF &
     "begin" & ASCII.LF &
@@ -131,10 +149,8 @@ procedure O2c is
     "  end;" & ASCII.LF &
     "  Out.Int(s, 0);" & ASCII.LF &
     "  Out.Ln;" & ASCII.LF &
-    "  i := 9;" & ASCII.LF &
-    "  UpTo12(i);" & ASCII.LF &
-    "  Out.Int(i, 0);" & ASCII.LF &
-    "  Out.Ln" & ASCII.LF &
+    "  UpTo12;" & ASCII.LF &
+    "  Dot" & ASCII.LF &
     "end Hello.";
 
 

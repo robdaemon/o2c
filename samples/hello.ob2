@@ -34,13 +34,31 @@ begin
   return x * x
 end Square;
 
-procedure UpTo12(var k: integer);
+procedure UpTo12;
+  const Goal = 12;
+  var k: integer;
 begin
+  k := 9;
   loop
     k := k + 1;
-    if k = 12 then exit end
-  end
+    if k = Goal then exit end
+  end;
+  Out.Int(k, 0);
+  Out.Ln
 end UpTo12;
+
+procedure Dot;
+  type Pt = pointer to Point;
+  type Point = record x, y: integer end;
+  var q: Pt; d: integer;
+begin
+  new(q);
+  q^.x := 3;
+  q^.y := 4;
+  d := q^.x + q^.y;
+  Out.Int(d, 0);
+  Out.Ln
+end Dot;
 
 
 begin
@@ -116,8 +134,6 @@ begin
   end;
   Out.Int(s, 0);
   Out.Ln;
-  i := 9;
-  UpTo12(i);
-  Out.Int(i, 0);
-  Out.Ln
+  UpTo12;
+  Dot
 end Hello.

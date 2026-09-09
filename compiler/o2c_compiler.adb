@@ -886,6 +886,10 @@ package body O2c_Compiler is
       Name : constant String := Ident_Text;
       UTI  : Natural;
    begin
+      if Find_UT (Name) /= 0 then
+         raise O2c_Error with "type '" & Name & "' is already declared "
+           & "(line " & Natural'Image (Cur.Line) & ")";
+      end if;
       Next;                       --  past the type name
       Expect (Lex.Tok_Equal, "'='");
       Next;
@@ -1072,6 +1076,7 @@ package body O2c_Compiler is
       PRef  : array (1 .. Max_Params) of Boolean;
       N_Par : Natural := 0;
       Param_Base : Natural;
+      Local_N_UT : Natural := 0;  --  UTypes count before locals (M10)
       Ret_Typ : EType := T_Int;
       Is_Function : Boolean := False;
       Hdr   : Unbounded_String;
@@ -1171,6 +1176,50 @@ package body O2c_Compiler is
          Hdr := Hdr & " return " & Ada_Type (Ret_Typ);
       end if;
       Append_Decl (To_String (Hdr) & " is");
+      --  local declarations (M10): optional CONST/TYPE/VAR sections
+      --  between the header and BEGIN.  Their symbols push onto the
+      --  table after the parameters (so locals may shadow parameters
+      --  and module names) and are dropped with the parameters at END;
+      --  procedure-local types live at the tail of UTypes and are
+      --  dropped when the procedure ends.
+      Local_N_UT := N_UT;
+      loop
+         exit when Cur.Kind = Lex.Tok_Begin or else Cur.Kind = Lex.Tok_End;
+         if Cur.Kind = Lex.Tok_Const then
+            Next;
+            while Cur.Kind = Lex.Tok_Ident loop
+               Decl_Const;
+            end loop;
+         elsif Cur.Kind = Lex.Tok_Type then
+            Next;
+            while Cur.Kind = Lex.Tok_Ident loop
+               Decl_Type;
+            end loop;
+         elsif Cur.Kind = Lex.Tok_Var then
+            Next;
+            while Cur.Kind = Lex.Tok_Ident loop
+               Decl_Var;
+            end loop;
+         else
+            raise O2c_Error with "expected CONST/TYPE/VAR or BEGIN in "
+              & "procedure " & Name & " (line "
+              & Natural'Image (Cur.Line) & ")";
+         end if;
+      end loop;
+      --  a procedure-local POINTER TO must resolve inside this procedure
+      for I in Local_N_UT + 1 .. N_UT loop
+         if UTypes (I).Is_Ptr and then UTypes (I).Pend then
+            raise O2c_Error with "POINTER TO "
+              & To_String (UTypes (I).Pend_Nm) & " (type "
+              & To_String (UTypes (I).Name)
+              & ") has no RECORD declaration in procedure " & Name;
+         end if;
+      end loop;
+      if Cur.Kind /= Lex.Tok_Begin then
+         raise O2c_Error with "procedure " & Name
+           & " needs a BEGIN body after its declarations (line "
+           & Natural'Image (Cur.Line) & ")";
+      end if;
       if Cur.Kind = Lex.Tok_Begin then
          declare
             Saved : constant Unbounded_String := Body_Buf;
@@ -1208,7 +1257,8 @@ package body O2c_Compiler is
       Next;
       Append_Decl ("   end " & Name & ";");
 
-      N_Sym := Param_Base;        --  drop parameter scope only
+      N_Sym := Param_Base;        --  drop parameters and locals
+      N_UT := Local_N_UT;         --  drop procedure-local types (M10)
    end Decl_Procedure;
 
    --  A buffered POINTER TO whose target record never appeared is an
