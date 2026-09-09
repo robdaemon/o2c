@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M17 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M18 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M17 status
+## M18 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -20,7 +20,7 @@ Supported subset: `module`, `import Out`, `const` and `var`
 arrays, pointers) as parameters and returns (M11)**, **open array
 (`ARRAY OF`) parameters (M12)** and **record extension + type-bound
 procedures (M13 static, M14 dynamic, M15 method
-functions)**, and **record-typed fields + nested arrays (M16)**, and **SET and LONGINT scalar types (M17)** — plus **local
+functions)**, and **record-typed fields + nested arrays (M16)**, and **SET and LONGINT scalar types (M17)**, and **REAL (M18)** — plus **local
 `const`/`type`/`var` declarations inside procedures (M10)**, full
 expressions with Oberon
 precedence (`+ - * DIV MOD & OR ~ = # < <= > >=`, parens), typed
@@ -91,6 +91,14 @@ demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
 
+**M18 — REAL**: `REAL` maps to Ada `Float`.  Literals carry a
+decimal point (`1.5`, `6.25`); `+ - * /` arithmetic (division is now
+real), unary sign, comparisons and equality work, mixing with
+INTEGER is allowed for plain literals (widened) and INTEGER
+variables convert on assignment/argument/return.  `Out.Real(x, w)`
+prints a fixed three-decimal value via a generated helper.  The demo
+computes `6.25 / 2.5` and prints `2.500`.
+
 **M17 — SET and LONGINT**: `SET` maps to an Ada modular
 type (`O2c_Set is mod 2**32`, `with Interfaces`), with literal sets
 `{e1, e2, …}`, union `+`, difference `-`, intersection `*`,
@@ -160,7 +168,7 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 `new`, `nil`, `pointer to`, …) so they are easy to type; any case is
 accepted.
 
-Not yet in M17: nested modules and other imports (only `Out`),
+Not yet in M18: nested modules and other imports (only `Out`),
 declaring procedures inside procedures, multi-dimensional arrays,
 `SET` and other Oberon-2 types.
 

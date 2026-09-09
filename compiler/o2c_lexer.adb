@@ -270,6 +270,21 @@ package body O2c_Lexer is
             T.Text (N) := C;
             Advance;
          end loop;
+         --  REAL literals: digits '.' digits (M18)
+         if Peek = '.' and then Pos + 1 < Len
+           and then Src (Pos + 2) in '0' .. '9'
+         then
+            Advance;              --  the '.'
+            N := N + 1;
+            T.Text (N) := '.';
+            loop
+               C := Peek;
+               exit when not (C in '0' .. '9');
+               N := N + 1;
+               T.Text (N) := C;
+               Advance;
+            end loop;
+         end if;
          T.Kind := Tok_Number;
          T.Len := N;
          return T;

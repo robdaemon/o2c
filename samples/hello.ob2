@@ -20,6 +20,7 @@ var head, cur: Node;
 var shp: PShape; circ: PCircle;
 var sac: Tote;
 var s2: set; l2: longint;
+var r: real;
 
 const Greeting = "hello from Oberon-2";
 
@@ -264,5 +265,9 @@ begin
     l2 := l2 + 1
   end;
   if l2 = 60 then Out.Int(1, 0) else Out.Int(0, 0) end;
+  Out.Ln;
+  r := 6.25;
+  r := r / 2.5;
+  if r = 2.5 then Out.Real(r, 0) end;
   Out.Ln
 end Hello.

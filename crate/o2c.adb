@@ -35,6 +35,7 @@ procedure O2c is
     "var shp: PShape; circ: PCircle;" & ASCII.LF &
     "var sac: Tote;" & ASCII.LF &
     "var s2: set; l2: longint;" & ASCII.LF &
+    "var r: real;" & ASCII.LF &
     ASCII.LF &
     "const Greeting = ""hello from Oberon-2"";" & ASCII.LF &
     ASCII.LF &
@@ -279,6 +280,10 @@ procedure O2c is
     "    l2 := l2 + 1" & ASCII.LF &
     "  end;" & ASCII.LF &
     "  if l2 = 60 then Out.Int(1, 0) else Out.Int(0, 0) end;" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  r := 6.25;" & ASCII.LF &
+    "  r := r / 2.5;" & ASCII.LF &
+    "  if r = 2.5 then Out.Real(r, 0) end;" & ASCII.LF &
     "  Out.Ln" & ASCII.LF &
     "end Hello.";
 
