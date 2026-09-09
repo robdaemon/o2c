@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M2 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M8 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,29 +12,44 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M1 status
+## M8 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
-(INTEGER/BOOLEAN, module-level), nested `procedure`s with value and
+(INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
 `VAR` (by-reference) parameters, full expressions with Oberon
 precedence (`+ - * DIV MOD & OR ~ = # < <= > >=`, parens), typed
 assignment, control flow (`IF/ELSIF/ELSE`, `WHILE/DO`, `REPEAT/UNTIL`,
 `FOR/TO/BY`, `CASE` with comma label lists and optional `ELSE`),
-**type declarations** (`ARRAY n OF INTEGER|BOOLEAN` and
-`RECORD` of scalar fields) with index/field designators, whole-value
-copies, procedures and **functions** (`: T` return types with
-`RETURN`, usable in expressions), and call statements — `Out.String`,
-`Out.Int`, `Out.Ln`, and local-procedure calls. Errors are reported
+type declarations (`ARRAY n OF` scalar element types and `RECORD` of
+scalar or pointer-typed fields) with index/field designators,
+whole-value copies, procedures and **functions** (`: T` return types
+with `RETURN`, usable in expressions), and call statements — `Out.String`,
+`Out.Int`, `Out.Ln`, and local-procedure calls.  Errors are reported
 with line/column.
+
+**M8 — POINTER types**: `P = POINTER TO Rec` supports the classic
+Oberon idiom where the record is declared after the pointer
+(`Node = POINTER TO NodeDesc; NodeDesc = RECORD ... next: Node END`).
+Pointer variables default to `NIL`; `NEW(p)` allocates the designated
+record; `^` derefs (`p^.field`, chained `p^.next^.val`); pointers are
+compared with `= NIL` / `# NIL` (and to same-typed pointers) and copied
+wholesale.  Ada mapping: `access` types, `p := new T`, `null`, with
+`^` dropped (Ada auto-derefs).  The demo builds a small linked list
+with `NEW` nodes linked through a `next` field and walks it to a `NIL`
+sentinel.  Pointers are module-level only: no `DISPOSE`, no pointer
+parameters/return types, and record fields are scalars or pointers
+(no nested records/arrays).
 
 **Deviation from the Oberon-2 spec (project decision): keywords and
 standard type names are case-insensitive** (`module`/`MODULE`,
 `integer`/`INTEGER` in type position, `var`/`VAR`, `Begin`… all
-accepted). Ordinary identifiers stay case-sensitive.
+accepted; `NEW` is recognized case-insensitively in statement
+position). Ordinary identifiers stay case-sensitive.
 
-Not yet in M1: `var`/`type`/records/arrays, procedure parameters,
-expressions beyond literals/const refs, arithmetic statements, other
-imported modules.
+Not yet in M8: nested modules and other imports (only `Out`), local
+declarations inside procedures, record-typed fields/nested arrays,
+`WITH`/type extension/type-bound procedures, `LOOP`/`EXIT`, `SET`
+and other Oberon-2 types.
 
 ## Build
 

@@ -20,8 +20,11 @@ procedure O2c is
     "type Vector = ARRAY 4 OF integer;" & ASCII.LF &
     "type Pair = RECORD a, b: integer END;" & ASCII.LF &
     "type Line = ARRAY 8 OF char;" & ASCII.LF &
+    "type Node = POINTER TO NodeDesc;" & ASCII.LF &
+    "type NodeDesc = RECORD v: integer; next: Node END;" & ASCII.LF &
     "var v: Vector; p: Pair; q: Pair; i: integer;" & ASCII.LF &
     "var msg: Line; ch: char;" & ASCII.LF &
+    "var head, cur: Node; s: integer;" & ASCII.LF &
     ASCII.LF &
     "const Greeting = ""hello from Oberon-2"";" & ASCII.LF &
     ASCII.LF &
@@ -93,7 +96,27 @@ procedure O2c is
     "    Out.Int(9, 0)" & ASCII.LF &
     "  end;" & ASCII.LF &
     "  Out.Ln" & ASCII.LF &
-    "  CountTo(21, n)" & ASCII.LF &
+    "  CountTo(21, n);" & ASCII.LF &
+    "  head := NIL;" & ASCII.LF &
+    "  NEW(head);" & ASCII.LF &
+    "  head^.v := 1;" & ASCII.LF &
+    "  head^.next := NIL;" & ASCII.LF &
+    "  NEW(cur);" & ASCII.LF &
+    "  cur^.v := 2;" & ASCII.LF &
+    "  cur^.next := head;" & ASCII.LF &
+    "  head := cur;" & ASCII.LF &
+    "  NEW(cur);" & ASCII.LF &
+    "  cur^.v := 3;" & ASCII.LF &
+    "  cur^.next := head;" & ASCII.LF &
+    "  head := cur;" & ASCII.LF &
+    "  cur := head;" & ASCII.LF &
+    "  s := 0;" & ASCII.LF &
+    "  while cur # NIL do" & ASCII.LF &
+    "    s := s + cur^.v;" & ASCII.LF &
+    "    cur := cur^.next" & ASCII.LF &
+    "  end;" & ASCII.LF &
+    "  Out.Int(s, 0);" & ASCII.LF &
+    "  Out.Ln" & ASCII.LF &
     "end Hello.";
 
 

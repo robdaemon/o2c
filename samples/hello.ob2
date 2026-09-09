@@ -4,10 +4,13 @@ import Out;
 type Vector = ARRAY 4 OF integer;
 type Pair = RECORD a, b: integer END;
 type Line = ARRAY 8 OF char;
+type Node = POINTER TO NodeDesc;
+type NodeDesc = RECORD v: integer; next: Node END;
 
 var n: integer;
 var v: Vector; p: Pair; q: Pair; i: integer;
 var msg: Line; ch: char;
+var head, cur: Node; s: integer;
 
 const Greeting = "hello from Oberon-2";
 
@@ -84,5 +87,25 @@ begin
     Out.Int(9, 0)
   end;
   Out.Ln
-  CountTo(21, n)
+  CountTo(21, n);
+  head := NIL;
+  NEW(head);
+  head^.v := 1;
+  head^.next := NIL;
+  NEW(cur);
+  cur^.v := 2;
+  cur^.next := head;
+  head := cur;
+  NEW(cur);
+  cur^.v := 3;
+  cur^.next := head;
+  head := cur;
+  cur := head;
+  s := 0;
+  while cur # NIL do
+    s := s + cur^.v;
+    cur := cur^.next
+  end;
+  Out.Int(s, 0);
+  Out.Ln
 end Hello.
