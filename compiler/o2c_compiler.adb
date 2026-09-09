@@ -126,6 +126,7 @@ package body O2c_Compiler is
    Multi_Ok   : Boolean := False;   --  library imports are available
    Spec_Buf   : Unbounded_String;   --  package spec text (exports)
    Spec_Decl  : Boolean := False;   --  route Append_Decl to Spec_Buf (M20)
+   Base_In_Spec : Boolean := False; --  O2c_*_Arr bases live in the spec
    Used_Console : Boolean := False; --  module emits Console calls
 
    --  exported type catalog (M20): the visible TYPE declarations of
@@ -148,6 +149,11 @@ package body O2c_Compiler is
       Par_Nm  : Unbounded_String;   --  qualified RECORD (Parent)
       N_F     : Natural := 0;
       F       : XT_Field_Arr := (others => <>);
+      --  arrays (M20e): fixed length + element type (scalar Elem, or
+      --  qualified Elem_Nm for user element types)
+      Arr_Len : Integer := 0;
+      Elem    : EType := T_Int;
+      Elem_Nm : Unbounded_String;
    end record;
    XT_Tab : array (1 .. Max_XT) of XT_Entry := (others => <>);
    N_XT   : Natural := 0;
@@ -478,15 +484,12 @@ package body O2c_Compiler is
                   Fld : UField renames UTypes (U).F (F);
                begin
                   if Fld.UT /= 0 then
-                     if not (UTypes (Fld.UT).Is_Rec
-                             or else UTypes (Fld.UT).Is_Ptr)
-                       or else not UTypes (Fld.UT).ExpT
-                     then
+                     if not UTypes (Fld.UT).ExpT then
                         raise O2c_Error with "exported RECORD '"
                           & To_String (UTypes (U).Name)
                           & "': field '" & To_String (Fld.Name)
-                          & "' must be scalar or an exported RECORD/POINTER "
-                          & "of the same module (arrays are M20b)";
+                          & "' must be scalar or an exported type of the "
+                          & "same module";
                      end if;
                   elsif Fld.Typ = T_Set then
                      raise O2c_Error with "exported RECORD '"
@@ -495,6 +498,20 @@ package body O2c_Compiler is
                   end if;
                end;
             end loop;
+         else
+            --  exported fixed ARRAY type (M20e)
+            if UTypes (U).Elem_UT /= 0 then
+               if not UTypes (UTypes (U).Elem_UT).ExpT then
+                  raise O2c_Error with "exported ARRAY type '"
+                    & To_String (UTypes (U).Name)
+                    & "': element type must be scalar or an exported type "
+                    & "of the same module";
+               end if;
+            elsif UTypes (U).Elem = T_Set then
+               raise O2c_Error with "exported ARRAY type '"
+                 & To_String (UTypes (U).Name)
+                 & "': SET elements are not exportable (M20e)";
+            end if;
          end if;
       end loop;
       --  register the shapes (references as qualified names)
@@ -537,6 +554,15 @@ package body O2c_Compiler is
                      end if;
                   end;
                end loop;
+            elsif not UTypes (U).Is_Ptr then
+               --  exported fixed ARRAY type (M20e)
+               XT_Tab (N_XT).Arr_Len := UTypes (U).Arr_Len;
+               XT_Tab (N_XT).Elem := UTypes (U).Elem;
+               if UTypes (U).Elem_UT /= 0 then
+                  XT_Tab (N_XT).Elem_Nm := To_Unbounded_String
+                    (QName (To_String (Mod_Name),
+                            To_String (UTypes (UTypes (U).Elem_UT).Name)));
+               end if;
             end if;
          end if;
       end loop;
@@ -616,6 +642,14 @@ package body O2c_Compiler is
                             else UT_By_Name
                               (To_String (XT_Tab (X).F (F).UT_Nm))));
                end loop;
+            elsif not XT_Tab (X).Is_Ptr then
+               --  fixed array shape (M20e)
+               UTypes (U).Arr_Len := XT_Tab (X).Arr_Len;
+               UTypes (U).Elem := XT_Tab (X).Elem;
+               if Length (XT_Tab (X).Elem_Nm) > 0 then
+                  UTypes (U).Elem_UT := UT_By_Name
+                    (To_String (XT_Tab (X).Elem_Nm));
+               end if;
             end if;
          end;
       end loop;
@@ -2693,10 +2727,6 @@ package body O2c_Compiler is
       Spec_Decl := UTypes (UTI).ExpT;
 
       if Cur.Kind = Lex.Tok_Array then
-         if UTypes (UTI).ExpT then
-            raise O2c_Error with "exported fixed ARRAY types are M20b "
-              & "(found '" & Name & "')";
-         end if;
          Next;
          Expect (Lex.Tok_Number, "an array length");
          declare
@@ -2745,6 +2775,9 @@ package body O2c_Compiler is
                Used_Int_Arr := True;
             else
                Used_Bool_Arr := True;
+            end if;
+            if UTypes (UTI).ExpT then
+               Base_In_Spec := True;   --  M20e: base must be visible
             end if;
             Append_Decl ("   subtype " & Name & " is "
                          & (if UTypes (UTI).Elem = T_Int
@@ -3187,8 +3220,16 @@ package body O2c_Compiler is
                if not (UTypes (PUT (I)).Is_Rec
                        or else UTypes (PUT (I)).Is_Ptr)
                then
-                  raise O2c_Error with "exported method '" & Name
-                    & "': ARRAY parameters are not exportable yet (M20c)";
+                  --  M20e: a named fixed ARRAY formal exports as VAR
+                  if not PRef (I) then
+                     raise O2c_Error with "exported method '" & Name
+                       & "': ARRAY parameters must be declared VAR (M20e)";
+                  end if;
+                  if UTypes (PUT (I)).Elem = T_Set then
+                     raise O2c_Error with "exported method '" & Name
+                       & "': SET-element ARRAY parameters are not "
+                       & "exportable (M20e)";
+                  end if;
                end if;
             end if;
          end loop;
@@ -3248,8 +3289,16 @@ package body O2c_Compiler is
                if not (UTypes (PUT (I)).Is_Rec
                        or else UTypes (PUT (I)).Is_Ptr)
                then
-                  raise O2c_Error with "exported procedure '" & Name
-                    & "': ARRAY parameters are not exportable yet (M20c)";
+                  --  M20e: a named fixed ARRAY formal exports as VAR
+                  if not PRef (I) then
+                     raise O2c_Error with "exported procedure '" & Name
+                       & "': ARRAY parameters must be declared VAR (M20e)";
+                  end if;
+                  if UTypes (PUT (I)).Elem = T_Set then
+                     raise O2c_Error with "exported procedure '" & Name
+                       & "': SET-element ARRAY parameters are not "
+                       & "exportable (M20e)";
+                  end if;
                end if;
             end if;
          end loop;
@@ -4712,11 +4761,11 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  declarative region of the main procedure or a package body).
       procedure Emit_Helpers (S : in out Unbounded_String) is
       begin
-         if Used_Int_Arr then
+         if Used_Int_Arr and then not (Pkg_Mode and then Base_In_Spec) then
             S := S & "   type O2c_Int_Arr is array (Integer range <>) of Integer;"
               & ASCII.LF;
          end if;
-         if Used_Bool_Arr then
+         if Used_Bool_Arr and then not (Pkg_Mode and then Base_In_Spec) then
             S := S & "   type O2c_Bool_Arr is array (Integer range <>) of Boolean;"
               & ASCII.LF;
          end if;
@@ -4800,6 +4849,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       Used_Set := False;
       Used_Real := False;
       Used_Console := False;
+      Base_In_Spec := False;
       N_Bound := 0;
       Recv_UT := 0;
       G_N := 0;
@@ -4980,6 +5030,14 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
          --  elaboration runs them before the importer's body).
          Spec_Txt := To_Unbounded_String
            ("package " & To_String (Mod_Name) & " is" & ASCII.LF)
+           & (if Base_In_Spec and then Used_Int_Arr
+              then "   type O2c_Int_Arr is array (Integer range <>)"
+                & " of Integer;" & ASCII.LF
+              else "")
+           & (if Base_In_Spec and then Used_Bool_Arr
+              then "   type O2c_Bool_Arr is array (Integer range <>)"
+                & " of Boolean;" & ASCII.LF
+              else "")
            & Spec_Buf
            & To_Unbounded_String
              ("end " & To_String (Mod_Name) & ";" & ASCII.LF);

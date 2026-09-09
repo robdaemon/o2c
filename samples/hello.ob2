@@ -24,6 +24,7 @@ var r: real;
 var m: integer;
 var a, b: Math.Point;
 var hx, tx: Math.Node;
+var w: Math.Vec;
 
 const Greeting = "hello from Oberon-2";
 
@@ -311,5 +312,14 @@ begin
   Out.Int(a.x + a.y, 0);
   Out.Ln;
   Out.Int(a.Sum(), 0);
+  Out.Ln;
+  w[0] := 5;
+  w[1] := 7;
+  w[2] := 9;
+  w[3] := 11;
+  Out.Int(w[0] + w[3], 0);
+  Out.Ln;
+  Math.Fill(w, 100);
+  Out.Int(w[0] + w[3], 0);
   Out.Ln
 end Hello.

@@ -91,6 +91,17 @@ demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
 
+**M20e — exported fixed ARRAY types**: a `TYPE name* = ARRAY n
+OF ...` is emitted into the package spec; numeric arrays put the
+shared `O2c_Int_Arr`/`O2c_Bool_Arr` base in the spec too, char arrays
+export as `String` subtypes, and arrays-of-exported-type work.  An
+importer declares `var w: Math.Vec`, indexes it, takes `len(w)`, and
+passes it to exported procedures taking a named fixed ARRAY formal
+(declared `VAR`); the export catalog carries the array shape so the
+designator engine and value initialisation behave like local arrays.
+The demo fills a `Math.Vec` via `Math.Fill`, printing `203` at the
+end.  Exported records may now carry fields of exported array types.
+
 **M20c — exported type-bound methods**: a procedure method
 marked `name*` on an exported RECORD type (`procedure (var p: Point)
 Scale*(k: integer)`) gets an exported dispatcher

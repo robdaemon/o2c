@@ -1,10 +1,18 @@
 module Math;
 const Pi* = 3.14159;
 type Point* = record x, y: integer end;
+type Vec* = array 4 of integer;
 type Node* = pointer to NodeDesc;
 type NodeDesc* = record v: integer; next: Node end;
 var base: integer;
 var count*: integer;
+procedure Fill*(var v: Vec; start: integer);
+  var j: integer;
+begin
+  for j := 0 to 3 do
+    v[j] := start + j
+  end
+end Fill;
 procedure Translate*(var p: Point; dx: integer; dy: integer);
 begin
   p.x := p.x + dx;
