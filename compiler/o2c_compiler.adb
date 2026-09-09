@@ -3248,8 +3248,7 @@ package body O2c_Compiler is
                     & PNm & "' (line "
                     & Natural'Image (Cur.Line) & ")";
                end if;
-               if not UTypes (PT).Is_Rec or else UTypes (PT).Is_Ext
-                 or else UTypes (PT).Is_Ptr
+               if not UTypes (PT).Is_Rec or else UTypes (PT).Is_Ptr
                then
                   raise O2c_Error with "'" & To_String (UTypes (PT).Name)
                     & "' is not an extensible RECORD type (line "
@@ -5110,31 +5109,28 @@ package body O2c_Compiler is
                   elsif UTypes (U).Is_Rec
                     and then Cur.Kind = Lex.Tok_LBrace
                   then
-                     --  M35/M36: record aggregate { f = value, ... };
-                     --  components emit in declaration order with
-                     --  defaults for the unnamed ones.  Extension types
-                     --  emit an Ada extension aggregate over a qualified
-                     --  parent aggregate.
+                     --  M35/M37: record aggregate { f = value, ... };
+                     --  components default, extension types emit nested
+                     --  Ada extension aggregates over the whole chain.
                      Next;   --  past '{'
                      declare
-                        P    : constant Natural := UTypes (U).Parent;
-                        PUsed : array (1 .. 16) of Boolean :=
-                          (others => False);
-                        PVal  : array (1 .. 16) of Unbounded_String :=
-                          (others => <>);
-                        OUsed : array (1 .. 16) of Boolean :=
-                          (others => False);
-                        OVal  : array (1 .. 16) of Unbounded_String :=
-                          (others => <>);
-                        A     : Unbounded_String;
+                        Chain : array (1 .. 8) of Natural := (others => 0);
+                        NCh   : Natural := 0;
+                        Used  : array (1 .. 8, 1 .. 16) of Boolean :=
+                          (others => (others => False));
+                        Val   : array (1 .. 8, 1 .. 16) of Unbounded_String :=
+                          (others => (others => <>));
+                        Tmp   : Natural := U;
                      begin
-                        if P /= 0 and then
-                          (UTypes (P).Is_Ext or else UTypes (P).Parent /= 0)
-                        then
-                           raise O2c_Error with "record aggregates on "
-                             & "multi-level extensions are not supported "
-                             & "(M36)";
-                        end if;
+                        while Tmp /= 0 loop
+                           NCh := NCh + 1;
+                           if NCh > Chain'Last then
+                              raise O2c_Error with "record extension chain "
+                                & "too deep for an aggregate (M37)";
+                           end if;
+                           Chain (NCh) := Tmp;
+                           Tmp := UTypes (Tmp).Parent;
+                        end loop;
                         loop
                            exit when Cur.Kind = Lex.Tok_RBrace;
                            if Cur.Kind /= Lex.Tok_Ident then
@@ -5142,62 +5138,42 @@ package body O2c_Compiler is
                                 & "in the record aggregate";
                            end if;
                            declare
-                              FNm : constant String :=
-                                Cur.Text (1 .. Cur.Len);
-                              InP : Natural := 0;
-                              InO : Natural := 0;
+                              FNm  : constant String := Cur.Text (1 .. Cur.Len);
+                              NI   : Natural := 0;
+                              FI   : Natural := 0;
                               FTyp : EType := T_Int;
                            begin
-                              if P /= 0 then
-                                 for F in 1 .. UTypes (P).N_F loop
-                                    if To_String (UTypes (P).F (F).Name)
+                              for C in 1 .. NCh loop
+                                 for F in 1 .. UTypes (Chain (C)).N_F loop
+                                    if To_String (UTypes (Chain (C)).F (F).Name)
                                       = FNm
                                     then
-                                       InP := F;
-                                       FTyp := UTypes (P).F (F).Typ;
-                                       if UTypes (P).Imported
-                                         and then not UTypes (P).F (F).ExpF
-                                       then
-                                          raise O2c_Error with "field '"
-                                            & FNm & "' is not exported "
-                                            & "(M36)";
-                                       end if;
+                                       NI := C;
+                                       FI := F;
+                                       FTyp := UTypes (Chain (C)).F (F).Typ;
                                     end if;
                                  end loop;
-                              end if;
-                              for F in 1 .. UTypes (U).N_F loop
-                                 if To_String (UTypes (U).F (F).Name)
-                                   = FNm
-                                 then
-                                    InO := F;
-                                    FTyp := UTypes (U).F (F).Typ;
-                                 end if;
                               end loop;
-                              if InP = 0 and then InO = 0 then
+                              if NI = 0 then
                                  raise O2c_Error with "no field '" & FNm
                                    & "' in " & To_String (UTypes (U).Name);
                               end if;
-                              if (InP /= 0 and then UTypes (P).F (InP).UT /= 0)
-                                or else
-                                (InO /= 0 and then UTypes (U).F (InO).UT /= 0)
+                              if UTypes (Chain (NI)).Imported
+                                and then not UTypes (Chain (NI)).F (FI).ExpF
                               then
+                                 raise O2c_Error with "field '" & FNm
+                                   & "' is not exported (M37)";
+                              end if;
+                              if UTypes (Chain (NI)).F (FI).UT /= 0 then
                                  raise O2c_Error with "record aggregate "
-                                   & "fields must be scalar (M36; '"
+                                   & "fields must be scalar (M37; '"
                                    & FNm & "')";
                               end if;
-                              if InP /= 0 then
-                                 if PUsed (InP) then
-                                    raise O2c_Error with "field '" & FNm
-                                      & "' given twice in the aggregate";
-                                 end if;
-                                 PUsed (InP) := True;
-                              else
-                                 if OUsed (InO) then
-                                    raise O2c_Error with "field '" & FNm
-                                      & "' given twice in the aggregate";
-                                 end if;
-                                 OUsed (InO) := True;
+                              if Used (NI, FI) then
+                                 raise O2c_Error with "field '" & FNm
+                                   & "' given twice in the aggregate";
                               end if;
+                              Used (NI, FI) := True;
                               Next;               --  past the field name
                               Expect (Lex.Tok_Equal, "'='");
                               Next;
@@ -5221,11 +5197,7 @@ package body O2c_Compiler is
                                     raise O2c_Error with "field '" & FNm
                                       & "' has the wrong type";
                                  end if;
-                                 if InP /= 0 then
-                                    PVal (InP) := V.Text;
-                                 else
-                                    OVal (InO) := V.Text;
-                                 end if;
+                                 Val (NI, FI) := V.Text;
                               end;
                            end;
                            exit when Cur.Kind /= Lex.Tok_Comma;
@@ -5233,68 +5205,45 @@ package body O2c_Compiler is
                         end loop;
                         Expect (Lex.Tok_RBrace, "'}'");
                         Next;
-                        if P /= 0 then
-                           --  parent part: qualified full aggregate
-                           A := A & To_String (UTypes (P).Name) & "'(";
-                           for F in 1 .. UTypes (P).N_F loop
-                              if UTypes (P).F (F).UT /= 0 then
-                                 raise O2c_Error with "record aggregate "
-                                   & "needs scalar fields only (M36)";
-                              end if;
-                              if F > 1 then
-                                 A := A & ", ";
-                              end if;
-                              A := A & To_String (UTypes (P).F (F).Name)
-                                & " => "
-                                & (if PUsed (F)
-                                   then To_String (PVal (F))
-                                   else Scalar_Init (UTypes (P).F (F).Typ));
-                           end loop;
-                           A := A & ")";
-                           for F in 1 .. UTypes (U).N_F loop
-                              if UTypes (U).F (F).UT /= 0 then
-                                 raise O2c_Error with "record aggregate "
-                                   & "needs scalar fields only (M36)";
-                              end if;
-                              A := A & " with " & To_String
-                                (UTypes (U).F (F).Name) & " => "
-                                & (if OUsed (F)
-                                   then To_String (OVal (F))
-                                   else Scalar_Init (UTypes (U).F (F).Typ));
-                              exit when F = UTypes (U).N_F;
-                              for G in F + 1 .. UTypes (U).N_F loop
-                                 A := A & ", " & To_String
-                                   (UTypes (U).F (G).Name) & " => "
-                                   & (if OUsed (G)
-                                      then To_String (OVal (G))
-                                      else Scalar_Init
-                                        (UTypes (U).F (G).Typ));
+                        declare
+                           function Build (Nd : Natural) return String is
+                              Res : Unbounded_String;
+                              NI  : Natural := 0;
+                           begin
+                              for C in 1 .. NCh loop
+                                 if Chain (C) = Nd then
+                                    NI := C;
+                                 end if;
                               end loop;
-                              exit;
-                           end loop;
-                        else
-                           A := A & "(";
-                           for F in 1 .. UTypes (U).N_F loop
-                              if UTypes (U).F (F).UT /= 0 then
-                                 raise O2c_Error with "record aggregate "
-                                   & "needs scalar fields only (M35)";
+                              for F in 1 .. UTypes (Nd).N_F loop
+                                 if UTypes (Nd).F (F).UT /= 0 then
+                                    raise O2c_Error with "record aggregate "
+                                      & "needs scalar fields only (M37)";
+                                 end if;
+                                 if F > 1 then
+                                    Res := Res & ", ";
+                                 end if;
+                                 Res := Res & To_String (UTypes (Nd).F (F).Name)
+                                   & " => "
+                                   & (if Used (NI, F)
+                                      then To_String (Val (NI, F))
+                                      else Scalar_Init
+                                        (UTypes (Nd).F (F).Typ));
+                              end loop;
+                              if UTypes (Nd).Parent /= 0 then
+                                 return To_String (UTypes (Nd).Name) & "'("
+                                   & Build (UTypes (Nd).Parent)
+                                   & " with " & To_String (Res) & ")";
                               end if;
-                              if F > 1 then
-                                 A := A & ", ";
-                              end if;
-                              A := A & To_String (UTypes (U).F (F).Name)
-                                & " => "
-                                & (if OUsed (F)
-                                   then To_String (OVal (F))
-                                   else Scalar_Init (UTypes (U).F (F).Typ));
-                           end loop;
-                           A := A & ")";
-                        end if;
-                        Append_Body ("      " & Head (1 .. H_Len)
-                                     & " := (" & To_String (A) & ");");
+                              return To_String (UTypes (Nd).Name) & "'("
+                                & To_String (Res) & ")";
+                           end Build;
+                        begin
+                           Append_Body ("      " & Head (1 .. H_Len)
+                                        & " := " & Build (U) & ";");
+                        end;
                      end;
                   elsif not UTypes (U).Is_Rec
-                    and then UTypes (U).Elem /= T_Char
                     and then Cur.Kind = Lex.Tok_LBrace
                   then
                      --  M36: numeric fixed-array aggregate { e1, e2, .. }
@@ -5314,6 +5263,24 @@ package body O2c_Compiler is
                            declare
                               V : Expr_Rec := Parse_Expr;
                            begin
+                              if UTypes (U).Elem = T_Char
+                                and then V.Typ = T_Str
+                              then
+                                 --  single-character string literal
+                                 declare
+                                    T : constant String :=
+                                      To_String (V.Text);
+                                 begin
+                                    if T'Length = 3 and then
+                                      T (T'First) = '"'
+                                      and then T (T'Last) = '"'
+                                    then
+                                       V.Typ := T_Char;
+                                       V.Text := To_Unbounded_String
+                                         ("'" & T (T'First + 1) & "'");
+                                    end if;
+                                 end;
+                              end if;
                               if V.Typ /= UTypes (U).Elem then
                                  raise O2c_Error with "array element type "
                                    & "mismatch (line "

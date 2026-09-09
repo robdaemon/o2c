@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M36 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M37 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M36 status
+## M37 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,15 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M37 — multi-level extensions and CHAR/BOOLEAN aggregates**:
+extending an extended RECORD is now allowed, and record aggregates
+generalize to any chain depth by emitting nested, type-qualified Ada
+extension aggregates (`G'((S'((B'(...) with c => ..)) with d => ..))`).
+  Fixed CHAR-array variables accept positional aggregates whose single-
+character string elements convert to CHAR, and BOOLEAN arrays work the
+same way.  Verified natively: a G{a=5,c=7,d=1} prints 13, the char
+array's first element has ORD 120, and a boolean array test prints 1.
 
 **M36 — extension and array aggregates**: record aggregates now work
 on single-level extension types: the compiler emits an Ada extension
