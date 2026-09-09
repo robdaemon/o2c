@@ -91,6 +91,16 @@ demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
 
+**M21 — shared support types, open arrays, SET vars**: every
+multi-module build now emits a small `O2c_Types` package
+(`O2c_Int_Arr`, `O2c_Bool_Arr`, `O2c_Set`) that every unit withs and
+uses instead of declaring its own, so library and importer actually
+share those Ada types.  That unlocks exported procedures taking
+open-ARRAY formals (`SumArr*(a: array of integer): integer`, called
+from an importer with a fixed array) and exported SET VARIABLEs
+(`var marks*: set`) whose values an importer can assign, union and
+test with `IN`.  The demo prints `... 27 28 406` at the end.
+
 **M20e — exported fixed ARRAY types**: a `TYPE name* = ARRAY n
 OF ...` is emitted into the package spec; numeric arrays put the
 shared `O2c_Int_Arr`/`O2c_Bool_Arr` base in the spec too, char arrays

@@ -7,6 +7,16 @@ type NodeDesc* = record v: integer; next: Node end;
 var base: integer;
 var count*: integer;
 var origin*: Point;
+var marks*: set;
+procedure SumArr*(a: array of integer): integer;
+  var j: integer; t: integer;
+begin
+  t := 0;
+  for j := 0 to len(a) - 1 do
+    t := t + a[j]
+  end;
+  return t
+end SumArr;
 procedure Fill*(var v: Vec; start: integer);
   var j: integer;
 begin

@@ -2747,10 +2747,10 @@ package body O2c_Compiler is
          else
             for I in 1 .. N loop
                if Exps (I) and then
-                 not (Scalar_Exportable (Typ) and then Typ /= T_Set)
+                 not (Scalar_Exportable (Typ) or else Typ = T_Set)
                then
                   raise O2c_Error with "exported VARIABLEs: INTEGER/"
-                    & "LONGINT/REAL/CHAR/BOOLEAN only (M19; '"
+                    & "LONGINT/REAL/CHAR/BOOLEAN/SET only (M21; '"
                     & To_String (Names (I)) & "')";
                end if;
                N_Sym := N_Sym + 1;
@@ -3275,10 +3275,10 @@ package body O2c_Compiler is
               & "' can be exported only on an exported type (M20c)";
          end if;
          for I in 2 .. N_Par loop
-            if POpen (I) then
+            if POpen (I) and then PTyp (I) = T_Set then
                raise O2c_Error with "exported method '" & Name
-                 & "': open ARRAY parameters are not exportable yet "
-                 & "(M20c)";
+                 & "': SET-element ARRAY OF parameters are not "
+                 & "exportable (M21)";
             end if;
             if PTyp (I) = T_Set then
                raise O2c_Error with "exported method '" & Name
@@ -3341,10 +3341,10 @@ package body O2c_Compiler is
               & "exported (M20b; '" & Name & "')";
          end if;
          for I in 1 .. N_Par loop
-            if POpen (I) then
+            if POpen (I) and then PTyp (I) = T_Set then
                raise O2c_Error with "exported procedure '" & Name
-                 & "': open ARRAY parameters are not exportable yet "
-                 & "(M20c)";
+                 & "': SET-element ARRAY OF parameters are not "
+                 & "exportable (M21)";
             end if;
             if PTyp (I) = T_Set then
                raise O2c_Error with "exported procedure '" & Name
@@ -3413,7 +3413,7 @@ package body O2c_Compiler is
                   E.P (I) := (Name => PName (I),
                               Typ => (if PUT (I) = 0 then PTyp (I)
                                       else T_Int),
-                              UT => 0, By_Ref => PRef (I), Open => False);
+                              UT => 0, By_Ref => PRef (I), Open => POpen (I));
                   if PUT (I) /= 0 then
                      E.P_Nm (I) := To_Unbounded_String
                        (QName (To_String (Mod_Name),
@@ -4891,15 +4891,22 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  declarative region of the main procedure or a package body).
       procedure Emit_Helpers (S : in out Unbounded_String) is
       begin
-         if Used_Int_Arr and then not (Pkg_Mode and then Base_In_Spec) then
+         --  M21: in a multi-module build the support types live in the
+         --  shared O2c_Types package (with/use emitted per unit), so no
+         --  unit declares them locally.
+         if Used_Int_Arr and then not Multi_Ok
+           and then not (Pkg_Mode and then Base_In_Spec)
+         then
             S := S & "   type O2c_Int_Arr is array (Integer range <>) of Integer;"
               & ASCII.LF;
          end if;
-         if Used_Bool_Arr and then not (Pkg_Mode and then Base_In_Spec) then
+         if Used_Bool_Arr and then not Multi_Ok
+           and then not (Pkg_Mode and then Base_In_Spec)
+         then
             S := S & "   type O2c_Bool_Arr is array (Integer range <>) of Boolean;"
               & ASCII.LF;
          end if;
-         if Used_Set then
+         if Used_Set and then not Multi_Ok then
             S := S & "   type O2c_Set is mod 2**32;" & ASCII.LF;
          end if;
          if Used_Int then
@@ -5142,6 +5149,9 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
             if Used_Set then
                S := S & "with Interfaces;" & ASCII.LF;
             end if;
+            if Multi_Ok then
+               S := S & "with O2c_Types; use O2c_Types;" & ASCII.LF;
+            end if;
             for I in 1 .. N_Imp loop
                if To_String (Imports (I).Name) /= "Out" then
                   S := S & "with " & To_String (Imports (I).Name) & ";"
@@ -5164,15 +5174,19 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
          --  bodies and the module initialisation statements (Ada
          --  elaboration runs them before the importer's body).
          Spec_Txt := To_Unbounded_String
-           ("package " & To_String (Mod_Name) & " is" & ASCII.LF)
-           & (if Base_In_Spec and then Used_Int_Arr
+           (if Multi_Ok
+            then "with O2c_Types; use O2c_Types;" & ASCII.LF
+            else "")
+           & (if not Multi_Ok and then Base_In_Spec and then Used_Int_Arr
               then "   type O2c_Int_Arr is array (Integer range <>)"
                 & " of Integer;" & ASCII.LF
               else "")
-           & (if Base_In_Spec and then Used_Bool_Arr
+           & (if not Multi_Ok and then Base_In_Spec and then Used_Bool_Arr
               then "   type O2c_Bool_Arr is array (Integer range <>)"
                 & " of Boolean;" & ASCII.LF
               else "")
+           & To_Unbounded_String
+             ("package " & To_String (Mod_Name) & " is" & ASCII.LF)
            & Spec_Buf
            & To_Unbounded_String
              ("end " & To_String (Mod_Name) & ";" & ASCII.LF);
@@ -5184,6 +5198,9 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
             end if;
             if Used_Set then
                S := S & "with Interfaces;" & ASCII.LF;
+            end if;
+            if Multi_Ok then
+               S := S & "with O2c_Types; use O2c_Types;" & ASCII.LF;
             end if;
             for I in 1 .. N_Imp loop
                if To_String (Imports (I).Name) /= "Out" then
@@ -5242,6 +5259,19 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_X := 0;
       N_Prov := 0;
       Multi_Ok := True;
+      --  M21: shared support types (O2c_Int_Arr / O2c_Bool_Arr /
+      --  O2c_Set) live in one package every unit withs and uses, so
+      --  cross-module SET values and open-array formals share types.
+      Add ("o2c_types.ads",
+           To_Unbounded_String
+             ("with Interfaces;" & ASCII.LF
+              & "package O2c_Types is" & ASCII.LF
+              & "   type O2c_Int_Arr is array (Integer range <>)"
+              & " of Integer;" & ASCII.LF
+              & "   type O2c_Bool_Arr is array (Integer range <>)"
+              & " of Boolean;" & ASCII.LF
+              & "   type O2c_Set is mod 2**32;" & ASCII.LF
+              & "end O2c_Types;" & ASCII.LF));
       for I in 1 .. N_Libs loop
          Compile_Module (To_String (Libs (I).Text), True,
                          M_T, S_T, B_T);

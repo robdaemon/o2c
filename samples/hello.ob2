@@ -325,5 +325,13 @@ begin
   Math.origin.x := 77;
   Math.origin.y := 64;
   Out.Int(Math.origin.x + Math.origin.y, 0);
+  Out.Ln;
+  Math.marks := {1, 3};
+  if 2 IN Math.marks then Out.Int(26, 0) else Out.Int(27, 0) end;
+  Out.Ln;
+  Math.marks := Math.marks + {2};
+  if 2 IN Math.marks then Out.Int(28, 0) end;
+  Out.Ln;
+  Out.Int(Math.SumArr(w), 0);
   Out.Ln
 end Hello.
