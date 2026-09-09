@@ -10,7 +10,7 @@ type NodeDesc = record v: integer; next: Node end;
 var n: integer;
 var v: Vector; p: Pair; q: Pair; i: integer;
 var msg: Line; ch: char;
-var head, cur: Node; s: integer;
+var head, cur: Node;
 
 const Greeting = "hello from Oberon-2";
 
@@ -60,6 +60,47 @@ begin
   Out.Ln
 end Dot;
 
+procedure Push(var l: Node; v: integer);
+  var n: Node;
+begin
+  new(n);
+  n^.v := v;
+  n^.next := l;
+  l := n
+end Push;
+
+procedure SwapPair(var r: Pair);
+  var t: integer;
+begin
+  t := r.a;
+  r.a := r.b;
+  r.b := t
+end SwapPair;
+
+procedure Last(l: Node): Node;
+  var r: Node;
+begin
+  r := l;
+  if r # nil then
+    while r^.next # nil do
+      r := r^.next
+    end
+  end;
+  return r
+end Last;
+
+procedure Sum(l: Node): integer;
+  var r: Node; t: integer;
+begin
+  r := l;
+  t := 0;
+  while r # nil do
+    t := t + r^.v;
+    r := r^.next
+  end;
+  return t
+end Sum;
+
 
 begin
   n := 0;
@@ -94,7 +135,12 @@ begin
   Out.Ln;
   q := p;
   Out.Int(q.b, 0);
-  Out.Ln
+  Out.Ln;
+  SwapPair(p);
+  Out.Int(p.a, 0);
+  Out.Ln;
+  Out.Int(p.b, 0);
+  Out.Ln;
   msg := "hi";
   msg[0] := "H";
   Out.String(msg);
@@ -115,24 +161,15 @@ begin
   Out.Ln
   CountTo(21, n);
   head := nil;
-  new(head);
-  head^.v := 1;
-  head^.next := nil;
-  new(cur);
-  cur^.v := 2;
-  cur^.next := head;
-  head := cur;
-  new(cur);
-  cur^.v := 3;
-  cur^.next := head;
-  head := cur;
-  cur := head;
-  s := 0;
-  while cur # nil do
-    s := s + cur^.v;
-    cur := cur^.next
-  end;
-  Out.Int(s, 0);
+  Push(head, 1);
+  Push(head, 2);
+  Push(head, 3);
+  cur := Last(head);
+  Out.Int(head^.v, 0);
+  Out.Ln;
+  Out.Int(cur^.v, 0);
+  Out.Ln;
+  Out.Int(Sum(head), 0);
   Out.Ln;
   UpTo12;
   Dot

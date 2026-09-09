@@ -25,7 +25,7 @@ procedure O2c is
     "var n: integer;" & ASCII.LF &
     "var v: Vector; p: Pair; q: Pair; i: integer;" & ASCII.LF &
     "var msg: Line; ch: char;" & ASCII.LF &
-    "var head, cur: Node; s: integer;" & ASCII.LF &
+    "var head, cur: Node;" & ASCII.LF &
     ASCII.LF &
     "const Greeting = ""hello from Oberon-2"";" & ASCII.LF &
     ASCII.LF &
@@ -75,6 +75,47 @@ procedure O2c is
     "  Out.Ln" & ASCII.LF &
     "end Dot;" & ASCII.LF &
     ASCII.LF &
+    "procedure Push(var l: Node; v: integer);" & ASCII.LF &
+    "  var n: Node;" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  new(n);" & ASCII.LF &
+    "  n^.v := v;" & ASCII.LF &
+    "  n^.next := l;" & ASCII.LF &
+    "  l := n" & ASCII.LF &
+    "end Push;" & ASCII.LF &
+    ASCII.LF &
+    "procedure SwapPair(var r: Pair);" & ASCII.LF &
+    "  var t: integer;" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  t := r.a;" & ASCII.LF &
+    "  r.a := r.b;" & ASCII.LF &
+    "  r.b := t" & ASCII.LF &
+    "end SwapPair;" & ASCII.LF &
+    ASCII.LF &
+    "procedure Last(l: Node): Node;" & ASCII.LF &
+    "  var r: Node;" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  r := l;" & ASCII.LF &
+    "  if r # nil then" & ASCII.LF &
+    "    while r^.next # nil do" & ASCII.LF &
+    "      r := r^.next" & ASCII.LF &
+    "    end" & ASCII.LF &
+    "  end;" & ASCII.LF &
+    "  return r" & ASCII.LF &
+    "end Last;" & ASCII.LF &
+    ASCII.LF &
+    "procedure Sum(l: Node): integer;" & ASCII.LF &
+    "  var r: Node; t: integer;" & ASCII.LF &
+    "begin" & ASCII.LF &
+    "  r := l;" & ASCII.LF &
+    "  t := 0;" & ASCII.LF &
+    "  while r # nil do" & ASCII.LF &
+    "    t := t + r^.v;" & ASCII.LF &
+    "    r := r^.next" & ASCII.LF &
+    "  end;" & ASCII.LF &
+    "  return t" & ASCII.LF &
+    "end Sum;" & ASCII.LF &
+    ASCII.LF &
     ASCII.LF &
     "begin" & ASCII.LF &
     "  n := 0;" & ASCII.LF &
@@ -109,7 +150,12 @@ procedure O2c is
     "  Out.Ln;" & ASCII.LF &
     "  q := p;" & ASCII.LF &
     "  Out.Int(q.b, 0);" & ASCII.LF &
-    "  Out.Ln" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  SwapPair(p);" & ASCII.LF &
+    "  Out.Int(p.a, 0);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  Out.Int(p.b, 0);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
     "  msg := ""hi"";" & ASCII.LF &
     "  msg[0] := ""H"";" & ASCII.LF &
     "  Out.String(msg);" & ASCII.LF &
@@ -130,24 +176,15 @@ procedure O2c is
     "  Out.Ln" & ASCII.LF &
     "  CountTo(21, n);" & ASCII.LF &
     "  head := nil;" & ASCII.LF &
-    "  new(head);" & ASCII.LF &
-    "  head^.v := 1;" & ASCII.LF &
-    "  head^.next := nil;" & ASCII.LF &
-    "  new(cur);" & ASCII.LF &
-    "  cur^.v := 2;" & ASCII.LF &
-    "  cur^.next := head;" & ASCII.LF &
-    "  head := cur;" & ASCII.LF &
-    "  new(cur);" & ASCII.LF &
-    "  cur^.v := 3;" & ASCII.LF &
-    "  cur^.next := head;" & ASCII.LF &
-    "  head := cur;" & ASCII.LF &
-    "  cur := head;" & ASCII.LF &
-    "  s := 0;" & ASCII.LF &
-    "  while cur # nil do" & ASCII.LF &
-    "    s := s + cur^.v;" & ASCII.LF &
-    "    cur := cur^.next" & ASCII.LF &
-    "  end;" & ASCII.LF &
-    "  Out.Int(s, 0);" & ASCII.LF &
+    "  Push(head, 1);" & ASCII.LF &
+    "  Push(head, 2);" & ASCII.LF &
+    "  Push(head, 3);" & ASCII.LF &
+    "  cur := Last(head);" & ASCII.LF &
+    "  Out.Int(head^.v, 0);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  Out.Int(cur^.v, 0);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  Out.Int(Sum(head), 0);" & ASCII.LF &
     "  Out.Ln;" & ASCII.LF &
     "  UpTo12;" & ASCII.LF &
     "  Dot" & ASCII.LF &

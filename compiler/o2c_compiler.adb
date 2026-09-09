@@ -58,6 +58,7 @@ package body O2c_Compiler is
       Name   : Unbounded_String;
       Typ    : EType := T_Int;
       By_Ref : Boolean := False;
+      UT     : Natural := 0;      --  user type (record/array/pointer) index
    end record;
 
    type Param_Array is array (1 .. Max_Params) of Param_Rec;
@@ -84,6 +85,7 @@ package body O2c_Compiler is
    In_Proc   : Boolean := False;   --  parsing inside a procedure body
    Cur_Proc_Ret : Boolean := False;
    Cur_Ret_Type : EType := T_Int;
+   Cur_Ret_UT   : Natural := 0;   --  pointer return user type (M11)
    Ctrl_Depth   : Natural := 0;    --  open IF/WHILE/REPEAT/FOR/LOOP nesting
    Func_Return_Ok : Boolean := False;
    Used_CStr : Boolean := False;
@@ -385,10 +387,64 @@ package body O2c_Compiler is
       return R;
    end Parse_Ptr_Value;
 
+   --  Parse one actual argument against a formal parameter (M11).
+   --  Record/array formals are VAR-only, so their actual is a whole
+   --  variable of exactly that type; pointer formals take a pointer
+   --  value/designator of the same type or NIL (VAR rejects NIL);
+   --  scalar formals keep the previous expression check.
+   function Parse_Actual (Formal : Param_Rec) return Expr_Rec is
+      A : Expr_Rec;
+   begin
+      if Formal.UT /= 0 and then not UTypes (Formal.UT).Is_Ptr then
+         --  record/array VAR actual: a variable of exactly this type
+         if Cur.Kind /= Lex.Tok_Ident then
+            raise O2c_Error with "a variable of type "
+              & To_String (UTypes (Formal.UT).Name) & " expected (line "
+              & Natural'Image (Cur.Line) & ")";
+         end if;
+         declare
+            Id : constant Natural := Find (Cur.Text (1 .. Cur.Len));
+         begin
+            if Id = 0 or else Syms (Id).Kind /= S_Var
+              or else Syms (Id).UT /= Formal.UT
+            then
+               raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
+                 & "' is not a variable of type "
+                 & To_String (UTypes (Formal.UT).Name) & " (line "
+                 & Natural'Image (Cur.Line) & ")";
+            end if;
+            A.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
+            Next;
+            return A;
+         end;
+      end if;
+      A := Parse_Expr;
+      if Formal.UT = 0 then
+         if A.Typ /= Formal.Typ then
+            raise O2c_Error with "argument has the wrong type (line "
+              & Natural'Image (Cur.Line) & ")";
+         end if;
+      else
+         --  pointer formal (value or VAR)
+         if A.Typ = T_Nil then
+            if Formal.By_Ref then
+               raise O2c_Error with "a VAR POINTER parameter needs a "
+                 & "variable, not NIL (line "
+                 & Natural'Image (Cur.Line) & ")";
+            end if;
+         elsif A.Typ /= T_Ptr or else A.Ptr_UT /= Formal.UT then
+            raise O2c_Error with "argument must be a pointer of type "
+              & To_String (UTypes (Formal.UT).Name) & " or NIL (line "
+              & Natural'Image (Cur.Line) & ")";
+         end if;
+      end if;
+      return A;
+   end Parse_Actual;
+
    --  Assign a POINTER value (designator or NIL) to an Ada LHS whose
    --  pointer user type is LHS_UT; type-check the value first (M8).
    procedure Assign_Pointer (LHS : String; LHS_UT : Natural) is
-      R : Expr_Rec := Parse_Ptr_Value;
+      R : Expr_Rec := Parse_Expr;
    begin
       if R.Typ /= T_Nil and then
         (R.Typ /= T_Ptr or else R.Ptr_UT /= LHS_UT)
@@ -463,7 +519,13 @@ package body O2c_Compiler is
                     & "' is a proper procedure, not a function (line "
                     & Natural'Image (Cur.Line) & ")";
                end if;
-               R.Typ := Syms (Id).Typ;
+               if Syms (Id).UT /= 0 then
+                  --  function returning a POINTER (M11)
+                  R.Typ := T_Ptr;
+                  R.Ptr_UT := Syms (Id).UT;
+               else
+                  R.Typ := Syms (Id).Typ;
+               end if;
                R.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
                Next;
                if Cur.Kind = Lex.Tok_LParen then
@@ -480,15 +542,10 @@ package body O2c_Compiler is
                            raise O2c_Error with "too many arguments";
                         end if;
                         declare
-                           A : Expr_Rec := Parse_Expr;
+                           A : Expr_Rec :=
+                             Parse_Actual (Syms (Id).P (N_A));
                         begin
                            Args (N_A) := A.Text;
-                           if Syms (Id).P (N_A).Typ /= A.Typ then
-                              raise O2c_Error with "argument "
-                                & Natural'Image (N_A) & " of "
-                                & Cur.Text (1 .. Cur.Len)
-                                & " has the wrong type";
-                           end if;
                         end;
                         exit when Cur.Kind /= Lex.Tok_Comma;
                         Next;
@@ -1073,11 +1130,13 @@ package body O2c_Compiler is
       Name  : constant String := Ident_Text;
       PName : array (1 .. Max_Params) of Unbounded_String;
       PTyp  : array (1 .. Max_Params) of EType;
+      PUT   : array (1 .. Max_Params) of Natural := (others => 0);
       PRef  : array (1 .. Max_Params) of Boolean;
       N_Par : Natural := 0;
       Param_Base : Natural;
       Local_N_UT : Natural := 0;  --  UTypes count before locals (M10)
       Ret_Typ : EType := T_Int;
+      Ret_UT  : Natural := 0;     --  pointer return user type (M11)
       Is_Function : Boolean := False;
       Hdr   : Unbounded_String;
    begin
@@ -1105,11 +1164,27 @@ package body O2c_Compiler is
                   raise O2c_Error with "a type name expected (line "
                     & Natural'Image (Cur.Line) & ")";
                end if;
-               PTyp (N_Par) := Builtin_Type_Of (Cur.Text (1 .. Cur.Len));
-               if PTyp (N_Par) = T_Str then
-                  raise O2c_Error with "parameter types: INTEGER/BOOLEAN/"
-                    & "CHAR only ('" & Cur.Text (1 .. Cur.Len) & "')";
-               end if;
+               declare
+                  TN : constant String := Cur.Text (1 .. Cur.Len);
+               begin
+                  PTyp (N_Par) := Builtin_Type_Of (TN);
+                  if PTyp (N_Par) = T_Str then
+                     PUT (N_Par) := Find_UT (TN);
+                     if PUT (N_Par) = 0 then
+                        raise O2c_Error with "unknown type '" & TN
+                          & "' (line " & Natural'Image (Cur.Line) & ")";
+                     end if;
+                     if not UTypes (PUT (N_Par)).Is_Ptr then
+                        --  records and arrays are VAR-only (M11): the
+                        --  Oberon-2 report has no structured value params
+                        if not By_Ref then
+                           raise O2c_Error with "record/array parameters "
+                             & "must be declared VAR ('" & TN & "', line "
+                             & Natural'Image (Cur.Line) & ")";
+                        end if;
+                     end if;
+                  end if;
+               end;
                Next;
                PRef (N_Par) := By_Ref;
             end;
@@ -1124,17 +1199,30 @@ package body O2c_Compiler is
       end if;
       --  optional function return type
       Ret_Typ := T_Int;
+      Ret_UT := 0;
       if Cur.Kind = Lex.Tok_Colon then
          Next;
          if Cur.Kind /= Lex.Tok_Ident then
             raise O2c_Error with "a return type name expected (line "
               & Natural'Image (Cur.Line) & ")";
          end if;
-         Ret_Typ := Builtin_Type_Of (Cur.Text (1 .. Cur.Len));
-         if Ret_Typ = T_Str then
-            raise O2c_Error with "return types: INTEGER/BOOLEAN/CHAR only ('"
-              & Cur.Text (1 .. Cur.Len) & "')";
-         end if;
+         declare
+            TN : constant String := Cur.Text (1 .. Cur.Len);
+         begin
+            Ret_Typ := Builtin_Type_Of (TN);
+            if Ret_Typ = T_Str then
+               Ret_UT := Find_UT (TN);
+               if Ret_UT = 0 then
+                  raise O2c_Error with "unknown type '" & TN
+                    & "' (line " & Natural'Image (Cur.Line) & ")";
+               end if;
+               if not UTypes (Ret_UT).Is_Ptr then
+                  raise O2c_Error with "function return types: INTEGER/"
+                    & "BOOLEAN/CHAR or a POINTER type ('" & TN & "', line "
+                    & Natural'Image (Cur.Line) & ")";
+               end if;
+            end if;
+         end;
          Next;
          Is_Function := True;
       end if;
@@ -1143,18 +1231,19 @@ package body O2c_Compiler is
 
       N_Sym := N_Sym + 1;
       Syms (N_Sym) := (Kind => S_Proc, Name => To_Unbounded_String (Name),
-                       Params => N_Par, Typ => Ret_Typ,
+                       Params => N_Par, Typ => Ret_Typ, UT => Ret_UT,
                        Ret => Is_Function, others => <>);
       for I in 1 .. N_Par loop
          Syms (N_Sym).P (I) :=
-           (Name => PName (I), Typ => PTyp (I), By_Ref => PRef (I));
+           (Name => PName (I), Typ => PTyp (I), By_Ref => PRef (I),
+            UT => PUT (I));
       end loop;
 
       --  parameters are in scope for the body (popped after it)
       Param_Base := N_Sym;
       for I in 1 .. N_Par loop
          N_Sym := N_Sym + 1;
-         Syms (N_Sym) := (Kind => S_Var, Typ => PTyp (I),
+         Syms (N_Sym) := (Kind => S_Var, Typ => PTyp (I), UT => PUT (I),
                           Name => PName (I), others => <>);
       end loop;
 
@@ -1168,12 +1257,15 @@ package body O2c_Compiler is
             end if;
             Hdr := Hdr & To_String (PName (I))
               & (if PRef (I) then " : in out " else " : ")
-              & Ada_Type (PTyp (I));
+              & (if PUT (I) /= 0 then To_String (UTypes (PUT (I)).Name)
+                 else Ada_Type (PTyp (I)));
          end loop;
          Hdr := Hdr & ")";
       end if;
       if Is_Function then
-         Hdr := Hdr & " return " & Ada_Type (Ret_Typ);
+         Hdr := Hdr & " return "
+           & (if Ret_UT /= 0 then To_String (UTypes (Ret_UT).Name)
+              else Ada_Type (Ret_Typ));
       end if;
       Append_Decl (To_String (Hdr) & " is");
       --  local declarations (M10): optional CONST/TYPE/VAR sections
@@ -1229,6 +1321,7 @@ package body O2c_Compiler is
             Next;
             Cur_Proc_Ret := Is_Function;
             Cur_Ret_Type := Ret_Typ;
+            Cur_Ret_UT := Ret_UT;
             Func_Return_Ok := False;
             In_Proc := True;
             Statement_Seq;        --  stops at END; fills Body_Buf
@@ -1635,7 +1728,14 @@ package body O2c_Compiler is
                declare
                   V : Expr_Rec := Parse_Expr;
                begin
-                  if V.Typ /= Cur_Ret_Type then
+                  if Cur_Ret_UT /= 0 then
+                     if V.Typ /= T_Nil and then
+                       (V.Typ /= T_Ptr or else V.Ptr_UT /= Cur_Ret_UT)
+                     then
+                        raise O2c_Error with "RETURN value type mismatch "
+                          & "(line " & Natural'Image (Cur.Line) & ")";
+                     end if;
+                  elsif V.Typ /= Cur_Ret_Type then
                      raise O2c_Error with "RETURN value type mismatch (line "
                        & Natural'Image (Cur.Line) & ")";
                   end if;
@@ -1991,14 +2091,10 @@ package body O2c_Compiler is
                         raise O2c_Error with "too many arguments";
                      end if;
                      declare
-                        A : Expr_Rec := Parse_Expr;
+                        A : Expr_Rec :=
+                          Parse_Actual (Syms (Idx).P (N_A));
                      begin
                         Args (N_A) := A.Text;
-                        if Syms (Idx).P (N_A).Typ /= A.Typ then
-                           raise O2c_Error with "argument "
-                             & Natural'Image (N_A) & " of "
-                             & Head (1 .. H_Len) & " has the wrong type";
-                        end if;
                      end;
                      exit when Cur.Kind /= Lex.Tok_Comma;
                      Next;
