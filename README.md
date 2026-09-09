@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M20 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M21 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M20 status
+## M21 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -154,7 +154,7 @@ type table, so `NEW`, `^` deref, `.field` chains, whole-record copies
 and pointer sharing behave like local types.  The demo builds and
 walks a `Math.Node` list, copies a `Math.Point`, calls `Math.Translate`
 (VAR record), `Math.Next` (pointer result) and the exported method
-`a.Scale(3)`, printing `100 100 103 60 309` at the end.
+`a.Scale(3)`, printing `100 100 103 60 309` at the time of M20c.
 
 **M19 — modules**: `module M; import Out, Other;` compiles from
 separate source files: `O2c_Compiler.Compile_Multi` turns each library
@@ -165,8 +165,8 @@ the package spec and an export catalog; importers use qualified
 module initialisation before the importer body.  The demo splits into
 `samples/hello.ob2` (command, now `import Out, Math`) and
 `samples/math.ob2` (library exporting `Pi*`, `count*`, `Sqr*`,
-`SetBase*`, `Bump*`); the regression asserts the resulting `3.142`
-printed from `Math.Pi`.
+`SetBase*`, `Bump*`); the regression asserts the final demo tail
+(now `... 406`).
 
 **M18 — REAL**: `REAL` maps to Ada `Float`.  Literals carry a
 decimal point (`1.5`, `6.25`); `+ - * /` arithmetic (division is now
@@ -245,11 +245,10 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 `new`, `nil`, `pointer to`, …) so they are easy to type; any case is
 accepted.
 
-Not yet in M20: exported fixed ARRAY types, exported SET-typed or
-record-typed VARIABLEs, exported procedures taking/returning exported
-types, array-typed fields in exported records, and methods across
-module boundaries (M20b); exported records expose all their fields to
-importers (field-level `*` marks are not enforced yet).
+Exported records expose all their fields to importers (field-level
+`*` marks are not enforced yet); whole-record assignment to exported
+module VARIABLEs is not supported.  Everything else in the module/
+import epic is shipped (M19-M21).
 declaring procedures inside procedures, multi-dimensional arrays,
 `SET` and other Oberon-2 types.
 
@@ -262,18 +261,21 @@ has no default (no machine-specific fallback), so CI fails loudly:
 
 ## End-to-end pipeline (verified)
 
-1. Stage `crate/bin/o2c.elf` as `Tests/O2c` via the aegir Makefile's
-   `O2C_ROOT` knob and boot a test-mode initrd:
-   `make run INITRD_MODE=test O2C_ROOT=../o2c`.
-2. o2c compiles the embedded demo module and prints the
-   generated Ada with `O2C|` line prefixes between `--- ada begin ---`
-   / `--- ada end ---` markers (exact host reconstruction despite
-   shared-console chatter).
-3. Reconstruct the emitted source on the host, build it with the
-   external chain (`gprbuild -P prog.gpr -aP $AEGIR_ROOT/userspace/rts
-   -XAEGIR_ROOT=$AEGIR_ROOT`), and stage the resulting ELF the same
-   way as any userspace program.
-4. Boot it under Aegir and assert the console output.
+`tests/run_m1.sh` runs the whole dogfood chain in two Aegir boots:
 
-Verified result: `samples/hello.ob2` compiles, builds, and prints
-`hello from Oberon-2` then `42` on the Aegir console.
+1. Build `crate/bin/o2c.elf` and boot a quiet initrd
+   (`make run INITRD_MODE=min O2C_ROOT=../o2c`) that stages the demo
+   module sources (`Tests/O2cLib/Hello.ob2`, `Tests/O2cLib/Math.ob2`)
+   plus the o2c and hello ELFs.
+2. o2c reads the module files from the initrd, compiles them with
+   `O2c_Compiler.Compile_Multi` and prints every generated Ada unit
+   (`o2c_types.ads`, `math.ads`, `math.adb`, `hello.adb`) as `O2C|`
+   lines between `--- unit <file> ---` / `--- unit end ---` markers,
+   finishing with `--- ada end ---`.
+3. run_m1 reconstructs the units on the host, gprbuilds the
+   multi-unit program with the aegir runtime chain, and boots it as
+   `Tests/Hello`.
+4. Boot 2 asserts the demo's final console line (the cross-module
+   `406` from `Math.SumArr`).
+
+Verified: `tests/run_m1.sh` PASS (both boots, first attempt).
