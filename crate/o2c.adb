@@ -34,6 +34,7 @@ procedure O2c is
     "var head, cur: Node;" & ASCII.LF &
     "var shp: PShape; circ: PCircle;" & ASCII.LF &
     "var sac: Tote;" & ASCII.LF &
+    "var s2: set; l2: longint;" & ASCII.LF &
     ASCII.LF &
     "const Greeting = ""hello from Oberon-2"";" & ASCII.LF &
     ASCII.LF &
@@ -267,6 +268,17 @@ procedure O2c is
     "  sac.m[1][2] := 4;" & ASCII.LF &
     "  sac.k := 5;" & ASCII.LF &
     "  Out.Int(sac.m[0][1] + sac.m[1][2] + sac.k, 0);" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  s2 := {2, 4, 6};" & ASCII.LF &
+    "  if 4 IN s2 then Out.Int(4, 0); Out.Ln end;" & ASCII.LF &
+    "  s2 := s2 - {6};" & ASCII.LF &
+    "  if 6 IN s2 then Out.Int(0, 0) else Out.Int(6, 0) end;" & ASCII.LF &
+    "  Out.Ln;" & ASCII.LF &
+    "  l2 := 0;" & ASCII.LF &
+    "  while l2 < 60 do" & ASCII.LF &
+    "    l2 := l2 + 1" & ASCII.LF &
+    "  end;" & ASCII.LF &
+    "  if l2 = 60 then Out.Int(1, 0) else Out.Int(0, 0) end;" & ASCII.LF &
     "  Out.Ln" & ASCII.LF &
     "end Hello.";
 

@@ -19,6 +19,7 @@ var msg: Line; ch: char;
 var head, cur: Node;
 var shp: PShape; circ: PCircle;
 var sac: Tote;
+var s2: set; l2: longint;
 
 const Greeting = "hello from Oberon-2";
 
@@ -252,5 +253,16 @@ begin
   sac.m[1][2] := 4;
   sac.k := 5;
   Out.Int(sac.m[0][1] + sac.m[1][2] + sac.k, 0);
+  Out.Ln;
+  s2 := {2, 4, 6};
+  if 4 IN s2 then Out.Int(4, 0); Out.Ln end;
+  s2 := s2 - {6};
+  if 6 IN s2 then Out.Int(0, 0) else Out.Int(6, 0) end;
+  Out.Ln;
+  l2 := 0;
+  while l2 < 60 do
+    l2 := l2 + 1
+  end;
+  if l2 = 60 then Out.Int(1, 0) else Out.Int(0, 0) end;
   Out.Ln
 end Hello.

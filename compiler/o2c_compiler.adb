@@ -11,13 +11,15 @@ package body O2c_Compiler is
    --  T_Ptr and T_Nil are typing sentinels (never reach Ada_Type):
    --  T_Ptr marks a pointer-value operand (Ptr_UT names its pointer
    --  user type), T_Nil marks the NIL literal.
-   type EType is (T_Int, T_Bool, T_Str, T_Char, T_Ptr, T_Nil);
+   type EType is (T_Int, T_Bool, T_Str, T_Char, T_Long, T_Set,
+                  T_Ptr, T_Nil);
 
    type Expr_Rec is record
       Text   : Unbounded_String;
       Typ    : EType := T_Int;
       CStr   : Boolean := False;   --  whole ARRAY OF CHAR variable value
       Ptr_UT : Natural := 0;       --  pointer user-type index when T_Ptr
+      Lit    : Boolean := False;   --  a plain numeric literal (widening)
    end record;
 
    Max_Fields : constant := 32;
@@ -130,6 +132,7 @@ package body O2c_Compiler is
    Used_CStr : Boolean := False;
    Used_Int_Arr  : Boolean := False;  --  need O2c_Int_Arr base (M12)
    Used_Bool_Arr : Boolean := False;  --  need O2c_Bool_Arr base (M12)
+   Used_Set      : Boolean := False;  --  need O2c_Set type + Interfaces
    Loop_Depth : Natural := 0;      --  open LOOP statements (EXIT target)
    Loop_N     : Natural := 0;      --  LOOP counter for generated labels
    Loop_Lbl   : array (1 .. 64) of Unbounded_String;  --  per-depth label
@@ -278,6 +281,8 @@ package body O2c_Compiler is
          when T_Bool => return "Boolean";
          when T_Str  => return "String";
          when T_Char => return "Character";
+         when T_Long => return "Long_Integer";
+         when T_Set  => return "O2c_Set";
          when T_Ptr | T_Nil =>
             raise O2c_Error
               with "internal: Ada_Type on a pointer/NIL typing sentinel";
@@ -438,18 +443,23 @@ package body O2c_Compiler is
          return T_Bool;
       elsif Eq_No_Case (Name, "CHAR") then
          return T_Char;
+      elsif Eq_No_Case (Name, "LONGINT") then
+         return T_Long;
+      elsif Eq_No_Case (Name, "SET") then
+         return T_Set;
       end if;
       return T_Str;               --  sentinel: not a builtin scalar
    end Builtin_Type_Of;
 
    function Scalar_Init (T : EType) return String is
    begin
-      if T = T_Int then
-         return "0";
-      elsif T = T_Char then
-         return "ASCII.NUL";
-      end if;
-      return "False";
+      case T is
+         when T_Int | T_Long | T_Set => return "0";
+         when T_Char => return "ASCII.NUL";
+         when T_Bool => return "False";
+         when others =>
+            raise O2c_Error with "internal: Scalar_Init on a non-scalar";
+      end case;
    end Scalar_Init;
 
    --  Recursive default value for a whole value of user type UT (M16):
@@ -816,7 +826,9 @@ package body O2c_Compiler is
       end if;
       A := Parse_Expr;
       if Formal.UT = 0 then
-         if A.Typ /= Formal.Typ then
+         if Formal.Typ = T_Long and then A.Typ = T_Int and then A.Lit then
+            null;                     --  literal widens to LONGINT (M17)
+         elsif A.Typ /= Formal.Typ then
             raise O2c_Error with "argument has the wrong type (line "
               & Natural'Image (Cur.Line) & ")";
          end if;
@@ -1013,6 +1025,7 @@ package body O2c_Compiler is
          when Lex.Tok_Number =>
             R.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
             R.Typ := T_Int;
+            R.Lit := True;
             Next;
          when Lex.Tok_String =>
             R.Text := To_Unbounded_String
@@ -1031,6 +1044,45 @@ package body O2c_Compiler is
             R.Text := To_Unbounded_String ("null");
             R.Typ := T_Nil;
             Next;
+         when Lex.Tok_LBrace =>
+            --  SET literal: { e1, e2, ... } (M17), elements 0..31
+            Used_Set := True;
+            Next;              --  past '{'
+            R.Typ := T_Set;
+            declare
+               Bit   : Unbounded_String;
+               First : Boolean := True;
+            begin
+               loop
+                  exit when Cur.Kind = Lex.Tok_RBrace;
+                  declare
+                     E : Expr_Rec := Parse_Expr;
+                  begin
+                     if E.Typ /= T_Int then
+                        raise O2c_Error with "set elements must be INTEGER "
+                          & "(line " & Natural'Image (Cur.Line) & ")";
+                     end if;
+                     if First then
+                        First := False;
+                     else
+                        Bit := Bit & " or ";
+                     end if;
+                     Bit := Bit
+                       & "O2c_Set (Interfaces.Shift_Left "
+                       & "(Interfaces.Unsigned_32 (1), "
+                       & To_String (E.Text) & "))";
+                  end;
+                  exit when Cur.Kind /= Lex.Tok_Comma;
+                  Next;
+               end loop;
+               Expect (Lex.Tok_RBrace, "'}' closing a SET literal");
+               Next;
+               if First then
+                  R.Text := To_Unbounded_String ("O2c_Set (0)");
+               else
+                  R.Text := "(" & Bit & ")";
+               end if;
+            end;
          when Lex.Tok_LParen =>
             Next;
             R := Parse_Expr;
@@ -1051,8 +1103,9 @@ package body O2c_Compiler is
             begin
                Next;
                R := Parse_Factor;
-               if R.Typ /= T_Int then
-                  raise O2c_Error with "unary sign needs an INTEGER (line "
+               if R.Typ /= T_Int and then R.Typ /= T_Long then
+                  raise O2c_Error with "unary sign needs an INTEGER or "
+                    & "LONGINT (line "
                     & Natural'Image (Cur.Line) & ")";
                end if;
                R.Text := (if Neg then "-" else "") & "(" & R.Text & ")";
@@ -1358,6 +1411,27 @@ package body O2c_Compiler is
       return R;
    end Parse_Factor;
 
+   --  INTEGER/LONGINT compatibility (M17): mixing is allowed only when
+   --  one side is a plain numeric literal, which widens to LONGINT.
+   function Int_Like (A, B : Expr_Rec; Res : out EType) return Boolean is
+   begin
+      if A.Typ = T_Int and then B.Typ = T_Int then
+         Res := T_Int;
+         return True;
+      elsif A.Typ = T_Long and then B.Typ = T_Long then
+         Res := T_Long;
+         return True;
+      elsif A.Typ = T_Long and then B.Typ = T_Int and then B.Lit then
+         Res := T_Long;
+         return True;
+      elsif A.Typ = T_Int and then A.Lit and then B.Typ = T_Long then
+         Res := T_Long;
+         return True;
+      end if;
+      Res := T_Int;
+      return False;
+   end Int_Like;
+
    function Parse_Term return Expr_Rec is
       R : Expr_Rec := Parse_Factor;
    begin
@@ -1366,31 +1440,50 @@ package body O2c_Compiler is
             Next;
             declare
                X : Expr_Rec := Parse_Factor;
+               Res : EType;
             begin
-               if R.Typ /= T_Int or else X.Typ /= T_Int then
-                  raise O2c_Error with "'*' needs INTEGER operands";
+               if R.Typ = T_Set and then X.Typ = T_Set then
+                  R.Text := "(" & R.Text & " and " & X.Text & ")";
+                  R.Lit := False;
+               elsif Int_Like (R, X, Res) then
+                  R.Text := R.Text & " * " & X.Text;
+                  R.Typ := Res;
+                  R.Lit := False;
+               else
+                  raise O2c_Error with "'*' needs INTEGER/LONGINT or SET "
+                    & "operands";
                end if;
-               R.Text := R.Text & " * " & X.Text;
             end;
          elsif Cur.Kind = Lex.Tok_Div then
             Next;
             declare
                X : Expr_Rec := Parse_Factor;
+               Res : EType;
             begin
-               if R.Typ /= T_Int or else X.Typ /= T_Int then
-                  raise O2c_Error with "DIV needs INTEGER operands";
+               if R.Typ = T_Set and then X.Typ = T_Set then
+                  R.Text := "(" & R.Text & " xor " & X.Text & ")";
+                  R.Lit := False;
+               elsif Int_Like (R, X, Res) then
+                  R.Text := R.Text & " / " & X.Text;
+                  R.Typ := Res;
+                  R.Lit := False;
+               else
+                  raise O2c_Error with "'/' is real division, not in the "
+                    & "M2 subset";
                end if;
-               R.Text := R.Text & " / " & X.Text;
             end;
          elsif Cur.Kind = Lex.Tok_Mod then
             Next;
             declare
                X : Expr_Rec := Parse_Factor;
+               Res : EType;
             begin
-               if R.Typ /= T_Int or else X.Typ /= T_Int then
-                  raise O2c_Error with "MOD needs INTEGER operands";
+               if not Int_Like (R, X, Res) then
+                  raise O2c_Error with "MOD needs INTEGER/LONGINT operands";
                end if;
                R.Text := R.Text & " rem " & X.Text;
+               R.Typ := Res;
+               R.Lit := False;
             end;
          elsif Cur.Kind = Lex.Tok_Slash then
             raise O2c_Error with "'/' is real division, not in the M2 subset";
@@ -1403,6 +1496,7 @@ package body O2c_Compiler is
                   raise O2c_Error with "'&' needs BOOLEAN operands";
                end if;
                R.Text := R.Text & " and " & X.Text;
+               R.Lit := False;
             end;
          else
             exit;
@@ -1419,21 +1513,37 @@ package body O2c_Compiler is
             Next;
             declare
                X : Expr_Rec := Parse_Term;
+               Res : EType;
             begin
-               if R.Typ /= T_Int or else X.Typ /= T_Int then
-                  raise O2c_Error with "'+' needs INTEGER operands";
+               if R.Typ = T_Set and then X.Typ = T_Set then
+                  R.Text := "(" & R.Text & " or " & X.Text & ")";
+                  R.Lit := False;
+               elsif Int_Like (R, X, Res) then
+                  R.Text := R.Text & " + " & X.Text;
+                  R.Typ := Res;
+                  R.Lit := False;
+               else
+                  raise O2c_Error with "'+' needs INTEGER/LONGINT or SET "
+                    & "operands";
                end if;
-               R.Text := R.Text & " + " & X.Text;
             end;
          elsif Cur.Kind = Lex.Tok_Minus then
             Next;
             declare
                X : Expr_Rec := Parse_Term;
+               Res : EType;
             begin
-               if R.Typ /= T_Int or else X.Typ /= T_Int then
-                  raise O2c_Error with "'-' needs INTEGER operands";
+               if R.Typ = T_Set and then X.Typ = T_Set then
+                  R.Text := "(" & R.Text & " and not " & X.Text & ")";
+                  R.Lit := False;
+               elsif Int_Like (R, X, Res) then
+                  R.Text := R.Text & " - " & X.Text;
+                  R.Typ := Res;
+                  R.Lit := False;
+               else
+                  raise O2c_Error with "'-' needs INTEGER/LONGINT or SET "
+                    & "operands";
                end if;
-               R.Text := R.Text & " - " & X.Text;
             end;
          elsif Cur.Kind = Lex.Tok_Or then
             Next;
@@ -1444,6 +1554,7 @@ package body O2c_Compiler is
                   raise O2c_Error with "OR needs BOOLEAN operands";
                end if;
                R.Text := R.Text & " or " & X.Text;
+               R.Lit := False;
             end;
          else
             exit;
@@ -1455,6 +1566,27 @@ package body O2c_Compiler is
    function Parse_Expr return Expr_Rec is
       R : Expr_Rec := Parse_Simple;
    begin
+      if Cur.Kind = Lex.Tok_In then
+         --  membership test: e IN s (M17)
+         Next;
+         declare
+            X : Expr_Rec := Parse_Simple;
+         begin
+            if R.Typ /= T_Int or else X.Typ /= T_Set then
+               raise O2c_Error with "IN needs an INTEGER element and a SET "
+                 & "operand (line " & Natural'Image (Cur.Line) & ")";
+            end if;
+            Used_Set := True;
+            R.Text := To_Unbounded_String
+              ("((" & To_String (X.Text)
+               & " and O2c_Set (Interfaces.Shift_Left "
+               & "(Interfaces.Unsigned_32 (1), " & To_String (R.Text)
+               & "))) /= 0)");
+            R.Typ := T_Bool;
+            R.Lit := False;
+            return R;
+         end;
+      end if;
       if Cur.Kind = Lex.Tok_Equal or else Cur.Kind = Lex.Tok_NE
         or else Cur.Kind = Lex.Tok_LT or else Cur.Kind = Lex.Tok_LE
         or else Cur.Kind = Lex.Tok_GT or else Cur.Kind = Lex.Tok_GE
@@ -1472,15 +1604,38 @@ package body O2c_Compiler is
                  when Lex.Tok_LE    => " <= ",
                  when Lex.Tok_GT    => " > ",
                  when others        => " >= ");
+            Is_LE : constant Boolean := Cur.Kind = Lex.Tok_LE;
+            Is_GE : constant Boolean := Cur.Kind = Lex.Tok_GE;
          begin
             Next;
             declare
-               X : Expr_Rec := Parse_Simple;
+               X  : Expr_Rec := Parse_Simple;
+               Res : EType;
             begin
                if Ordering then
-                  if R.Typ /= T_Int or else X.Typ /= T_Int then
-                     raise O2c_Error with "ordering comparisons need INTEGER"
-                       & " operands";
+                  if R.Typ = T_Set and then X.Typ = T_Set then
+                     --  SET subset relations (only <= and >=)
+                     if not (Is_LE or Is_GE) then
+                        raise O2c_Error with "SET ordering supports only "
+                          & "'<=' and '>=' (line "
+                          & Natural'Image (Cur.Line) & ")";
+                     end if;
+                     Used_Set := True;
+                     if Is_LE then
+                        R.Text := To_Unbounded_String
+                          ("((" & To_String (R.Text) & " and not "
+                           & To_String (X.Text) & ") = 0)");
+                     else
+                        R.Text := To_Unbounded_String
+                          ("((" & To_String (X.Text) & " and not "
+                           & To_String (R.Text) & ") = 0)");
+                     end if;
+                     R.Typ := T_Bool;
+                     R.Lit := False;
+                     return R;
+                  elsif not Int_Like (R, X, Res) then
+                     raise O2c_Error with "ordering comparisons need "
+                       & "INTEGER/LONGINT or SET operands";
                   end if;
                else
                   if R.Typ = T_Ptr or else R.Typ = T_Nil
@@ -1509,36 +1664,46 @@ package body O2c_Compiler is
                         end if;
                      end;
                   else
-                     declare
-                        procedure Char_Coerce (E : in out Expr_Rec;
-                                               Other : EType) is
-                           T : constant String := To_String (E.Text);
+                     --  scalar equality: INTEGER/LONGINT (literal
+                     --  widening), BOOLEAN, CHAR, SET
+                     if not (R.Typ = T_Set and then X.Typ = T_Set)
+                       and then not Int_Like (R, X, Res)
+                     then
+                        declare
+                           procedure Char_Coerce (E : in out Expr_Rec;
+                                                  Other : EType) is
+                              T : constant String := To_String (E.Text);
+                           begin
+                              if E.Typ = T_Str and then Other = T_Char
+                                and then T'Length = 3
+                                and then T (T'First) = '"'
+                                and then T (T'Last) = '"'
+                              then
+                                 E.Typ := T_Char;
+                                 E.Text := To_Unbounded_String
+                                   ("'" & T (T'First + 1) & "'");
+                              end if;
+                           end Char_Coerce;
                         begin
-                           if E.Typ = T_Str and then Other = T_Char
-                             and then T'Length = 3
-                             and then T (T'First) = '"'
-                             and then T (T'Last) = '"'
+                           Char_Coerce (R, X.Typ);
+                           Char_Coerce (X, R.Typ);
+                           if R.Typ /= X.Typ
+                             or else (R.Typ /= T_Int and then R.Typ /= T_Long
+                                      and then R.Typ /= T_Bool
+                                      and then R.Typ /= T_Char
+                                      and then R.Typ /= T_Set)
                            then
-                              E.Typ := T_Char;
-                              E.Text := To_Unbounded_String
-                                ("'" & T (T'First + 1) & "'");
+                              raise O2c_Error with "'='/'#' operands must "
+                                & "match (INTEGER, LONGINT, BOOLEAN, CHAR "
+                                & "or SET)";
                            end if;
-                        end Char_Coerce;
-                     begin
-                        Char_Coerce (R, X.Typ);
-                        Char_Coerce (X, R.Typ);
-                        if R.Typ /= X.Typ
-                          or else (R.Typ /= T_Int and then R.Typ /= T_Bool
-                                   and then R.Typ /= T_Char)
-                        then
-                           raise O2c_Error with "'='/'#' operands must match"
-                             & " (INTEGER, BOOLEAN or CHAR)";
-                        end if;
-                     end;
+                        end;
+                     end if;
                   end if;
                end if;
                R.Text := "(" & R.Text & Op & X.Text & ")";
                R.Typ := T_Bool;
+               R.Lit := False;
             end;
          end;
       end if;
@@ -2659,6 +2824,10 @@ package body O2c_Compiler is
                         raise O2c_Error with "RETURN value type mismatch "
                           & "(line " & Natural'Image (Cur.Line) & ")";
                      end if;
+                  elsif Cur_Ret_Type = T_Long and then V.Typ = T_Int
+                    and then V.Lit
+                  then
+                     null;            --  literal widens (M17)
                   elsif V.Typ /= Cur_Ret_Type then
                      raise O2c_Error with "RETURN value type mismatch (line "
                        & Natural'Image (Cur.Line) & ")";
@@ -3072,7 +3241,12 @@ package body O2c_Compiler is
                   declare
                      V : Expr_Rec := Parse_Expr;
                   begin
-                     if Syms (Idx).Typ /= V.Typ or else V.Typ = T_Str then
+                     if V.Typ = T_Str
+                       or else (Syms (Idx).Typ /= V.Typ
+                                and then not (Syms (Idx).Typ = T_Long
+                                              and then V.Typ = T_Int
+                                              and then V.Lit))
+                     then
                         raise O2c_Error with "type mismatch assigning "
                           & Head (1 .. H_Len);
                      end if;
@@ -3121,6 +3295,7 @@ package body O2c_Compiler is
       Used_CStr := False;
       Used_Int_Arr := False;
       Used_Bool_Arr := False;
+      Used_Set := False;
       N_Bound := 0;
       Recv_UT := 0;
       G_N := 0;
@@ -3248,7 +3423,11 @@ package body O2c_Compiler is
       Next;
       Expect (Lex.Tok_EOF, "end of file");
 
-      S := S & "with Aegir_User.Console;" & ASCII.LF & ASCII.LF;
+      S := S & "with Aegir_User.Console;" & ASCII.LF;
+      if Used_Set then
+         S := S & "with Interfaces;" & ASCII.LF;
+      end if;
+      S := S & ASCII.LF;
       S := S & "procedure " & To_String (Mod_Name) & " is" & ASCII.LF;
       --  shared unconstrained array bases (M12): fixed numeric arrays
       --  are emitted as constrained subtypes so they fit ARRAY OF
@@ -3260,6 +3439,9 @@ package body O2c_Compiler is
       if Used_Bool_Arr then
          S := S & "   type O2c_Bool_Arr is array (Integer range <>) of Boolean;"
            & ASCII.LF;
+      end if;
+      if Used_Set then
+         S := S & "   type O2c_Set is mod 2**32;" & ASCII.LF;
       end if;
       if Used_Int then
          S := S & "   procedure O2c_Put_Int (V : Integer) is" & ASCII.LF

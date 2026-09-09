@@ -91,6 +91,7 @@ package body O2c_Lexer is
          when Tok_Nil       => return "keyword NIL";
          when Tok_Is        => return "keyword IS";
          when Tok_With      => return "keyword WITH";
+         when Tok_In        => return "keyword IN";
          when Tok_Div       => return "keyword DIV";
          when Tok_Mod       => return "keyword MOD";
          when Tok_And       => return "keyword AND";
@@ -105,6 +106,8 @@ package body O2c_Lexer is
          when Tok_RParen    => return "symbol )";
          when Tok_LBracket  => return "symbol [";
          when Tok_RBracket  => return "symbol ]";
+         when Tok_LBrace    => return "symbol {";
+         when Tok_RBrace    => return "symbol }";
          when Tok_Plus      => return "symbol +";
          when Tok_Minus     => return "symbol -";
          when Tok_Star      => return "symbol *";
@@ -161,6 +164,7 @@ package body O2c_Lexer is
       elsif Folded = "NIL" then return Tok_Nil;
       elsif Folded = "IS" then return Tok_Is;
       elsif Folded = "WITH" then return Tok_With;
+      elsif Folded = "IN" then return Tok_In;
       elsif Folded = "DIV" then return Tok_Div;
       elsif Folded = "MOD" then return Tok_Mod;
       elsif Folded = "AND" then return Tok_And;
@@ -317,6 +321,8 @@ package body O2c_Lexer is
          when ')' => T.Kind := Tok_RParen; Advance;
          when '[' => T.Kind := Tok_LBracket; Advance;
          when ']' => T.Kind := Tok_RBracket; Advance;
+         when '{' => T.Kind := Tok_LBrace; Advance;
+         when '}' => T.Kind := Tok_RBrace; Advance;
          when '+' => T.Kind := Tok_Plus; Advance;
          when '-' => T.Kind := Tok_Minus; Advance;
          when '*' => T.Kind := Tok_Star; Advance;

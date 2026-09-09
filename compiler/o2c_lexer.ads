@@ -20,11 +20,12 @@ package O2c_Lexer is
       Tok_While, Tok_Do, Tok_Repeat, Tok_Until,
       Tok_For, Tok_To, Tok_By, Tok_Loop, Tok_Exit, Tok_Return,
       Tok_True, Tok_False, Tok_Nil, Tok_Is,
-      Tok_With,
+      Tok_With, Tok_In,
       Tok_Div, Tok_Mod, Tok_And, Tok_Or, Tok_Not,
       --  symbols
       Tok_Semi, Tok_Colon, Tok_Assign, Tok_Dot, Tok_Comma,
       Tok_LParen, Tok_RParen, Tok_LBracket, Tok_RBracket,
+      Tok_LBrace, Tok_RBrace,
       Tok_Plus, Tok_Minus, Tok_Star, Tok_Slash,
       Tok_Equal, Tok_NE, Tok_LT, Tok_LE, Tok_GT, Tok_GE,
       Tok_Tilde, Tok_Amp, Tok_Bar, Tok_Caret);

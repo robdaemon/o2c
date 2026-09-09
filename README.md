@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M16 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M17 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M16 status
+## M17 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -20,7 +20,7 @@ Supported subset: `module`, `import Out`, `const` and `var`
 arrays, pointers) as parameters and returns (M11)**, **open array
 (`ARRAY OF`) parameters (M12)** and **record extension + type-bound
 procedures (M13 static, M14 dynamic, M15 method
-functions)**, and **record-typed fields + nested arrays (M16)** — plus **local
+functions)**, and **record-typed fields + nested arrays (M16)**, and **SET and LONGINT scalar types (M17)** — plus **local
 `const`/`type`/`var` declarations inside procedures (M10)**, full
 expressions with Oberon
 precedence (`+ - * DIV MOD & OR ~ = # < <= > >=`, parens), typed
@@ -91,6 +91,18 @@ demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
 
+**M17 — SET and LONGINT**: `SET` maps to an Ada modular
+type (`O2c_Set is mod 2**32`, `with Interfaces`), with literal sets
+`{e1, e2, …}`, union `+`, difference `-`, intersection `*`,
+symmetric difference `/`, membership `e IN s`, subset `<=`/`>=` and
+equality `= #`.  `LONGINT` maps to Ada `Long_Integer`; mixing
+LONGINT with INTEGER is an error except plain numeric literals,
+which widen (documented deviation), so `l := l + 1` and `l * 2`
+work while `l := i` (INTEGER variable) is rejected.  Both types work
+in vars, params, returns and record fields.  The demo tests
+membership and difference on `s2 := {2, 4, 6}` and counts a LONGINT
+to 60.
+
 **M16 — record-typed fields and nested arrays**: record
 fields may name an earlier RECORD or ARRAY type, and arrays may take
 an earlier ARRAY/RECORD type as their element type (so nested and
@@ -148,7 +160,7 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 `new`, `nil`, `pointer to`, …) so they are easy to type; any case is
 accepted.
 
-Not yet in M16: nested modules and other imports (only `Out`),
+Not yet in M17: nested modules and other imports (only `Out`),
 declaring procedures inside procedures, multi-dimensional arrays,
 `SET` and other Oberon-2 types.
 
