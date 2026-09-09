@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M32 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M33 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M32 status
+## M33 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,15 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M33 — string equality and ordering**: whole string values compare
+with `= # < <= > >=`.  A generated `O2c_S_Cmp` helper compares the
+NUL-terminated content of two String values (char-array variables may
+be padded with NULs, so `m1 = "hi"` and two `Line` variables holding
+`"hi"` both compare equal; ordering is lexicographic).  The comparison
+branch in Parse_Expr rewrites the operator to `O2c_S_Cmp(a, b) <op>
+0`.  Verified natively: `1 2 3 4` for equal / not-equal / less /
+less-or-equal.
 
 **M32 — nested procedures**: a procedure body may declare further
 procedures (`PROCEDURE` sections among its local CONST/TYPE/VAR

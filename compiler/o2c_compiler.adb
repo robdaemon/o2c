@@ -257,6 +257,7 @@ package body O2c_Compiler is
    Used_Bool_Arr : Boolean := False;  --  need O2c_Bool_Arr base (M12)
    Used_Set      : Boolean := False;  --  need O2c_Set type + Interfaces
    Used_Real     : Boolean := False;  --  need O2c_Put_Real helper (M18)
+   Used_StrCmp   : Boolean := False;  --  need O2c_S_Cmp helper (M33)
    Nested_Depth : Natural := 0;    --  nested PROCEDURE declarations (M32)
    Loop_Depth : Natural := 0;      --  open LOOP statements (EXIT target)
    Loop_N     : Natural := 0;      --  LOOP counter for generated labels
@@ -2706,6 +2707,17 @@ package body O2c_Compiler is
                X  : Expr_Rec := Parse_Simple;
                Res : EType;
             begin
+               if R.Typ = T_Str and then X.Typ = T_Str then
+                  --  M33: string equality/ordering over NUL-terminated
+                  --  content (char arrays may be padded with NULs)
+                  Used_StrCmp := True;
+                  R.Text := To_Unbounded_String
+                    ("(O2c_S_Cmp (" & To_String (R.Text) & ", "
+                     & To_String (X.Text) & ")" & Op & "0)");
+                  R.Typ := T_Bool;
+                  R.Lit := False;
+                  return R;
+               end if;
                if Ordering then
                   if R.Typ = T_Set and then X.Typ = T_Set then
                      --  SET subset relations (only <= and >=)
@@ -5701,6 +5713,45 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
               & "      end;" & ASCII.LF
               & "   end O2c_Put_Real;" & ASCII.LF;
          end if;
+         if Used_StrCmp then
+            --  M33: string comparison over NUL-terminated content
+            S := S & "   function O2c_S_Cmp (A, B : String) "
+              & "return Integer is" & ASCII.LF
+              & "      Na : Natural := 0; Nb : Natural := 0; K : Natural;"
+              & ASCII.LF
+              & "   begin" & ASCII.LF
+              & "      K := A'First;" & ASCII.LF
+              & "      while K <= A'Last and then A (K) /= ASCII.NUL loop"
+              & ASCII.LF
+              & "         Na := K; K := K + 1;" & ASCII.LF
+              & "      end loop;" & ASCII.LF
+              & "      K := B'First;" & ASCII.LF
+              & "      while K <= B'Last and then B (K) /= ASCII.NUL loop"
+              & ASCII.LF
+              & "         Nb := K; K := K + 1;" & ASCII.LF
+              & "      end loop;" & ASCII.LF
+              & "      K := 1;" & ASCII.LF
+              & "      while K <= Na - A'First + 1 and then "
+              & "K <= Nb - B'First + 1 loop" & ASCII.LF
+              & "         if A (A'First + K - 1) /= B (B'First + K - 1)"
+              & " then" & ASCII.LF
+              & "            if A (A'First + K - 1) < B (B'First + K - 1)"
+              & " then" & ASCII.LF
+              & "               return -1;" & ASCII.LF
+              & "            else" & ASCII.LF
+              & "               return 1;" & ASCII.LF
+              & "            end if;" & ASCII.LF
+              & "         end if;" & ASCII.LF
+              & "         K := K + 1;" & ASCII.LF
+              & "      end loop;" & ASCII.LF
+              & "      if (Na - A'First + 1) /= (Nb - B'First + 1) then"
+              & ASCII.LF
+              & "         return (if (Na - A'First + 1) < "
+              & "(Nb - B'First + 1) then -1 else 1);" & ASCII.LF
+              & "      end if;" & ASCII.LF
+              & "      return 0;" & ASCII.LF
+              & "   end O2c_S_Cmp;" & ASCII.LF;
+         end if;
       end Emit_Helpers;
 
    begin
@@ -5718,6 +5769,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       Used_Bool_Arr := False;
       Used_Set := False;
       Used_Real := False;
+      Used_StrCmp := False;
       Used_Console := False;
       Base_In_Spec := False;
       RVar_N := 0;
