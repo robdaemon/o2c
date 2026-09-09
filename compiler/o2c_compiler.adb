@@ -152,6 +152,23 @@ package body O2c_Compiler is
    XT_Tab : array (1 .. Max_XT) of XT_Entry := (others => <>);
    N_XT   : Natural := 0;
 
+   --  exported method catalog (M20c): type-bound procedures exported
+   --  by library modules, keyed by bound record name + method name.
+   Max_XM : constant := 128;
+   type XM_Entry is record
+      Owner  : Unbounded_String;
+      MName  : Unbounded_String;
+      RecN   : Unbounded_String;   --  bare exported record type name
+      Ret    : Boolean := False;
+      Typ    : EType := T_Int;     --  scalar result type
+      Ret_Nm : Unbounded_String;   --  qualified exported POINTER result
+      Params : Natural := 0;       --  extra arguments (receiver excluded)
+      P      : Param_Array := (others => <>);
+      P_Nm   : Nm_Array := (others => <>);
+   end record;
+   XMs : array (1 .. Max_XM) of XM_Entry := (others => <>);
+   N_XM : Natural := 0;
+
    --  forward (body defined with the other M20 import machinery)
    function Import_Type (Owner, Mem : String) return Natural;
 
@@ -330,6 +347,64 @@ package body O2c_Compiler is
       end if;
       return 0;
    end X_Ret_UT;
+
+   --  M20c import helpers: resolve an exported type-bound method on an
+   --  imported record chain (deepest bound first) and import a method
+   --  argument's type.
+   function Short_Nm (Nm : String) return String is
+   begin
+      for C in Nm'Range loop
+         if Nm (C) = '.' then
+            return Nm (C + 1 .. Nm'Last);
+         end if;
+      end loop;
+      return Nm;
+   end Short_Nm;
+
+   function UT_Owner (U : Natural) return String is
+      N : constant String := To_String (UTypes (U).Name);
+   begin
+      for C in N'Range loop
+         if N (C) = '.' then
+            return N (N'First .. C - 1);
+         end if;
+      end loop;
+      return To_String (Mod_Name);
+   end UT_Owner;
+
+   function XM_Bound (Owner : String; Rec : Natural;
+                      MName : String) return Natural is
+      U : Natural := Rec;
+   begin
+      while U /= 0 loop
+         for I in 1 .. N_XM loop
+            if To_String (XMs (I).Owner) = Owner
+              and then Short_Nm (To_String (UTypes (U).Name)) =
+                To_String (XMs (I).RecN)
+              and then To_String (XMs (I).MName) = MName
+            then
+               return I;
+            end if;
+         end loop;
+         U := UTypes (U).Parent;
+      end loop;
+      return 0;
+   end XM_Bound;
+
+   function XM_Formal (XMI, I : Natural) return Param_Rec is
+      F : Param_Rec := XMs (XMI).P (I);
+   begin
+      if Length (XMs (XMI).P_Nm (I)) > 0 then
+         declare
+            Q : constant String := To_String (XMs (XMI).P_Nm (I));
+         begin
+            F.UT := Import_Type (Q_Owner (Q), Q_Mem (Q));
+            F.Typ := T_Int;
+            F.Open := False;
+         end;
+      end if;
+      return F;
+   end XM_Formal;
 
    --  M19: exportable scalar kinds.  SET stays module-private because
    --  each Ada unit declares its own O2c_Set type; user types and open
@@ -547,6 +622,8 @@ package body O2c_Compiler is
       return UT_By_Name (QName (Owner, Mem));
    end Import_Type;
 
+
+
    procedure Next is
    begin
       Cur := Lex.Next_Token;
@@ -730,6 +807,28 @@ package body O2c_Compiler is
            else Ada_Type (S.Typ));
       return To_String (H);
    end Dsp_Hdr;
+
+   --  Procedure-method dispatcher header (M20c): receiver is the
+   --  class-wide view of bound record B; extra parameters mirror the
+   --  method implementation.  Mirrors Dsp_Hdr for procedure methods.
+   function Dsp_Hdr_P (DN : String; B : Natural; SIdx : Natural)
+                       return String is
+      S : Sym renames Syms (SIdx);
+      H : Unbounded_String;
+   begin
+      H := H & "procedure " & Dsp_Name (DN, B) & " (";
+      for I in 1 .. S.Params loop
+         if I > 1 then
+            H := H & "; ";
+         end if;
+         H := H & To_String (S.P (I).Name)
+           & (if S.P (I).By_Ref then " : in out " else " : ")
+           & (if I = 1 then To_String (UTypes (B).Name) & "'Class"
+              else P_Ada_Type (S.P (I)));
+      end loop;
+      H := H & ")";
+      return To_String (H);
+   end Dsp_Hdr_P;
 
    --  Emit the bodies of all method-function dispatchers (M15).  Run
    --  after every method is known, so each chain covers every override
@@ -2780,11 +2879,6 @@ package body O2c_Compiler is
       end Formal_Ada_Type;
    begin
       if Recv_UT /= 0 then
-         if UTypes (Recv_UT).ExpT then
-            raise O2c_Error with "type-bound procedures on an exported "
-              & "type are M20b ('" & To_String (UTypes (Recv_UT).Name)
-              & "')";
-         end if;
          --  type-bound procedure: receiver is formal parameter #1
          Impl_Nm := To_Unbounded_String (Method_Impl_Name (Name, Recv_UT));
          N_Par := 1;
@@ -2916,7 +3010,7 @@ package body O2c_Compiler is
       N_Sym := N_Sym + 1;
       Syms (N_Sym) := (Kind => S_Proc, Name => To_Unbounded_String (Name),
                        Params => N_Par, Typ => Ret_Typ, UT => Ret_UT,
-                       Ret => Is_Function, others => <>);
+                       Ret => Is_Function, Exp => Exported, others => <>);
       for I in 1 .. N_Par loop
          Syms (N_Sym).P (I) :=
            (Name => PName (I), Typ => PTyp (I), By_Ref => PRef (I),
@@ -2966,7 +3060,65 @@ package body O2c_Compiler is
            & (if Ret_UT /= 0 then To_String (UTypes (Ret_UT).Name)
               else Ada_Type (Ret_Typ));
       end if;
-      if Exported then
+      if Exported and then Recv_UT /= 0 then
+         --  M20c: exported type-bound method.  Its dispatcher is
+         --  exported from the package spec; plain procedures keep the
+         --  M19/M20b path below.
+         if not UTypes (Recv_UT).ExpT then
+            raise O2c_Error with "type-bound procedure '" & Name
+              & "' can be exported only on an exported type (M20c)";
+         end if;
+         for I in 2 .. N_Par loop
+            if POpen (I) then
+               raise O2c_Error with "exported method '" & Name
+                 & "': open ARRAY parameters are not exportable yet "
+                 & "(M20c)";
+            end if;
+            if PTyp (I) = T_Set then
+               raise O2c_Error with "exported method '" & Name
+                 & "': SET parameters are not exportable (M20c)";
+            end if;
+            if PUT (I) /= 0 then
+               if UTypes (PUT (I)).Imported
+                 or else not UTypes (PUT (I)).ExpT
+               then
+                  raise O2c_Error with "exported method '" & Name
+                    & "': parameters may use only this module's exported "
+                    & "types (M20c)";
+               end if;
+               if UTypes (PUT (I)).Is_Rec and then not PRef (I) then
+                  raise O2c_Error with "exported method '" & Name
+                    & "': RECORD parameters must be declared VAR";
+               end if;
+               if not (UTypes (PUT (I)).Is_Rec
+                       or else UTypes (PUT (I)).Is_Ptr)
+               then
+                  raise O2c_Error with "exported method '" & Name
+                    & "': ARRAY parameters are not exportable yet (M20c)";
+               end if;
+            end if;
+         end loop;
+         if Is_Function then
+            if Ret_UT /= 0 then
+               if UTypes (Ret_UT).Imported
+                 or else not UTypes (Ret_UT).ExpT
+               then
+                  raise O2c_Error with "exported method function '" & Name
+                    & "' must return a scalar or this module's exported "
+                    & "POINTER type (M20c)";
+               end if;
+               if not UTypes (Ret_UT).Is_Ptr then
+                  raise O2c_Error with "function return types: "
+                    & "INTEGER/BOOLEAN/CHAR or a POINTER type ('" & Name
+                    & "')";
+               end if;
+            elsif not Scalar_Exportable (Ret_Typ) then
+               raise O2c_Error with "exported method function '" & Name
+                 & "' must return INTEGER/LONGINT/REAL/CHAR/BOOLEAN "
+                 & "or an exported POINTER (M20c)";
+            end if;
+         end if;
+      elsif Exported then
          --  M19/M20b: exported procedures may take scalars and this
          --  module's exported RECORD (VAR) / POINTER types, and return
          --  scalars or an exported POINTER type.
@@ -3154,8 +3306,16 @@ package body O2c_Compiler is
                N_Dsp := N_Dsp + 1;
                Dsps (N_Dsp) := (MName => To_Unbounded_String (Name),
                                 BRec => Recv_UT, SymIdx => Param_Base);
-               Append_Decl ("   " & Dsp_Hdr (Name, Recv_UT, Param_Base)
-                            & ";");
+               --  M20c: an exported method function's dispatcher spec
+               --  goes into the package spec so importers can call it.
+               if Pkg_Mode and then UTypes (Recv_UT).ExpT and then Exported
+               then
+                  Append_Spec ("   " & Dsp_Hdr (Name, Recv_UT, Param_Base)
+                               & ";");
+               else
+                  Append_Decl ("   " & Dsp_Hdr (Name, Recv_UT, Param_Base)
+                               & ";");
+               end if;
             end if;
          end;
       end if;
@@ -3862,6 +4022,104 @@ package body O2c_Compiler is
                                         else 0));
                                  end;
                               end if;
+                              if BI = 0 and then UTypes (Urec).Imported then
+                                 --  M20c: method on an imported record
+                                 --  type: call the exported dispatcher
+                                 declare
+                                    Ownr : constant String :=
+                                      UT_Owner (Urec);
+                                    XMI  : constant Natural :=
+                                      XM_Bound (Ownr, Urec,
+                                                T1.Text (1 .. T1.Len));
+                                 begin
+                                    if XMI /= 0 then
+                                       if XMs (XMI).Ret then
+                                          raise O2c_Error with "method '"
+                                            & T1.Text (1 .. T1.Len)
+                                            & "' is a function; use its "
+                                            & "value (line "
+                                            & Natural'Image (Cur.Line)
+                                            & ")";
+                                       end if;
+                                       Next;    --  past '.'
+                                       Expect (Lex.Tok_Ident,
+                                               "a method name");
+                                       declare
+                                          Rtxt : constant String :=
+                                            (if UTypes (U).Is_Ptr
+                                             then Head (1 .. H_Len) & ".all"
+                                             else Head (1 .. H_Len));
+                                          DNm : constant String :=
+                                            T1.Text (1 .. T1.Len);
+                                          RNm : constant String :=
+                                            To_String (XMs (XMI).RecN);
+                                          ArgsT : Unbounded_String;
+                                          Call  : Unbounded_String;
+                                          N_A   : Natural := 0;
+                                       begin
+                                          Next;  --  past the method name
+                                          if Cur.Kind = Lex.Tok_LParen then
+                                             Next;
+                                             loop
+                                                exit when
+                                                  Cur.Kind =
+                                                    Lex.Tok_RParen;
+                                                N_A := N_A + 1;
+                                                if N_A > XMs (XMI).Params
+                                                then
+                                                   raise O2c_Error with
+                                                     "method '" & DNm
+                                                     & "' expects "
+                                                     & Natural'Image
+                                                       (XMs (XMI).Params)
+                                                     & " argument(s)";
+                                                end if;
+                                                declare
+                                                   A : Expr_Rec :=
+                                                     Parse_Actual
+                                                       (XM_Formal
+                                                          (XMI, N_A));
+                                                begin
+                                                   if N_A > 1 then
+                                                      ArgsT := ArgsT & ", ";
+                                                   end if;
+                                                   ArgsT := ArgsT & A.Text;
+                                                end;
+                                                exit when
+                                                  Cur.Kind /=
+                                                    Lex.Tok_Comma;
+                                                Next;
+                                             end loop;
+                                             if N_A /= XMs (XMI).Params then
+                                                raise O2c_Error with
+                                                  "method '" & DNm
+                                                  & "' expects "
+                                                  & Natural'Image
+                                                    (XMs (XMI).Params)
+                                                  & " argument(s), got "
+                                                  & Natural'Image (N_A);
+                                             end if;
+                                             Expect (Lex.Tok_RParen,
+                                                     "')'");
+                                             Next;
+                                          elsif XMs (XMI).Params /= 0 then
+                                             raise O2c_Error with "method '"
+                                               & DNm & "' needs arguments";
+                                          end if;
+                                          Call := Call & Ownr & "." & DNm
+                                            & "_Disp_O2c_" & RNm & " ("
+                                            & Rtxt;
+                                          if N_A > 0 then
+                                             Call := Call & ", "
+                                               & ArgsT;
+                                          end if;
+                                          Call := Call & ");";
+                                          Append_Body ("      "
+                                                       & To_String (Call));
+                                       end;
+                                    end if;
+                                 end;
+                              end if;
                            end;
                         end if;
                      end;
@@ -4219,7 +4477,138 @@ package body O2c_Compiler is
 
    --  module --------------------------------------------------------
 
-   procedure Compile_Module (Source : String; Is_Lib : Boolean;
+      procedure XM_Add (E : XM_Entry) is
+   begin
+      N_XM := N_XM + 1;
+      if N_XM > XMs'Last then
+         raise O2c_Error with "too many exported methods";
+      end if;
+      XMs (N_XM) := E;
+   end XM_Add;
+
+   --  M20c exporter side: for every exported type-bound method of the
+   --  module just parsed, register its dispatcher in the catalog and,
+   --  for procedure methods, emit the dispatcher spec (package spec)
+   --  and body (package body).  Function-method dispatchers come from
+   --  the existing machinery (their specs route to the spec when
+   --  exported); the catalog entry lets importers resolve both kinds.
+   procedure Capture_Methods is
+   begin
+      for Bd in 1 .. N_Bound loop
+         declare
+            SIdx : constant Natural := Bounds (Bd).SymIdx;
+            B    : constant Natural := Bounds (Bd).RecUT;
+            DN   : constant String := To_String (Bounds (Bd).Name);
+         begin
+            if not (UTypes (B).ExpT and then Syms (SIdx).Exp) then
+               null;
+            else
+               declare
+                  E : XM_Entry :=
+                    (MName => Bounds (Bd).Name,
+                     RecN => UTypes (B).Name,
+                     Ret => Syms (SIdx).Ret,
+                     Typ => Syms (SIdx).Typ,
+                     Params => Syms (SIdx).Params - 1,
+                     others => <>);
+               begin
+                  for I in 2 .. Syms (SIdx).Params loop
+                     E.P (I - 1) := Syms (SIdx).P (I);
+                     E.P (I - 1).UT := 0;
+                     if Syms (SIdx).P (I).UT /= 0 then
+                        E.P_Nm (I - 1) := To_Unbounded_String
+                          (QName (To_String (Mod_Name),
+                                  To_String
+                                    (UTypes (Syms (SIdx).P (I).UT).Name)));
+                        E.P (I - 1).Typ := T_Int;
+                     end if;
+                  end loop;
+                  if Syms (SIdx).Ret and then Syms (SIdx).UT /= 0 then
+                     E.Ret_Nm := To_Unbounded_String
+                       (QName (To_String (Mod_Name),
+                               To_String (UTypes (Syms (SIdx).UT).Name)));
+                  end if;
+                  E.Owner := To_Unbounded_String (To_String (Mod_Name));
+                  XM_Add (E);
+               end;
+               if not Syms (SIdx).Ret then
+                  --  procedure method: export the dispatcher wrapper
+                  --  (spec plus body carrying the tag chain)
+                  declare
+                     Rcvr : constant String :=
+                       To_String (Syms (SIdx).P (1).Name);
+                     Hdr  : constant String := Dsp_Hdr_P (DN, B, SIdx);
+                     ArgL : Unbounded_String;
+                     Cand : array (1 .. Max_Bound) of Natural :=
+                       (others => 0);
+                     N_C  : Natural := 0;
+                  begin
+                     for I in 2 .. Syms (SIdx).Params loop
+                        if I > 2 then
+                           ArgL := ArgL & ", ";
+                        end if;
+                        ArgL := ArgL & To_String (Syms (SIdx).P (I).Name);
+                     end loop;
+                     for X in 1 .. N_UT loop
+                        if UTypes (X).Is_Rec and then X /= B
+                          and then Rec_Descends (X, B)
+                        then
+                           for Bd2 in 1 .. N_Bound loop
+                              if Bounds (Bd2).RecUT = X
+                                and then To_String (Bounds (Bd2).Name) = DN
+                              then
+                                 declare
+                                    Pos : Positive := N_C + 1;
+                                 begin
+                                    while Pos > 1 and then
+                                      Rec_Depth (X) > Rec_Depth (Cand (Pos - 1))
+                                    loop
+                                       Cand (Pos) := Cand (Pos - 1);
+                                       Pos := Pos - 1;
+                                    end loop;
+                                    Cand (Pos) := X;
+                                 end;
+                                 N_C := N_C + 1;
+                              end if;
+                           end loop;
+                        end if;
+                     end loop;
+                     Append_Spec ("   " & Hdr & ";");
+                     Append_Decl ("   " & Hdr & " is");
+                     Append_Decl ("   begin");
+                     if N_C > 0 then
+                        for I in 1 .. N_C loop
+                           Append_Decl ("      if " & Rcvr & " in "
+                                        & To_String (UTypes (Cand (I)).Name)
+                                        & "'Class then");
+                           Append_Decl ("         "
+                                        & Method_Impl_Name (DN, Cand (I))
+                                        & " (" & To_String
+                                            (UTypes (Cand (I)).Name) & " ("
+                                        & Rcvr & ")"
+                                        & (if Syms (SIdx).Params > 1
+                                           then ", " & To_String (ArgL)
+                                           else "") & ");");
+                        end loop;
+                        Append_Decl ("      else");
+                     end if;
+                     Append_Decl ("         " & Method_Impl_Name (DN, B)
+                                  & " (" & Rcvr
+                                  & (if Syms (SIdx).Params > 1
+                                     then ", " & To_String (ArgL)
+                                     else "") & ");");
+                     if N_C > 0 then
+                        Append_Decl ("      end if;");
+                     end if;
+                     Append_Decl ("   end " & Dsp_Name (DN, B) & ";");
+                  end;
+               end if;
+            end if;
+         end;
+      end loop;
+   end Capture_Methods;
+
+procedure Compile_Module (Source : String; Is_Lib : Boolean;
                              Main_Txt : out Unbounded_String;
                              Spec_Txt : out Unbounded_String;
                              Body_Txt : out Unbounded_String) is
@@ -4461,6 +4850,7 @@ package body O2c_Compiler is
 
       if Pkg_Mode then
          Capture_Types;           --  validate + register exported types
+         Capture_Methods;         --  export type-bound method dispatchers
       end if;
 
       --  ---- unit assembly (M19) ----

@@ -91,6 +91,16 @@ demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
 
+**M20c — exported type-bound methods**: a procedure method
+marked `name*` on an exported RECORD type (`procedure (var p: Point)
+Scale*(k: integer)`) gets an exported dispatcher
+`<Method>_Disp_O2c_<Type>` in the package spec whose body carries
+the tag chain over the module's subtype tree; importers call it as a
+plain `obj.Method(...)` on their imported-typed variables and the
+compiler resolves the deepest bound method through the exported-method
+catalog.  The demo calls `a.Scale(3)` on a `Math.Point`, printing
+`309` at the end.  Function methods across modules are M20d.
+
 **M20b — exported procedures on exported types**: library
 procedures marked `name*` may now take VAR RECORD parameters and
 POINTER parameters of the exported types of the same module, and
@@ -112,8 +122,8 @@ work.  An importer writes `var p: Math.Point` (or a POINTER such as
 type table, so `NEW`, `^` deref, `.field` chains, whole-record copies
 and pointer sharing behave like local types.  The demo builds and
 walks a `Math.Node` list, copies a `Math.Point`, calls `Math.Translate`
-(VAR record) and `Math.Next` (pointer result), printing
-`100 100 103 60` at the end.
+(VAR record), `Math.Next` (pointer result) and the exported method
+`a.Scale(3)`, printing `100 100 103 60 309` at the end.
 
 **M19 — modules**: `module M; import Out, Other;` compiles from
 separate source files: `O2c_Compiler.Compile_Multi` turns each library

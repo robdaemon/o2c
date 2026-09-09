@@ -89,7 +89,7 @@ if [ "$ATT" -ge 6 ]; then
    exit 1
 fi
 
-echo "run_m1: boot 2/2 - assert hello output incl. Math types and typed procs (60)"
-boot_once "O2C_HELLO_ELF=$WORK/bin/hello.elf" '60'
+echo "run_m1: boot 2/2 - assert hello output incl. Math methods (309)"
+boot_once "O2C_HELLO_ELF=$WORK/bin/hello.elf" '309'
 
 echo "run_m1: PASS"

@@ -14,6 +14,11 @@ procedure Next*(l: Node): Node;
 begin
   return l^.next
 end Next;
+procedure (var p: Point) Scale*(k: integer);
+begin
+  p.x := p.x * k;
+  p.y := p.y * k
+end Scale;
 procedure Sqr*(x: integer): integer;
 begin
   return x * x

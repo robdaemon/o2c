@@ -306,5 +306,8 @@ begin
   Out.Ln;
   tx := Math.Next(hx);
   Out.Int(tx^.v, 0);
+  Out.Ln;
+  a.Scale(3);
+  Out.Int(a.x + a.y, 0);
   Out.Ln
 end Hello.
