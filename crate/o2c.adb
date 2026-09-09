@@ -250,7 +250,11 @@ procedure O2c is
     "    end;" & ASCII.LF &
     "    Out.Int(circ^.r, 0);" & ASCII.LF &
     "    Out.Ln" & ASCII.LF &
-    "  end" & ASCII.LF &
+    "  end;" & ASCII.LF &
+    "  shp := circ;" & ASCII.LF &
+    "  shp.Widen(3);" & ASCII.LF &
+    "  Out.Int(circ^.r, 0);" & ASCII.LF &
+    "  Out.Ln" & ASCII.LF &
     "end Hello.";
 
 

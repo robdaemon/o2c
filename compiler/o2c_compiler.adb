@@ -626,53 +626,136 @@ package body O2c_Compiler is
       return A;
    end Parse_Actual;
 
-   --  Emit a type-bound procedure call (M13).  Cur is just past the
-   --  method name; Recv is the Ada receiver expression (a record
-   --  variable or p.all).  Formal #1 is the receiver, so the actual
-   --  count must be Params - 1.
-   procedure Emit_Method_Call (BI : Natural; Recv : String) is
+   function Rec_Depth (UT : Natural) return Natural is
+      D : Natural := 0;
+      U : Natural := UT;
+   begin
+      while U /= 0 loop
+         D := D + 1;
+         U := UTypes (U).Parent;
+      end loop;
+      return D;
+   end Rec_Depth;
+
+   --  Emit a type-bound procedure call.  Cur is just past the method
+   --  name; Recv is the Ada receiver expression (a record variable or
+   --  p.all).  Formal #1 is the receiver, so the actual count must be
+   --  Params - 1.  When Td /= 0 (pointer receiver whose static target
+   --  is record Td) and Td's subtree overrides the method, a dynamic
+   --  tag chain is emitted (M14): the runtime object's most-derived
+   --  overriding implementation wins, else the static binding.
+   procedure Emit_Method_Call (BI : Natural; Recv : String;
+                               Td : Natural := 0) is
       SIdx : constant Natural := Bounds (BI).SymIdx;
       NPar : constant Natural := Syms (SIdx).Params;
       Exp  : constant Natural := NPar - 1;
-      Call : Unbounded_String;
+      MName : constant String := To_String (Bounds (BI).Name);
+      Args  : array (1 .. Max_Params - 1) of Unbounded_String;
+      N_A   : Natural := 0;
+      Cand  : array (1 .. Max_Bound) of Natural := (others => 0);
+      N_C   : Natural := 0;
+      BaseB : constant Natural := Bounds (BI).RecUT;
+      ArgT  : Unbounded_String;
    begin
-      Call := Call & Method_Impl_Name (To_String (Bounds (BI).Name),
-                                       Bounds (BI).RecUT)
-        & " (" & Recv;
+      --  parse the actual arguments once; their texts are reused by
+      --  every branch of a dispatch chain
       if Cur.Kind = Lex.Tok_LParen then
          Next;
-         declare
-            N_A : Natural := 0;
-         begin
-            loop
-               exit when Cur.Kind = Lex.Tok_RParen;
-               N_A := N_A + 1;
-               declare
-                  A : Expr_Rec :=
-                    Parse_Actual (Syms (SIdx).P (N_A + 1));
-               begin
-                  Call := Call & ", " & To_String (A.Text);
-               end;
-               exit when Cur.Kind /= Lex.Tok_Comma;
-               Next;
-            end loop;
-            if N_A /= Exp then
-               raise O2c_Error with "method '"
-                 & To_String (Bounds (BI).Name) & "' expects "
-                 & Natural'Image (Exp)
-                 & " argument(s), got " & Natural'Image (N_A);
+         loop
+            exit when Cur.Kind = Lex.Tok_RParen;
+            N_A := N_A + 1;
+            if N_A > Exp then
+               raise O2c_Error with "method '" & MName & "' expects "
+                 & Natural'Image (Exp) & " argument(s)";
             end if;
-         end;
+            declare
+               A : Expr_Rec := Parse_Actual (Syms (SIdx).P (N_A + 1));
+            begin
+               Args (N_A) := A.Text;
+            end;
+            exit when Cur.Kind /= Lex.Tok_Comma;
+            Next;
+         end loop;
+         if N_A /= Exp then
+            raise O2c_Error with "method '" & MName & "' expects "
+              & Natural'Image (Exp) & " argument(s), got "
+              & Natural'Image (N_A);
+         end if;
          Expect (Lex.Tok_RParen, "')'");
          Next;
       else
          if Exp /= 0 then
-            raise O2c_Error with "method '"
-              & To_String (Bounds (BI).Name) & "' expects "
+            raise O2c_Error with "method '" & MName & "' expects "
               & Natural'Image (Exp) & " argument(s)";
          end if;
       end if;
-      Append_Body ("      " & To_String (Call) & ");");
+      for I in 1 .. N_A loop
+         if I > 1 then
+            ArgT := ArgT & ", ";
+         end if;
+         ArgT := ArgT & Args (I);
+      end loop;
+
+      --  record types in Td's subtree that override M (deepest first)
+      if Td /= 0 then
+         for X in 1 .. N_UT loop
+            if UTypes (X).Is_Rec and then Rec_Descends (X, Td) then
+               for B in 1 .. N_Bound loop
+                  if Bounds (B).RecUT = X
+                    and then To_String (Bounds (B).Name) = MName
+                  then
+                     declare
+                        Pos : Positive := N_C + 1;
+                     begin
+                        while Pos > 1 and then
+                          Rec_Depth (X) > Rec_Depth (Cand (Pos - 1))
+                        loop
+                           Cand (Pos) := Cand (Pos - 1);
+                           Pos := Pos - 1;
+                        end loop;
+                        Cand (Pos) := X;
+                     end;
+                     N_C := N_C + 1;
+                  end if;
+               end loop;
+            end if;
+         end loop;
+      end if;
+
+      if Td /= 0 and then N_C > 0 then
+         --  dynamic dispatch: tag chain, deepest override first
+         for I in 1 .. N_C loop
+            Append_Body ("      " & (if I = 1 then "if " else "elsif ")
+                         & Recv & " in " & To_String (UTypes (Cand (I)).Name)
+                         & "'Class then");
+            Append_Body ("         "
+                         & Method_Impl_Name (MName, Cand (I)) & " ("
+                         & To_String (UTypes (Cand (I)).Name) & " (" & Recv
+                         & ")"
+                         & (if N_A > 0 then ", " & To_String (ArgT) else "")
+                         & ");");
+         end loop;
+         Append_Body ("      else");
+         Append_Body ("         "
+                      & Method_Impl_Name (MName, BaseB) & " ("
+                      & To_String (UTypes (BaseB).Name) & " (" & Recv & ")"
+                      & (if N_A > 0 then ", " & To_String (ArgT) else "")
+                      & ");");
+         Append_Body ("      end if;");
+      else
+         --  static binding
+         declare
+            RecvA : String := Recv;
+         begin
+            if Td /= 0 then
+               RecvA := To_String (UTypes (BaseB).Name) & " (" & Recv & ")";
+            end if;
+            Append_Body ("      " & Method_Impl_Name (MName, BaseB)
+                         & " (" & RecvA
+                         & (if N_A > 0 then ", " & To_String (ArgT) else "")
+                         & ");");
+         end;
+      end if;
    end Emit_Method_Call;
 
    --  Assign a POINTER value (designator or NIL) to an Ada LHS whose
@@ -2520,7 +2603,10 @@ package body O2c_Compiler is
                            else Head (1 .. H_Len));
                      begin
                         Next;      --  past the method name
-                        Emit_Method_Call (BI, Rtxt);
+                        Emit_Method_Call (BI, Rtxt,
+                                          (if UTypes (U).Is_Ptr
+                                           then UTypes (U).Ptr_Tgt
+                                           else 0));
                      end;
                   elsif UTypes (U).Is_Ptr then
                      raise O2c_Error with "'.' selects a record field; "

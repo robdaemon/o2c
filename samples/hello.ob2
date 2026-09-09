@@ -235,5 +235,9 @@ begin
     end;
     Out.Int(circ^.r, 0);
     Out.Ln
-  end
+  end;
+  shp := circ;
+  shp.Widen(3);
+  Out.Int(circ^.r, 0);
+  Out.Ln
 end Hello.

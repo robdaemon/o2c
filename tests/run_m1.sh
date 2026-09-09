@@ -42,19 +42,32 @@ boot_once() {  # $1 = extra make vars, $2 = marker
 echo "run_m1: building o2c.elf"
 make -C "$ROOT" build AEGIR_ROOT="$AEGIR_ROOT" >/dev/null
 
-echo "run_m1: boot 1/2 - o2c emits Ada for hello"
-boot_once "" '--- ada end ---'
-awk '/--- ada begin ---/{f=1;next} /--- ada end ---/{f=0}
-     f && /^O2C\|/{print substr($0,5)}' "$QEMU_LOG" > "$WORK/hello.adb"
-grep -q 'procedure Hello' "$WORK/hello.adb" \
-   || { echo "run_m1: no 'procedure Hello' in emitted source" >&2; exit 1; }
-
-echo "run_m1: building the emitted hello on the host"
-cp "$ROOT/tests/hello.gpr" "$WORK/"
-( cd "$AEGIR_ROOT/userspace/echo" && alr exec -- gprbuild -q -p \
-    -P "$WORK/hello.gpr" -aP "$AEGIR_ROOT/userspace/rts" \
-    -XAEGIR_ROOT="$AEGIR_ROOT" >/dev/null ) \
-   || { echo "run_m1: host build of emitted Ada failed" >&2; exit 1; }
+echo "run_m1: boot 1/2 - o2c emits Ada for hello (retry on torn capture)"
+ATT=0
+while [ "$ATT" -lt 4 ]; do
+   ATT=$((ATT+1))
+   echo "run_m1:   attempt $ATT"
+   boot_once "" '--- ada end ---'
+   awk '/--- ada begin ---/{f=1;next} /--- ada end ---/{f=0}
+        f && /^O2C\|/{print substr($0,5)}' "$QEMU_LOG" > "$WORK/hello.adb"
+   if ! grep -q 'procedure Hello' "$WORK/hello.adb"; then
+      echo "run_m1: capture torn (no 'procedure Hello'); retrying" >&2
+      continue
+   fi
+   cp "$ROOT/tests/hello.gpr" "$WORK/"
+   if ( cd "$AEGIR_ROOT/userspace/echo" && alr exec -- gprbuild -q -p \
+        -P "$WORK/hello.gpr" -aP "$AEGIR_ROOT/userspace/rts" \
+        -XAEGIR_ROOT="$AEGIR_ROOT" >/dev/null ); then
+      break
+   else
+      echo "run_m1: host build of emitted Ada failed (torn capture); "
+        "retrying" >&2
+   fi
+done
+if [ "$ATT" -ge 4 ]; then
+   echo "run_m1: emitted-Ada capture/build failed after 4 attempts" >&2
+   exit 1
+fi
 
 echo "run_m1: boot 2/2 - assert hello output under Aegir"
 boot_once "O2C_HELLO_ELF=$WORK/bin/hello.elf" 'hello from Oberon-2'
