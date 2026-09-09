@@ -1,5 +1,5 @@
 module Hello;
-import Out;
+import Out, Math;
 
 type Vector = array 4 of integer;
 type Pair = record a, b: integer end;
@@ -21,6 +21,7 @@ var shp: PShape; circ: PCircle;
 var sac: Tote;
 var s2: set; l2: longint;
 var r: real;
+var m: integer;
 
 const Greeting = "hello from Oberon-2";
 
@@ -269,5 +270,19 @@ begin
   r := 6.25;
   r := r / 2.5;
   if r = 2.5 then Out.Real(r, 0) end;
+  Out.Ln;
+  m := Math.Sqr(6);
+  Out.Int(m, 0);
+  Out.Ln;
+  Math.SetBase(7);
+  m := 0;
+  Math.Bump(m);
+  Math.Bump(m);
+  Out.Int(m, 0);
+  Out.Ln;
+  Math.count := m + 1;
+  Out.Int(Math.count, 0);
+  Out.Ln;
+  Out.Real(Math.Pi, 0);
   Out.Ln
 end Hello.

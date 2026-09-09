@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M18 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M19 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M18 status
+## M19 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -91,6 +91,18 @@ demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
 
+**M19 — modules**: `module M; import Out, Other;` compiles from
+separate source files: `O2c_Compiler.Compile_Multi` turns each library
+module into an Ada package spec+body and the command module into the
+main procedure.  Exported `CONST`/`VARIABLE`/`procedure*` names live in
+the package spec and an export catalog; importers use qualified
+`M.name` reads, writes and calls, and Ada elaboration runs library
+module initialisation before the importer body.  The demo splits into
+`samples/hello.ob2` (command, now `import Out, Math`) and
+`samples/math.ob2` (library exporting `Pi*`, `count*`, `Sqr*`,
+`SetBase*`, `Bump*`); the regression asserts the resulting `3.142`
+printed from `Math.Pi`.
+
 **M18 — REAL**: `REAL` maps to Ada `Float`.  Literals carry a
 decimal point (`1.5`, `6.25`); `+ - * /` arithmetic (division is now
 real), unary sign, comparisons and equality work, mixing with
@@ -168,7 +180,10 @@ position). Ordinary identifiers stay case-sensitive.  Sample modules
 `new`, `nil`, `pointer to`, …) so they are easy to type; any case is
 accepted.
 
-Not yet in M18: nested modules and other imports (only `Out`),
+Not yet in M19: exported record/array/pointer types, exported SET-typed
+or record-typed VARIABLEs, and methods across module boundaries (M20),
+plus true separate Ada packages per module already landed — exports ride
+`name*` marks and importers use qualified `M.name`.
 declaring procedures inside procedures, multi-dimensional arrays,
 `SET` and other Oberon-2 types.
 

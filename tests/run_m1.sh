@@ -2,9 +2,12 @@
 # o2c M1 regression: the full dogfood pipeline.
 #
 #   1. build o2c.elf (o2c runs under Aegir)
-#   2. boot a test-mode initrd staging Tests/O2c; capture the generated
-#      Ada (O2C| lines between the markers) and rebuild it on the host
-#   3. boot again staging Tests/Hello; assert "hello from Oberon-2"
+#   2. boot a test-mode initrd staging Tests/O2c; o2c reads the demo
+#      module sources from the initrd (Tests/O2cLib/*.ob2), compiles
+#      them as separate modules and prints each generated Ada unit
+#      between markers; rebuild them all on the host
+#   3. boot again staging Tests/Hello; assert the full demo output,
+#      including the cross-module tail (Math exports)
 #
 # Requires AEGIR_ROOT (the aegir checkout; no default).
 set -eu
@@ -42,16 +45,34 @@ boot_once() {  # $1 = extra make vars, $2 = marker
 echo "run_m1: building o2c.elf"
 make -C "$ROOT" build AEGIR_ROOT="$AEGIR_ROOT" >/dev/null
 
-echo "run_m1: boot 1/2 - o2c emits Ada for hello (retry on torn capture)"
+echo "run_m1: boot 1/2 - o2c compiles the demo modules (retry on torn capture)"
 ATT=0
 while [ "$ATT" -lt 6 ]; do
    ATT=$((ATT+1))
    echo "run_m1:   attempt $ATT"
    boot_once "" '--- ada end ---'
-   awk '/--- ada begin ---/{f=1;next} /--- ada end ---/{f=0}
-        f && /^O2C\|/{print substr($0,5)}' "$QEMU_LOG" > "$WORK/hello.adb"
-   if ! grep -q 'procedure Hello' "$WORK/hello.adb"; then
-      echo "run_m1: capture torn (no 'procedure Hello'); retrying" >&2
+   python3 - "$QEMU_LOG" "$WORK" <<'PY'
+import sys
+log, work = sys.argv[1], sys.argv[2]
+txt = open(log, errors="replace").read()
+buf = {}
+cur = None
+for line in txt.splitlines():
+    if line.startswith("--- unit ") and line.endswith(" ---"):
+        cur = line[len("--- unit "):-len(" ---")]
+        buf.setdefault(cur, [])
+    elif line == "--- unit end ---":
+        cur = None
+    elif line.startswith("O2C|") and cur is not None:
+        buf[cur].append(line[4:])
+for name, lines in buf.items():
+    open(work + "/" + name, "w").write("\n".join(lines) + "\n")
+PY
+   if [ ! -s "$WORK/hello.adb" ] || [ ! -s "$WORK/math.ads" ] \
+      || [ ! -s "$WORK/math.adb" ] \
+      || ! grep -q 'procedure Hello' "$WORK/hello.adb" \
+      || ! grep -q 'package Math is' "$WORK/math.ads"; then
+      echo "run_m1: capture torn (units missing/incomplete); retrying" >&2
       continue
    fi
    cp "$ROOT/tests/hello.gpr" "$WORK/"
@@ -68,7 +89,7 @@ if [ "$ATT" -ge 6 ]; then
    exit 1
 fi
 
-echo "run_m1: boot 2/2 - assert hello output under Aegir"
-boot_once "O2C_HELLO_ELF=$WORK/bin/hello.elf" 'hello from Oberon-2'
+echo "run_m1: boot 2/2 - assert hello output incl. the Math cross-module tail"
+boot_once "O2C_HELLO_ELF=$WORK/bin/hello.elf" '3.142'
 
 echo "run_m1: PASS"
