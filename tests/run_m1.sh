@@ -17,7 +17,15 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK="${TMPDIR:-/tmp}/o2c-m1"
 QEMU_LOG="$WORK/boot.log"
 RUNTIME_LOG="$WORK/boot_runtime.log"
-RUN_MIN=${RUN_MIN:-280}
+#  Boot window in seconds.  Raised from 280 when o2c gained the bytecode
+#  pass: these boots now compile the demo AND compile+execute+publish a
+#  bytecode program (two full compiler runs in the emulated guest), so the
+#  demo's last marker arrives later than it used to.  That is intended work,
+#  not a regression - but the follow-up is to stop making BOTH boots carry
+#  it: the bytecode pass should be gated to a boot that stages the VM
+#  (VmGreet.ob2 + program 42), leaving boot 1 (Ada capture) and boot 2
+#  (demo) as light as they were, and this window back near 280.
+RUN_MIN=${RUN_MIN:-460}
 
 rm -rf "$WORK"; mkdir -p "$WORK"
 

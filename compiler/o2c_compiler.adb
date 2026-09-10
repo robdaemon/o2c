@@ -8974,10 +8974,93 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
          end if;
          Res (C) := (File => To_Unbounded_String (File), Text => T);
       end Add;
+      --  Which modules this call's sources import.
+      --
+      --  The builtin Oakwood modules are embedded SOURCE, so they must be
+      --  parsed on every call - imports have to resolve and user code is
+      --  checked against their types - but there is no reason to EMIT them
+      --  all: a program importing only Out used to drag thirteen builtin Ada
+      --  units into its output, and into whatever compiles that output.
+      --  Gather the import clauses first, then emit only what is reached.
+      --
+      --  Sizing: an import clause names a screenful at most.  The bound is a
+      --  guard against a pathological source and raises rather than quietly
+      --  emitting less than the program needs.
+      Max_Imports_Seen : constant := 64;
+      Seen   : array (1 .. Max_Imports_Seen) of Unbounded_String;
+      N_Seen : Natural := 0;
+
+      procedure Note_Import (Name : String) is
+      begin
+         for I in 1 .. N_Seen loop
+            if Eq_No_Case (To_String (Seen (I)), Name) then
+               return;
+            end if;
+         end loop;
+         if N_Seen = Max_Imports_Seen then
+            raise O2c_Error with "more than"
+              & Natural'Image (Max_Imports_Seen) & " imported names";
+         end if;
+         N_Seen := N_Seen + 1;
+         Seen (N_Seen) := To_Unbounded_String (Name);
+      end Note_Import;
+
+      procedure Gather_Imports (Src : String) is
+         use type O2c_Lexer.Token_Kind;
+         T : O2c_Lexer.Token;
+      begin
+         --  Through the LEXER, not a text search: "import" inside a comment
+         --  or a string literal must not count.
+         O2c_Lexer.Init (Src);
+         loop
+            T := O2c_Lexer.Next_Token;
+            exit when T.Kind = O2c_Lexer.Tok_EOF;
+            if T.Kind = O2c_Lexer.Tok_Import then
+               loop
+                  T := O2c_Lexer.Next_Token;
+                  exit when T.Kind /= O2c_Lexer.Tok_Ident;
+                  Note_Import (T.Text (1 .. T.Len));
+                  T := O2c_Lexer.Next_Token;   --  ',' or ';'
+                  exit when T.Kind /= O2c_Lexer.Tok_Comma;
+               end loop;
+            end if;
+         end loop;
+      end Gather_Imports;
+
+      function Imported (Name : String) return Boolean is
+      begin
+         for I in 1 .. N_Seen loop
+            if Eq_No_Case (To_String (Seen (I)), Name) then
+               return True;
+            end if;
+         end loop;
+         return False;
+      end Imported;
+
+      --  Emit a builtin's units?  None in bytecode mode: the VM calls the
+      --  Oakwood surface as NATIVES, so the Ada units are irrelevant there
+      --  (and the image carries imports in its own tables).  Otherwise emit
+      --  only what something imports.
+      --
+      --  One builtin imports another - Convert imports Reals (M52) - so
+      --  Reals is emitted whenever Convert is.  If more such edges appear
+      --  this wants a closure rather than a special case.
+      function Emits (Name : String) return Boolean is
+        (not Bytecode_Requested
+         and then (Imported (Name)
+                   or else (Name = "Reals" and then Imported ("Convert"))));
+
    begin
       N_X := 0;
       N_Prov := 0;
       Multi_Ok := True;
+
+      --  Collect imports first (see Emits).
+      Gather_Imports (Main_Source);
+      for I in 1 .. N_Libs loop
+         Gather_Imports (To_String (Libs (I).Text));
+      end loop;
+
       for I in 1 .. N_Libs loop
          if To_String (Libs (I).Name) = "Math" then
             Skip_Math := True;
@@ -8999,25 +9082,37 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  M38: compile the builtin Oakwood modules first so that user
       --  modules and the main can import them
       Compile_Module (Oak_Strings_Src, True, M_T, S_T, B_T);
+      if Emits ("Strings") then
+         --  Strings: parsed above in every case, emitted
+         --  only when something imports it (see Emits).
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Texts_Src, True, M_T, S_T, B_T);
+      if Emits ("Texts") then
+         --  Texts: parsed above in every case, emitted
+         --  only when something imports it (see Emits).
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Files_Src, True, M_T, S_T, B_T);
+      if Emits ("Files") then
+         --  Files: parsed above in every case, emitted
+         --  only when something imports it (see Emits).
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
@@ -9027,90 +9122,134 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  name); otherwise Math is auto-provided like the others.
       if not Skip_Math then
          Compile_Module (Oak_Math_Src, True, M_T, S_T, B_T);
-         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
-         if Length (B_T) > 0 then
-            Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+         if Emits ("Math") then
+            --  Math: parsed above in every case, emitted only when
+            --  something imports it (see Emits).
+            Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
+            if Length (B_T) > 0 then
+               Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+            end if;
          end if;
          N_Prov := N_Prov + 1;
          Provided (N_Prov) := Mod_Name;
       end if;
 
       Compile_Module (Oak_MathL_Src, True, M_T, S_T, B_T);
+      if Emits ("MathL") then
+         --  MathL: parsed above in every case, emitted
+         --  only when something imports it (see Emits).
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Input_Src, True, M_T, S_T, B_T);
+      if Emits ("Input") then
+         --  Input: parsed above in every case, emitted
+         --  only when something imports it (see Emits).
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_XYplane_Src, True, M_T, S_T, B_T);
+      if Emits ("XYplane") then
+         --  XYplane: parsed above in every case, emitted
+         --  only when something imports it (see Emits).
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Args_Src, True, M_T, S_T, B_T);
+      if Emits ("Args") then
+         --  Args: parsed above in every case, emitted
+         --  only when something imports it (see Emits).
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Err_Src, True, M_T, S_T, B_T);
+      if Emits ("Err") then
+         --  Err: parsed above in every case, emitted
+         --  only when something imports it (see Emits).
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Env_Src, True, M_T, S_T, B_T);
+      if Emits ("Env") then
+         --  Env: parsed above in every case, emitted
+         --  only when something imports it (see Emits).
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_In_Src, True, M_T, S_T, B_T);
+      if Emits ("In") then
+         --  In: parsed above in every case, emitted
+         --  only when something imports it (see Emits).
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Reals_Src, True, M_T, S_T, B_T);
+      if Emits ("Reals") then
+         --  Reals: parsed above in every case, emitted
+         --  only when something imports it (see Emits).
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Term_Src, True, M_T, S_T, B_T);
+      if Emits ("Term") then
+         --  Term: parsed above in every case, emitted
+         --  only when something imports it (see Emits).
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Convert_Src, True, M_T, S_T, B_T);
+      if Emits ("Convert") then
+         --  Convert: parsed above in every case, emitted
+         --  only when something imports it (see Emits).
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
