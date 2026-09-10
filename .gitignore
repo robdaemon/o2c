@@ -1,5 +1,7 @@
 crate/obj/
 crate/bin/
+vm/obj/
+vm/bin/
 /o2c_compiler.ali
 /o2c_compiler.o
 /o2c_lexer.ali

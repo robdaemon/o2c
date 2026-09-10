@@ -111,6 +111,28 @@ backend's regression still passes **and** the new VM path is exercised.
   build targets for **host** and for **Aegir**.  Acceptance: the demo's
   arithmetic/control-flow prefix runs under the VM and matches the Ada
   backend's output; `run_m1` grows a VM pass.
+
+  **Progress — thin slice done (end-to-end, host build).**  Deliberately
+  built from the runtime end first, so the container and opcodes are proven
+  by execution before the emitter depends on them:
+  - `vm/obc_vm.ads|adb` — loader, verifier and stack interpreter for the
+    subset a module body needs (arithmetic, comparisons, globals,
+    `JMP`/`JZ`/`JNZ`, `Out.Int`/`Out.String`/`Out.Ln` as natives).  Every
+    other v1 opcode is *defined but reported as not implemented*, so a
+    program using one fails loudly.  `Run` is total: a malformed image is
+    rejected with a status, never a CONSTRAINT_ERROR.
+  - `vm/vm.gpr` + `make vm-host` — host build, deliberately **not** through
+    the aegir crate's alr environment (that selects the riscv64 toolchain):
+    the host VM is the reference tool the golden tests diff against and has
+    to stay runnable after the Ada backend is retired.  Zero warnings.
+  - `tools/obc_asm.py` — a test-only assembler for hand-built images (it
+    also builds the loader's negative cases).
+  - `tests/vm/slice.asm` + `tests/vm/slice.out` — golden output, and
+    `tests/run_vm.sh` — the positive diff plus six rejection cases (bad
+    magic, future minor version, size mismatch, jump out of range,
+    not-implemented opcode, native arity mismatch).  All pass.
+  Remaining for M53: the IR layer and the bytecode emitter, then running
+  compiler-produced images (the assembler is a test tool, not a backend).
 - **M54 — data.** ARRAY (open and fixed), RECORD, POINTER, `NEW`, string
   builtins (`COPY`, `CHR`/`ORD` interactions, comparison), nested procedures.
 - **M55 — OOP.** Type extension, type-bound procedures, dynamic dispatch,

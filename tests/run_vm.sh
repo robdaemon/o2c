@@ -1,0 +1,114 @@
+#!/bin/bash
+#  Bytecode VM tests (M53 thin slice).
+#
+#  Positive: assemble tests/vm/slice.asm and diff the VM's output against
+#  the checked-in golden file - this is the validation path that has to
+#  outlive the Ada backend (docs/bytecode-vm.md).
+#  Negative: the loader/verifier must REJECT malformed images with a
+#  diagnostic and a non-zero exit, never crash (docs/obc-image.md).
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+AEGIR_ROOT="${AEGIR_ROOT:-}"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/alrrt}"
+export TMPDIR="${TMPDIR:-/tmp}"
+
+VM="$ROOT/vm/bin/vm_main"
+ASM="$ROOT/tools/obc_asm.py"
+fails=0
+
+note() { echo "run_vm: $*"; }
+bad() { echo "run_vm: FAIL: $*" >&2; fails=$((fails + 1)); }
+
+note "building the host VM"
+if ! ( cd "$ROOT" && make vm-host AEGIR_ROOT="$AEGIR_ROOT" >"$WORK/build.log" 2>&1 ); then
+   echo "run_vm: host VM build failed" >&2
+   tail -20 "$WORK/build.log" >&2
+   exit 1
+fi
+
+#  ---- positive: golden output --------------------------------------------
+python3 "$ASM" "$ROOT/tests/vm/slice.asm" "$WORK/slice.obc" >/dev/null || \
+   { echo "run_vm: assembly failed" >&2; exit 1; }
+if timeout 60 "$VM" "$WORK/slice.obc" >"$WORK/slice.out" 2>"$WORK/slice.err"; then
+   if ! diff -u "$ROOT/tests/vm/slice.out" "$WORK/slice.out"; then
+      bad "slice output differs from tests/vm/slice.out"
+   else
+      note "positive: slice.asm output matches the golden file"
+   fi
+else
+   bad "slice.asm did not run: $(cat "$WORK/slice.err")"
+fi
+
+#  ---- negative: malformed images must be rejected -------------------------
+python3 - "$WORK" <<'PY'
+import struct, sys, os
+work = sys.argv[1]
+base = open(os.path.join(work, "slice.obc"), "rb").read()
+#  the code section, so byte searches below cannot hit a header byte
+n_sec = struct.unpack_from("<H", base, 12)[0]
+code_off = code_len = None
+for i in range(n_sec):
+    sid, _fl, off, size = struct.unpack_from("<IIQQ", base, 64 + 24 * i)
+    if sid == 6:
+        code_off, code_len = off, size
+assert code_off and code_off > 64
+code_end = code_off + code_len
+
+def find_code(needle, start=None):
+    at = base.find(needle, code_off if start is None else start, code_end)
+    assert at > 0, needle
+    return at
+
+def put(name, data, needle):
+    open(os.path.join(work, name), "wb").write(data)
+    open(os.path.join(work, name + ".want"), "w").write(needle)
+
+b = bytearray(base); b[0:4] = b"XXXX"
+put("badmagic.obc", bytes(b), "bad magic")
+
+b = bytearray(base); struct.pack_into("<H", b, 6, 1)      # future minor
+put("futurever.obc", bytes(b), "unsupported image version")
+
+b = bytearray(base); struct.pack_into("<Q", b, 40, len(base) + 8)
+put("badsize.obc", bytes(b), "truncated or inconsistent image")
+
+#  a jump target past the end of the code payload: patch the JZ operand
+b = bytearray(base)
+i = find_code(bytes([0xA1]))                              # JZ
+struct.pack_into("<I", b, i + 1, 0xFFFFFF)
+put("badjump.obc", bytes(b), "jump target")
+
+#  an opcode the slice does not implement: rewrite a NOP-ish byte to CALL
+b = bytearray(base)
+i = find_code(bytes([0x01]))                              # HALT
+b[i] = 0xC0                                               # -> CALL
+put("notimpl.obc", bytes(b), "not implemented")
+
+#  native arity mismatch: CALL_NATIVE Out.Ln with one argument
+b = bytearray(base)
+i = find_code(bytes([0xC3, 0x02, 0x00, 0x00]))            # Out.Ln, 0 args
+b[i + 3] = 1
+put("badnative.obc", bytes(b), "bad native call")
+PY
+
+for img in badmagic futurever badsize badjump notimpl badnative; do
+   want="$(cat "$WORK/$img.obc.want")"
+   if timeout 60 "$VM" "$WORK/$img.obc" >"$WORK/$img.out" 2>"$WORK/$img.err"; then
+      bad "$img was accepted but must be rejected"
+   elif ! grep -aq "$want" "$WORK/$img.err"; then
+      bad "$img: expected diagnostic containing '$want', got: $(cat "$WORK/$img.err")"
+   else
+      note "negative: $img rejected ($want)"
+   fi
+done
+
+if [ "$fails" -gt 0 ]; then
+   echo "run_vm: FAIL ($fails)" >&2
+   exit 1
+fi
+echo "run_vm: PASS"

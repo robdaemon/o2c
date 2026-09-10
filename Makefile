@@ -28,3 +28,28 @@ build:
 
 clean:
 	rm -rf crate/obj crate/bin
+
+#  Host build of the bytecode VM.  This deliberately does NOT go through
+#  the aegir crate's alr environment: that one selects the riscv64
+#  toolchain, and the host VM is a plain x86_64 Ada program with no Aegir
+#  runtime - it is the reference tool the golden tests diff against, and
+#  it has to stay runnable after the Ada backend is retired.  alr keeps
+#  native toolchains under ~/.local/share/alire/toolchains/; override
+#  VM_GNAT_BIN for a different layout.
+VM_GNAT_BIN := $(firstword $(wildcard $(HOME)/.local/share/alire/toolchains/gnat_native_*/bin) $(wildcard $(HOME)/.local/share/alire/toolchains/gnat_*/bin))
+VM_GPR_BIN := $(firstword $(wildcard $(HOME)/.local/share/alire/toolchains/gprbuild_*/bin))
+VM_GPRBUILD := $(if $(VM_GPR_BIN),$(VM_GPR_BIN)/gprbuild,gprbuild)
+
+.PHONY: vm-host vm-clean
+vm-host:
+	@if [ -z "$(VM_GNAT_BIN)" ]; then \
+	   echo "vm-host: no native GNAT toolchain found under" \
+	        "$$HOME/.local/share/alire/toolchains; set VM_GNAT_BIN"; \
+	   exit 1; \
+	fi
+	@#  gprbuild needs both the compiler and its own directory on PATH:
+	@#  gnatmake refuses project files in this GNAT release.
+	PATH="$(VM_GNAT_BIN):$(VM_GPR_BIN):$(PATH)" $(VM_GPRBUILD) -p -P $(CURDIR)/vm/vm.gpr
+
+vm-clean:
+	rm -rf vm/obj vm/bin

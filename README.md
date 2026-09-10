@@ -13,9 +13,13 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `docs/bytecode-vm.md` — plan for the bytecode backend + VM and the
   libgc (Boehm) integration that replaces the arena
 - `docs/obc-image.md` — the `.obc` image container format (v1 spec)
+- `vm/`      — the bytecode VM (`make vm-host` builds it for the host; it
+  is the reference implementation the golden tests diff against)
+- `tools/obc_asm.py` — test-only assembler for `.obc` images
 - `crate/`   — build project for the `o2c.elf` Aegir program
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
-- `tests/`   — expected-output tests (M1 pipeline script lands here)
+- `tests/`   — `run_m1.sh` (end-to-end under Aegir) and `run_vm.sh` (the
+  VM: golden output plus malformed-image rejection)
 
 ## M52 status
 
