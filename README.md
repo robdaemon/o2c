@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M49 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M50 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -14,7 +14,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M49 status
+## M50 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -92,6 +92,23 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M50 — `Args` and `Err` (OBNC extension modules)**: the first two
+modules from the `obnc-libext` comparison land.  `Args` exports
+`count*` and `Get(n; VAR arg: ARRAY OF CHAR; VAR res: INTEGER)` over
+`Aegir_User.CLI.Arg_Count`/`Argument` — aegir's args page has no
+argv[0], so `Argument (1)` is the first argument and our `Get` is
+**1-based** (OBNC's `extArgs.Get (0)` names the same argument; the
+difference is called out in the module comment and
+`docs/obnc-libext.md`).  `res` carries the argument length, or -1 when
+`n` is out of range.  `Err` prints to the console — aegir's fd 2 *is*
+the console, so there is no distinct standard error to separate (that
+is the one documented deviation); it provides `Write`, `WriteInt`,
+`WriteReal` and `WriteLn`.  Reserved names `ArgCount`/`ArgGet` are
+recognised only inside the builtin `Args`.
+
+  Demo markers `8200` (`count`), `8210` (out-of-range `Get`), `8212`
+  (in-range `Get`), plus the `err-ok` line, are asserted by `run_m1`.
 
 **M49 — Oakwood `XYplane` module (drawing plane)**: `draw*`/`erase*`,
 the plane variables `X*`, `Y*`, `W*`, `H*`, `Open`, `Clear`,

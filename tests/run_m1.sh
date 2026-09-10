@@ -135,5 +135,11 @@ if ! grep -aq '8100' "$QEMU_LOG" || ! grep -aq '8103' "$QEMU_LOG" \
    tail -30 "$QEMU_LOG" >&2
    exit 1
 fi
+if ! grep -aq '8210' "$QEMU_LOG" || ! grep -aq '8212' "$QEMU_LOG" \
+   || ! grep -aq 'err-ok' "$QEMU_LOG"; then
+   echo "run_m1: Args/Err demo output not seen" >&2
+   tail -30 "$QEMU_LOG" >&2
+   exit 1
+fi
 
 echo "run_m1: PASS"

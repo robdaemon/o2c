@@ -31,10 +31,10 @@ control).
 
 | obnc-libext  | aegir facility                                        | o2c status                                                                 |
 |--------------|-------------------------------------------------------|----------------------------------------------------------------------------|
-| `extArgs`    | `Aegir_User.CLI.Arg_Count` / `Argument (Index)`       | **planned** — `Args`: `count*`, `Get(n; VAR arg; VAR res)`                 |
+| `extArgs`    | `Aegir_User.CLI.Arg_Count` / `Argument (Index)`       | **shipped (M50)** — `Args`: `count*`, `Get(n; VAR arg; VAR res)`, 1-based  |
 | `extEnv`     | `Aegir_User.CLI.Get_Env` / `Set_Env` (`ENV:<Name>`)   | **planned** — `Env`: `Get`, `Set`                                          |
 | `extConvert` | none needed (pure Oberon)                             | **partly covered** by `Reals` (REAL side); integer side is a gap          |
-| `extErr`     | fd 2 *is* the console — aegir has no separate stderr  | **planned** as console-backed `Err` (documented deviation)                 |
+| `extErr`     | fd 2 *is* the console — aegir has no separate stderr  | **shipped (M50)** as console-backed `Err` (documented deviation)           |
 | `extTrap`    | traps belong to the kernel; no user handler exists    | **not planned** — documented as not applicable                             |
 
 Two naming/indexing decisions to record with the modules:
@@ -48,9 +48,8 @@ Two naming/indexing decisions to record with the modules:
 
 ## Proposed milestones
 
-1. **M50 — `Args` + `Err`**: `Args.count*` / `Get`, and a
-   console-backed `Err` with `Write`/`WriteInt`/`WriteLn` (same bytes
-   as `Out`, documented: aegir has no distinct stderr).
+1. ~~**M50 — `Args` + `Err`**~~ **done**: `Args.count*`/`Get` (1-based)
+   and the console-backed `Err` (`Write`/`WriteInt`/`WriteReal`/`WriteLn`).
 2. **M51 — `Env`**: `Get(name)` into an `ARRAY OF CHAR` plus `Set`,
    over `CLI.Get_Env`/`Set_Env`.
 3. **M52 — `Convert`**: `ToInt`/`ToReal`/`FromInt` (and `FromReal` by

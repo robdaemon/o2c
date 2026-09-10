@@ -2123,6 +2123,21 @@ package body O2c_Compiler is
                R.Lit := False;
                return R;
             end if;
+            if To_String (Mod_Name) = "Args"
+              and then Eq_No_Case (Cur.Text (1 .. Cur.Len), "ARGCOUNT")
+            then
+               --  M50 FFI: argument count (builtin Args only)
+               Next;
+               if Cur.Kind = Lex.Tok_LParen then
+                  Next;
+                  Expect (Lex.Tok_RParen, "')'");
+                  Next;
+               end if;
+               R.Text := To_Unbounded_String ("O2c_Arg_Count");
+               R.Typ := T_Int;
+               R.Lit := False;
+               return R;
+            end if;
             if To_String (Mod_Name) = "XYplane"
               and then (Eq_No_Case (Cur.Text (1 .. Cur.Len), "PLANEISDOT")
                         or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
@@ -4908,7 +4923,40 @@ package body O2c_Compiler is
          elsif Cur.Kind = Lex.Tok_Ident then
             H_Len := Cur.Len;
             Head (1 .. H_Len) := Cur.Text (1 .. H_Len);
-            if To_String (Mod_Name) = "XYplane"
+            if To_String (Mod_Name) = "Args"
+              and then Eq_No_Case (Head (1 .. H_Len), "ARGGET")
+            then
+               --  M50 FFI: argument fetch (builtin Args only)
+               declare
+                  P1, P2, P3 : Expr_Rec;
+               begin
+                  Next;
+                  Expect (Lex.Tok_LParen, "'(' after ArgGet");
+                  Next;
+                  P1 := Parse_Expr;
+                  if P1.Typ /= T_Int then
+                     raise O2c_Error with "ArgGet needs an INTEGER index";
+                  end if;
+                  Expect (Lex.Tok_Comma, "','");
+                  Next;
+                  P2 := Parse_Expr;
+                  if P2.Typ /= T_Str then
+                     raise O2c_Error with "ArgGet needs an ARRAY OF CHAR "
+                       & "buffer";
+                  end if;
+                  Expect (Lex.Tok_Comma, "','");
+                  Next;
+                  P3 := Parse_Expr;
+                  if P3.Typ /= T_Int then
+                     raise O2c_Error with "ArgGet needs an INTEGER result";
+                  end if;
+                  Expect (Lex.Tok_RParen, "')'");
+                  Next;
+                  Append_Body ("      O2c_Arg_Get (" & To_String (P1.Text)
+                               & ", " & To_String (P2.Text) & ", "
+                               & To_String (P3.Text) & ");");
+               end;
+            elsif To_String (Mod_Name) = "XYplane"
               and then (Eq_No_Case (Head (1 .. H_Len), "PLANEOPEN")
                         or else Eq_No_Case (Head (1 .. H_Len),
                                             "PLANECLEAR")
@@ -7003,6 +7051,9 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                S := S & "with Aegir_User.CLI;" & ASCII.LF
                  & "with Interfaces;" & ASCII.LF;
             end if;
+            if To_String (Mod_Name) = "Args" then
+               S := S & "with Aegir_User.CLI;" & ASCII.LF;
+            end if;
             if Length (S) > 0 then
                S := S & ASCII.LF;
             end if;
@@ -7511,6 +7562,46 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "      Key_Pos := Key_Pos + 1;" & ASCII.LF
                  & "      return C;" & ASCII.LF
                  & "   end O2c_Plane_Key;" & ASCII.LF
+                 & "";
+            end if;
+            if To_String (Mod_Name) = "Args" then
+               --  M50 FFI: command-line arguments (builtin Args only).
+               --  aegir's args page has no argv[0]: Argument (1) is the
+               --  first argument, so our Get is 1-based (OBNC's
+               --  extArgs.Get is 0-based for the same list).
+               S := S
+                 & "   function O2c_Arg_Count return Integer is" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      Aegir_User.CLI.Init;" & ASCII.LF
+                 & "      return Integer (Aegir_User.CLI.Arg_Count);" & ASCII.LF
+                 & "   end O2c_Arg_Count;" & ASCII.LF
+                 & "   procedure O2c_Arg_Get (N : Integer; Buf : out String; Res : out Integer) is" & ASCII.LF
+                 & "      S : String (1 .. 256);" & ASCII.LF
+                 & "      L : Natural := 0;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      Aegir_User.CLI.Init;" & ASCII.LF
+                 & "      if N < 1 or else N > Aegir_User.CLI.Arg_Count then" & ASCII.LF
+                 & "         Res := -1;" & ASCII.LF
+                 & "      else" & ASCII.LF
+                 & "         declare" & ASCII.LF
+                 & "            A : constant String := Aegir_User.CLI.Argument (Positive (N));" & ASCII.LF
+                 & "         begin" & ASCII.LF
+                 & "            for I in A'Range loop" & ASCII.LF
+                 & "               exit when L >= 256;" & ASCII.LF
+                 & "               L := L + 1;" & ASCII.LF
+                 & "               S (L) := A (I);" & ASCII.LF
+                 & "            end loop;" & ASCII.LF
+                 & "            Res := L;" & ASCII.LF
+                 & "         end;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      for I in 1 .. Buf'Length loop" & ASCII.LF
+                 & "         if I <= L then" & ASCII.LF
+                 & "            Buf (Buf'First + I - 1) := S (I);" & ASCII.LF
+                 & "         else" & ASCII.LF
+                 & "            Buf (Buf'First + I - 1) := Character'Val (0);" & ASCII.LF
+                 & "         end if;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "   end O2c_Arg_Get;" & ASCII.LF
                  & "";
             end if;
             if To_String (Mod_Name) = "Reals" then
@@ -8330,6 +8421,47 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
    end Oak_XYplane_Src;
 
 
+   function Oak_Args_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module Args;" & ASCII.LF;
+      S := S & "var count*: integer;" & ASCII.LF;
+      S := S & "procedure Get*(n: integer; var arg: array of char; var res: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  ArgGet(n, arg, res)" & ASCII.LF;
+      S := S & "end Get;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  count := ArgCount" & ASCII.LF;
+      S := S & "end Args." & ASCII.LF;
+      return To_String (S);
+   end Oak_Args_Src;
+
+   function Oak_Err_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module Err;" & ASCII.LF;
+      S := S & "import Out;" & ASCII.LF;
+      S := S & "procedure Write*(s: array of char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Out.String(s)" & ASCII.LF;
+      S := S & "end Write;" & ASCII.LF;
+      S := S & "procedure WriteInt*(x: integer; w: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Out.Int(x, w)" & ASCII.LF;
+      S := S & "end WriteInt;" & ASCII.LF;
+      S := S & "procedure WriteReal*(x: real; w: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Out.Real(x, w)" & ASCII.LF;
+      S := S & "end WriteReal;" & ASCII.LF;
+      S := S & "procedure WriteLn*;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Out.Ln" & ASCII.LF;
+      S := S & "end WriteLn;" & ASCII.LF;
+      S := S & "end Err." & ASCII.LF;
+      return To_String (S);
+   end Oak_Err_Src;
+
+
    function Compile_Multi (Main_Source : String; Libs : Lib_Array;
                            N_Libs : Natural; Count : out Natural)
                            return Unit_Array
@@ -8425,6 +8557,22 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_XYplane_Src, True, M_T, S_T, B_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
+      if Length (B_T) > 0 then
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
+      N_Prov := N_Prov + 1;
+      Provided (N_Prov) := Mod_Name;
+
+      Compile_Module (Oak_Args_Src, True, M_T, S_T, B_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
+      if Length (B_T) > 0 then
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
+      N_Prov := N_Prov + 1;
+      Provided (N_Prov) := Mod_Name;
+
+      Compile_Module (Oak_Err_Src, True, M_T, S_T, B_T);
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
