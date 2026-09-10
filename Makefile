@@ -73,13 +73,5 @@ vm-aegir:
 vm-aegir-clean:
 	rm -rf vm/obj-aegir vm/bin-aegir
 
-#  The guest fixture: the host front end compiles tests/bc/vmgreet.ob2 to
-#  the image the aegir initrd stages at Tests/O2cBC/VmGreet.obc, so a boot
-#  can prove the Aegir VM runs an image.  Generated, never committed.
-vm-fixture: tools-host
-	mkdir -p $(CURDIR)/vm/fixture
-	$(CURDIR)/tools/bin/o2c_bc_host $(CURDIR)/tests/bc/vmgreet.ob2 \
-	  $(CURDIR)/vm/fixture/VmGreet.obc
-
 tools-clean:
 	rm -rf tools/obj tools/bin

@@ -4,7 +4,7 @@ vm/obj/
 vm/bin/
 vm/obj-aegir/
 vm/bin-aegir/
-vm/fixture/
+
 tools/obj/
 tools/bin/
 /o2c_compiler.ali
