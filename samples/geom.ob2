@@ -1,4 +1,4 @@
-module Math;
+module Geom;
 const Pi* = 3.14159;
 type Point* = record x*, y*: integer; tag: integer end;
 type Vec* = array 4 of integer;
@@ -56,4 +56,4 @@ begin
 end Bump;
 begin
   base := 10
-end Math.
+end Geom.

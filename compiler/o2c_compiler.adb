@@ -1881,6 +1881,89 @@ package body O2c_Compiler is
                R.Text := (if Neg then "-" else "") & "(" & R.Text & ")";
             end;
          when Lex.Tok_Ident =>
+            if To_String (Mod_Name) = "Math"
+              and then (Eq_No_Case (Cur.Text (1 .. Cur.Len), "POWER")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "EXP")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "LN")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "LOG")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "SIN")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "COS")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "TAN")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "ARCSIN")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "ARCCOS")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "ARCTAN")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
+                                            "ARCTAN2"))
+            then
+               --  M41 FFI: REAL transcendental calls (builtin Math only)
+               declare
+                  Nm   : constant String := Cur.Text (1 .. Cur.Len);
+                  Two  : constant Boolean :=
+                    (Eq_No_Case (Nm, "POWER")
+                     or else Eq_No_Case (Nm, "LOG")
+                     or else Eq_No_Case (Nm, "ARCTAN2"));
+                  Ada_Nm : Unbounded_String;
+                  A1, A2 : Expr_Rec;
+                  procedure Chk (A : Expr_Rec) is
+                  begin
+                     if A.Typ /= T_Real
+                       and then not (A.Typ = T_Int and then A.Lit)
+                     then
+                        raise O2c_Error with "Math argument must be REAL";
+                     end if;
+                  end Chk;
+               begin
+                  Next;              --  past the reserved name
+                  Expect (Lex.Tok_LParen, "'(' after a Math call");
+                  Next;
+                  A1 := Parse_Expr;
+                  Chk (A1);
+                  if Two then
+                     Expect (Lex.Tok_Comma, "','");
+                     Next;
+                     A2 := Parse_Expr;
+                     Chk (A2);
+                  end if;
+                  Expect (Lex.Tok_RParen, "')'");
+                  Next;
+                  if Eq_No_Case (Nm, "POWER") then
+                     --  Ada has no real-valued ** : use exp(ex*ln(base))
+                     R.Text := To_Unbounded_String
+                       ("Ada.Numerics.Elementary_Functions.Exp (")
+                       & To_String (A2.Text) & " * "
+                       & "Ada.Numerics.Elementary_Functions.Log ("
+                       & To_String (A1.Text) & "))";
+                  else
+                     if Eq_No_Case (Nm, "LN") or else Eq_No_Case (Nm, "LOG")
+                     then
+                        Ada_Nm := To_Unbounded_String ("Log");
+                     elsif Eq_No_Case (Nm, "ARCTAN2") then
+                        Ada_Nm := To_Unbounded_String ("Arctan");
+                     else
+                        Ada_Nm := To_Unbounded_String (Nm);
+                     end if;
+                     R.Text := To_Unbounded_String
+                       ("Ada.Numerics.Elementary_Functions.") & Ada_Nm & " (";
+                  end if;
+                  if not Eq_No_Case (Nm, "POWER") then
+                     if Eq_No_Case (Nm, "LOG") then
+                        --  log(x, base): use named args - positional
+                        --  order is X, Base
+                        R.Text := R.Text & "Base => " & To_String (A2.Text)
+                          & ", X => " & To_String (A1.Text);
+                     elsif Two then
+                        R.Text := R.Text & To_String (A1.Text) & ", "
+                          & To_String (A2.Text);
+                     else
+                        R.Text := R.Text & To_String (A1.Text);
+                     end if;
+                     R.Text := R.Text & ")";
+                  end if;
+               end;
+               R.Typ := T_Real;
+               R.Lit := False;
+               return R;
+            end if;
             if To_String (Mod_Name) = "Files"
               and then Eq_No_Case (Cur.Text (1 .. Cur.Len), "FSTAT")
             then
@@ -6329,6 +6412,9 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "with Aegir_User.CLI;" & ASCII.LF
                  & "with Interfaces;" & ASCII.LF;
             end if;
+            if To_String (Mod_Name) = "Math" then
+               S := S & "with Ada.Numerics.Elementary_Functions;" & ASCII.LF;
+            end if;
             if Length (S) > 0 then
                S := S & ASCII.LF;
             end if;
@@ -6627,6 +6713,61 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
    end Oak_Files_Src;
 
 
+   function Oak_Math_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module Math;" & ASCII.LF;
+      S := S & "const pi* = 3.14159265358979;" & ASCII.LF;
+      S := S & "const e* = 2.71828182845905;" & ASCII.LF;
+      S := S & "procedure power*(base: real; ex: real): real;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Power(base, ex)" & ASCII.LF;
+      S := S & "end power;" & ASCII.LF;
+      S := S & "procedure exp*(x: real): real;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Exp(x)" & ASCII.LF;
+      S := S & "end exp;" & ASCII.LF;
+      S := S & "procedure ln*(x: real): real;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Ln(x)" & ASCII.LF;
+      S := S & "end ln;" & ASCII.LF;
+      S := S & "procedure log*(x: real; base: real): real;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Log(x, base)" & ASCII.LF;
+      S := S & "end log;" & ASCII.LF;
+      S := S & "procedure sin*(x: real): real;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Sin(x)" & ASCII.LF;
+      S := S & "end sin;" & ASCII.LF;
+      S := S & "procedure cos*(x: real): real;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Cos(x)" & ASCII.LF;
+      S := S & "end cos;" & ASCII.LF;
+      S := S & "procedure tan*(x: real): real;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Tan(x)" & ASCII.LF;
+      S := S & "end tan;" & ASCII.LF;
+      S := S & "procedure arcsin*(x: real): real;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Arcsin(x)" & ASCII.LF;
+      S := S & "end arcsin;" & ASCII.LF;
+      S := S & "procedure arccos*(x: real): real;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Arccos(x)" & ASCII.LF;
+      S := S & "end arccos;" & ASCII.LF;
+      S := S & "procedure arctan*(x: real): real;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Arctan(x)" & ASCII.LF;
+      S := S & "end arctan;" & ASCII.LF;
+      S := S & "procedure arctan2*(y: real; x: real): real;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Arctan2(y, x)" & ASCII.LF;
+      S := S & "end arctan2;" & ASCII.LF;
+      S := S & "end Math." & ASCII.LF;
+      S := S & "" & ASCII.LF;
+      return To_String (S);
+   end Oak_Math_Src;
+
    function Compile_Multi (Main_Source : String; Libs : Lib_Array;
                            N_Libs : Natural; Count : out Natural)
                            return Unit_Array
@@ -6634,6 +6775,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       Res : Unit_Array;
       C   : Natural := 0;
       M_T, S_T, B_T : Unbounded_String;
+      Skip_Math : Boolean := False;
 
       procedure Add (File : String; T : Unbounded_String) is
       begin
@@ -6647,6 +6789,11 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_X := 0;
       N_Prov := 0;
       Multi_Ok := True;
+      for I in 1 .. N_Libs loop
+         if To_String (Libs (I).Name) = "Math" then
+            Skip_Math := True;
+         end if;
+      end loop;
       --  M21: shared support types (O2c_Int_Arr / O2c_Bool_Arr /
       --  O2c_Set) live in one package every unit withs and uses, so
       --  cross-module SET values and open-array formals share types.
@@ -6685,6 +6832,19 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
+
+      --  M41: the Oakwood Math builtin.  A user library named Math
+      --  wins over the builtin (the dogfood demo used to own the
+      --  name); otherwise Math is auto-provided like the others.
+      if not Skip_Math then
+         Compile_Module (Oak_Math_Src, True, M_T, S_T, B_T);
+         Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
+         if Length (B_T) > 0 then
+            Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+         end if;
+         N_Prov := N_Prov + 1;
+         Provided (N_Prov) := Mod_Name;
+      end if;
 
       for I in 1 .. N_Libs loop
          if not Is_Provided (To_String (Libs (I).Name)) then

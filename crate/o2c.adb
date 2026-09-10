@@ -6,7 +6,7 @@ with Ada.Strings.Unbounded;  use Ada.Strings.Unbounded;
 with O2c_Compiler;
 
 --  o2c entry point (M19).  Reads the staged demo module sources from
---  the initrd (Tests/O2cLib/Hello.ob2, Tests/O2cLib/Math.ob2) and
+--  the initrd (Tests/O2cLib/Hello.ob2, Tests/O2cLib/Geom.ob2) and
 --  compiles them as separate modules; prints every generated Ada unit
 --  between markers, so a test boot can capture the files exactly:
 --
@@ -69,9 +69,9 @@ begin
    Aegir_User.Console.Set_Endpoint (1);
    Aegir_User.Console.Put_Line ("o2c 0.3 (Oberon-2 to Ada for Aegir)");
    Aegir_User.CLI.Init;
-   Libs (1) := (Name => To_Unbounded_String ("Math"),
+   Libs (1) := (Name => To_Unbounded_String ("Geom"),
                 Text => To_Unbounded_String
-                  (Read_Module ("RD0:Tests/O2cLib/Math.ob2")));
+                  (Read_Module ("RD0:Tests/O2cLib/Geom.ob2")));
    Libs (2) := (Name => To_Unbounded_String ("Geo"),
                 Text => To_Unbounded_String
                   (Read_Module ("RD0:Tests/O2cLib/Geo.ob2")));

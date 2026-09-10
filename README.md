@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M40 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M41 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M40 status
+## M41 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,23 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M41 — Math module (Oakwood REAL transcendentals)**: the fourth
+builtin module implements the Oakwood `Math` basic module — `CONST
+pi*`, `e*` and the REAL functions `power*`, `exp*`, `ln*`, `log*(x,
+base)`, `sin*`, `cos*`, `tan*`, `arcsin*`, `arccos*`, `arctan*`,
+`arctan2*(y, x)` — over `Ada.Numerics.Elementary_Functions` (the
+aegir RTS ships the pure-Ada Cert-Math build, so no libm/FPU is
+needed on the riscv target).  Bodies are Oberon source; reserved
+REAL-call names recognized only while compiling the builtin module
+map to the Ada package (`ln` → `Log`, `log(x, base)` → named
+`Log(Base => base, X => x)`, `power` → `exp(ex * ln(base))` since
+Ada has no real-valued `**`).  The dogfood demo library that owned
+the name `Math` was renamed to **`Geom`** (samples/geom.ob2,
+`Tests/O2cLib/Geom.ob2`); a user library named `Math` still wins
+over the builtin when one exists.  Demo: `ln(e)`, `sin(pi/2)`,
+`log(8, 2)`, `arctan2(1, 1)` checks print `71 73 75 77` before the
+final `406`.
 
 **M40 — Files module (real, Aegir-fileserver-backed)**: the third
 builtin module implements the Oakwood `Files` naming/reading API over
@@ -456,7 +473,7 @@ has no default (no machine-specific fallback), so CI fails loudly:
 
 1. Build `crate/bin/o2c.elf` and boot a quiet initrd
    (`make run INITRD_MODE=min O2C_ROOT=../o2c`) that stages the demo
-   module sources (`Tests/O2cLib/Hello.ob2`, `Tests/O2cLib/Math.ob2`)
+   module sources (`Tests/O2cLib/Hello.ob2`, `Tests/O2cLib/Geom.ob2`)
    plus the o2c and hello ELFs.
 2. o2c reads the module files from the initrd, compiles them with
    `O2c_Compiler.Compile_Multi` and prints every generated Ada unit
