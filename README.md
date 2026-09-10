@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M39 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M40 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M39 status
+## M40 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,25 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M40 — Files module (real, Aegir-fileserver-backed)**: the third
+builtin module implements the Oakwood `Files` naming/reading API over
+the real stateless file server: `File*` (opaque POINTER to a private
+`FileDesc` holding the NUL-padded name and LONGINT size — M26 opaque
+pattern with the helper char-array types exported so the forced spec
+stays valid), `Rider*` (pos/eof/cur), `Old*`, `Create*`, `Length*`,
+`Register*`, `Open*`, `Base*`, `Seek*`, `Pos*` and byte-wise `Read*`.
+Because the subset has no ADDRESS/FFI, the Files module body is the
+compiler FFI's first user: while compiling the builtin module named
+`Files`, the package body gains private `O2c_FStat` / `O2c_FRead`
+helpers (`Aegir_User.CLI.Init` + `Files.Stat/Open/Read`, offset- and
+bounds-safe, reads <= 32 KiB) plus the reserved `FStat(name)` /
+`FRead(path, offset, buffer)` names; a LONGINT designator-chain
+assignment bug (missing literal widening for `p^.field := 0`) was
+fixed along the way.  `New` is exported as `Create` (Ada reserves
+`new`).  The rig change grants `Tests/Hello` the `fs` cap and stages
+`Tests/O2cLib/Sample.txt`; the demo reads the staged file through a
+Rider and prints its content.  (Read-only: writes report failure.)
 
 **M39 — Texts module (ETH-style, console-backed)**: a second builtin
 module implements the ETH `Texts` Writer idiom over the console: a

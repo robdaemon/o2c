@@ -1,9 +1,10 @@
 module Hello;
-import Out, Math, Geo, Strings, Texts;
+import Out, Math, Geo, Strings, Texts, Files;
 
 type Vector = array 4 of integer;
 type Pair = record a, b: integer end;
 type Line = array 8 of char;
+type FLine = array 64 of char;
 type Node = pointer to NodeDesc;
 type NodeDesc = record v: integer; next: Node end;
 type Shape = record x: integer end;
@@ -30,6 +31,7 @@ var bx: Geo.Box;
 var hx, tx: Math.Node;
 var w: Math.Vec;
 var px: P3;
+var fd: Files.File; rr: Files.Rider; fl: FLine; cc: char; fi: integer;
 
 const Greeting = "hello from Oberon-2";
 
@@ -373,6 +375,19 @@ begin
   Out.Ln;
   Math.marks := Math.marks + {2};
   if 2 IN Math.marks then Out.Int(28, 0) end;
+  Out.Ln;
+  fd := Files.Old("RD0:Tests/O2cLib/Sample.txt");
+  Files.Open(rr, fd);
+  fi := 0;
+  while (fi < 63) & ~rr.eof do
+    Files.Read(rr, cc);
+    if ~rr.eof then
+      fl[fi] := cc;
+      fi := fi + 1
+    end
+  end;
+  fl[fi] := CHR(0);
+  Out.String(fl);
   Out.Ln;
   Out.Int(Math.SumArr(w), 0);
   Out.Ln

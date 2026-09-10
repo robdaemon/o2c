@@ -89,7 +89,14 @@ if [ "$ATT" -ge 6 ]; then
    exit 1
 fi
 
-echo "run_m1: boot 2/2 - assert hello output incl. shared O2c_Types exports (406)"
+echo "run_m1: boot 2/2 - assert hello output incl. shared O2c_Types"
+echo "  exports (406) and the Files module reading the staged"
+echo "  Tests/O2cLib/Sample.txt (M40)"
 boot_once "O2C_HELLO_ELF=$WORK/bin/hello.elf" '406'
+if ! grep -aq 'O2c files demo ok' "$QEMU_LOG"; then
+   echo "run_m1: Files demo output not seen in boot 2 (tail below)" >&2
+   tail -30 "$QEMU_LOG" >&2
+   exit 1
+fi
 
 echo "run_m1: PASS"

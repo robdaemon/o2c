@@ -1881,6 +1881,28 @@ package body O2c_Compiler is
                R.Text := (if Neg then "-" else "") & "(" & R.Text & ")";
             end;
          when Lex.Tok_Ident =>
+            if To_String (Mod_Name) = "Files"
+              and then Eq_No_Case (Cur.Text (1 .. Cur.Len), "FSTAT")
+            then
+               --  M40 FFI: file size probe (builtin Files module only)
+               Next;              --  past FStat
+               Expect (Lex.Tok_LParen, "'(' after FStat");
+               Next;
+               declare
+                  A : Expr_Rec := Parse_Expr;
+               begin
+                  if A.Typ /= T_Str then
+                     raise O2c_Error with "FStat needs a file path";
+                  end if;
+                  Expect (Lex.Tok_RParen, "')'");
+                  Next;
+                  R.Text := To_Unbounded_String
+                    ("O2c_FStat (" & To_String (A.Text) & ")");
+               end;
+               R.Typ := T_Long;
+               R.Lit := False;
+               return R;
+            end if;
             if Eq_No_Case (Cur.Text (1 .. Cur.Len), "ORD")
               or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "CHR")
               or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "ABS")
@@ -4434,7 +4456,41 @@ package body O2c_Compiler is
          elsif Cur.Kind = Lex.Tok_Ident then
             H_Len := Cur.Len;
             Head (1 .. H_Len) := Cur.Text (1 .. H_Len);
-            if Eq_No_Case (Head (1 .. H_Len), "INC")
+            if To_String (Mod_Name) = "Files"
+              and then Eq_No_Case (Head (1 .. H_Len), "FREAD")
+            then
+               --  M40 FFI: named file read (builtin Files module only)
+               declare
+                  P1, P2, P3 : Expr_Rec;
+               begin
+                  Next;              --  past FRead
+                  Expect (Lex.Tok_LParen, "'(' after FRead");
+                  Next;
+                  P1 := Parse_Expr;
+                  if P1.Typ /= T_Str then
+                     raise O2c_Error with "FRead needs a file path";
+                  end if;
+                  Expect (Lex.Tok_Comma, "','");
+                  Next;
+                  P2 := Parse_Expr;
+                  if not (P2.Typ = T_Int or else P2.Typ = T_Long) then
+                     raise O2c_Error with "FRead offset must be INTEGER "
+                       & "or LONGINT";
+                  end if;
+                  Expect (Lex.Tok_Comma, "','");
+                  Next;
+                  P3 := Parse_Expr;
+                  if P3.Typ /= T_Str then
+                     raise O2c_Error with "FRead needs an ARRAY OF CHAR "
+                       & "buffer";
+                  end if;
+                  Expect (Lex.Tok_RParen, "')'");
+                  Next;
+                  Append_Body ("      O2c_FRead (" & To_String (P1.Text)
+                               & ", " & To_String (P2.Text) & ", "
+                               & To_String (P3.Text) & ");");
+               end;
+            elsif Eq_No_Case (Head (1 .. H_Len), "INC")
               or else Eq_No_Case (Head (1 .. H_Len), "DEC")
             then
                --  predeclared INC/DEC (M25): INC(x [, n]) / DEC(x [, n])
@@ -5002,6 +5058,18 @@ package body O2c_Compiler is
                               declare
                                  V : Expr_Rec := Parse_Expr;
                               begin
+                                 if D.Sc = T_Real and then V.Typ = T_Int then
+                                    V.Text := To_Unbounded_String
+                                      ("Float (" & To_String (V.Text) & ")");
+                                    V.Typ := T_Real;
+                                 elsif D.Sc = T_Long and then V.Typ = T_Int then
+                                    if not V.Lit then
+                                       raise O2c_Error with "type mismatch "
+                                         & "assigning "
+                                         & To_String (D.Text);
+                                    end if;
+                                    V.Typ := T_Long;
+                                 end if;
                                  if V.Typ /= D.Sc or else V.Typ = T_Str then
                                     raise O2c_Error with "type mismatch "
                                       & "assigning " & To_String (D.Text);
@@ -6256,12 +6324,73 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                S := S & "with " & To_String (Body_Withs (I)) & ";"
                  & ASCII.LF;
             end loop;
+            if To_String (Mod_Name) = "Files" then
+               S := S & "with Aegir_User.Files;" & ASCII.LF
+                 & "with Aegir_User.CLI;" & ASCII.LF
+                 & "with Interfaces;" & ASCII.LF;
+            end if;
             if Length (S) > 0 then
                S := S & ASCII.LF;
             end if;
             S := S & "package body " & To_String (Mod_Name) & " is"
               & ASCII.LF;
             Emit_Helpers (S);
+            if To_String (Mod_Name) = "Files" then
+               --  M40 FFI: private named-read helpers on the file server
+               S := S
+                 & "   function O2c_FStat (Nm : String) return Long_Integer is"
+                 & ASCII.LF
+                 & "      use type Interfaces.Unsigned_64;" & ASCII.LF
+                 & "      Sz : Interfaces.Unsigned_64;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      Aegir_User.CLI.Init;" & ASCII.LF
+                 & "      if Aegir_User.Files.Stat (Nm, Sz) /= "
+                 & "Aegir_User.Files.Status_Ok then" & ASCII.LF
+                 & "         return -1;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      return Long_Integer (Sz);" & ASCII.LF
+                 & "   end O2c_FStat;" & ASCII.LF
+                 & "   procedure O2c_FRead (Nm : String; Off : Long_Integer;"
+                 & " Buf : in out String) is" & ASCII.LF
+                 & "      use type Interfaces.Unsigned_64;" & ASCII.LF
+                 & "      Sz, Cn, Lim : Interfaces.Unsigned_64;" & ASCII.LF
+                 & "      St : Interfaces.Unsigned_64;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      Aegir_User.CLI.Init;" & ASCII.LF
+                 & "      if Off < 0 then" & ASCII.LF
+                 & "         return;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      St := Aegir_User.Files.Open (Nm, Sz);" & ASCII.LF
+                 & "      if St /= Aegir_User.Files.Status_Ok then"
+                 & ASCII.LF
+                 & "         return;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      if Interfaces.Unsigned_64 (Off) >= Sz then"
+                 & ASCII.LF
+                 & "         return;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      Lim := Interfaces.Unsigned_64 (Buf'Length);"
+                 & ASCII.LF
+                 & "      if Lim > 32768 then" & ASCII.LF
+                 & "         Lim := 32768;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      if Lim > Sz - Interfaces.Unsigned_64 (Off) then"
+                 & ASCII.LF
+                 & "         Lim := Sz - Interfaces.Unsigned_64 (Off);"
+                 & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      St := Aegir_User.Files.Read"
+                 & " (Nm, Interfaces.Unsigned_64 (Off)," & ASCII.LF
+                 & "               Buf'Address, Lim, Cn);" & ASCII.LF
+                 & "      if St /= Aegir_User.Files.Status_Ok then"
+                 & ASCII.LF
+                 & "         return;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      if Cn = 0 then" & ASCII.LF
+                 & "         return;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "   end O2c_FRead;" & ASCII.LF;
+            end if;
             S := S & To_String (Decl_Buf);
             if Length (Body_Buf) > 0 then
                S := S & "begin" & ASCII.LF;
@@ -6413,6 +6542,91 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       return To_String (S);
    end Oak_Texts_Src;
 
+   function Oak_Files_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module Files;" & ASCII.LF;
+      S := S & "type A64* = array 64 of char;" & ASCII.LF;
+      S := S & "type A1* = array 1 of char;" & ASCII.LF;
+      S := S & "type File* = pointer to FileDesc;" & ASCII.LF;
+      S := S & "type FileDesc = record name: A64; size: longint end;" & ASCII.LF;
+      S := S & "type Rider* = record f: File; pos: longint; eof*: boolean; cur: A1 end;" & ASCII.LF;
+      S := S & "procedure Old*(name: array of char): File;" & ASCII.LF;
+      S := S & "  var i: integer; f: File;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  new(f);" & ASCII.LF;
+      S := S & "  f^.size := FStat(name);" & ASCII.LF;
+      S := S & "  i := 0;" & ASCII.LF;
+      S := S & "  while i < 64 do" & ASCII.LF;
+      S := S & "    if i < len(name) then" & ASCII.LF;
+      S := S & "      f^.name[i] := name[i]" & ASCII.LF;
+      S := S & "    else" & ASCII.LF;
+      S := S & "      f^.name[i] := CHR(0)" & ASCII.LF;
+      S := S & "    end;" & ASCII.LF;
+      S := S & "    i := i + 1" & ASCII.LF;
+      S := S & "  end;" & ASCII.LF;
+      S := S & "  return f" & ASCII.LF;
+      S := S & "end Old;" & ASCII.LF;
+      S := S & "procedure Create*(name: array of char): File;" & ASCII.LF;
+      S := S & "  var i: integer; f: File;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  new(f);" & ASCII.LF;
+      S := S & "  f^.size := 0;" & ASCII.LF;
+      S := S & "  i := 0;" & ASCII.LF;
+      S := S & "  while i < 64 do" & ASCII.LF;
+      S := S & "    if i < len(name) then" & ASCII.LF;
+      S := S & "      f^.name[i] := name[i]" & ASCII.LF;
+      S := S & "    else" & ASCII.LF;
+      S := S & "      f^.name[i] := CHR(0)" & ASCII.LF;
+      S := S & "    end;" & ASCII.LF;
+      S := S & "    i := i + 1" & ASCII.LF;
+      S := S & "  end;" & ASCII.LF;
+      S := S & "  return f" & ASCII.LF;
+      S := S & "end Create;" & ASCII.LF;
+      S := S & "procedure Length*(f: File): longint;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return f^.size" & ASCII.LF;
+      S := S & "end Length;" & ASCII.LF;
+      S := S & "procedure Register*(f: File);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "end Register;" & ASCII.LF;
+      S := S & "procedure Open*(var r: Rider; f: File);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  r.f := f;" & ASCII.LF;
+      S := S & "  r.pos := 0;" & ASCII.LF;
+      S := S & "  r.eof := false" & ASCII.LF;
+      S := S & "end Open;" & ASCII.LF;
+      S := S & "procedure Base*(var r: Rider): File;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return r.f" & ASCII.LF;
+      S := S & "end Base;" & ASCII.LF;
+      S := S & "procedure Seek*(var r: Rider; pos: longint);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  r.pos := pos;" & ASCII.LF;
+      S := S & "  r.eof := false" & ASCII.LF;
+      S := S & "end Seek;" & ASCII.LF;
+      S := S & "procedure Pos*(var r: Rider): longint;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return r.pos" & ASCII.LF;
+      S := S & "end Pos;" & ASCII.LF;
+      S := S & "procedure Read*(var r: Rider; var ch: char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  if r.eof then" & ASCII.LF;
+      S := S & "    return" & ASCII.LF;
+      S := S & "  end;" & ASCII.LF;
+      S := S & "  if r.pos >= r.f^.size then" & ASCII.LF;
+      S := S & "    r.eof := true;" & ASCII.LF;
+      S := S & "    return" & ASCII.LF;
+      S := S & "  end;" & ASCII.LF;
+      S := S & "  FRead(r.f^.name, r.pos, r.cur);" & ASCII.LF;
+      S := S & "  ch := r.cur[0];" & ASCII.LF;
+      S := S & "  r.pos := r.pos + 1" & ASCII.LF;
+      S := S & "end Read;" & ASCII.LF;
+      S := S & "end Files." & ASCII.LF;
+      return To_String (S);
+   end Oak_Files_Src;
+
+
    function Compile_Multi (Main_Source : String; Libs : Lib_Array;
                            N_Libs : Natural; Count : out Natural)
                            return Unit_Array
@@ -6457,6 +6671,14 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Texts_Src, True, M_T, S_T, B_T);
+      Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
+      if Length (B_T) > 0 then
+         Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+      end if;
+      N_Prov := N_Prov + 1;
+      Provided (N_Prov) := Mod_Name;
+
+      Compile_Module (Oak_Files_Src, True, M_T, S_T, B_T);
       Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
