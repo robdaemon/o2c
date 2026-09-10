@@ -218,11 +218,14 @@ if grep -aq 'init: await' "$RUNTIME_LOG"; then
    grep -a 'init: await' "$RUNTIME_LOG" >&2
    exit 1
 fi
-#  The standalone half (o2c publishing to BD0: for program 42) is still NOT
-#  asserted: writing a NEW file to the mounted volume answers status 1
-#  (Not_Found), i.e. the fs protocol's documented create-on-first-Write does
-#  not hold for this server, so the publish fails.  That is an fs-server
-#  question, not a launcher one - the sequencing below is fixed and asserted.
+#  The standalone half (program 42 running the image o2c publishes) is not
+#  asserted yet, and the reason is now precise rather than mysterious: the VM
+#  starts before o2c finishes and waits for the image, every finite wait we
+#  tried expired first (10 s, 60 s, 300 s - o2c compiles the whole demo
+#  before its bytecode pass), and the wait is now effectively unbounded.  The
+#  assertion comes back once that combination has been seen green in a boot;
+#  asserting it before then would just make the suite flaky, which is worse
+#  than absent.
 if ! grep -aq 'vm elf ok' "$RUNTIME_LOG" \
    || ! grep -aq 'o2c bytecode: vm ok' "$RUNTIME_LOG"; then
    echo "run_m1: the guest did not compile and run bytecode" >&2

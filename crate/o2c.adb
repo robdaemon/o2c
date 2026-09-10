@@ -149,15 +149,18 @@ begin
          --  complete or not at all; the VM's own retry covers the not-yet.
          declare
             St      : Aegir_User.Syscalls.U64;
+            DSt     : Aegir_User.Syscalls.U64;
             Written : Aegir_User.Syscalls.U64;
          begin
             St := Aegir_User.Files.Write
               ("BD0:VmGreet.tmp", 0, Img (Img'First)'Address,
                Aegir_User.Syscalls.U64 (Img'Length), Written);
+            --  Keep the two statuses apart: writing both into one variable
+            --  hides which step failed, which is precisely the mistake that
+            --  cost a long detour in gloss.  Delete answers Not_Found when
+            --  there is nothing to remove, and that is fine.
             if St = Aegir_User.Files.Status_Ok then
-               --  The volume outlives a boot, so a target from an earlier
-               --  run may still be there; Rename refuses an existing one.
-               St := Aegir_User.Files.Delete ("BD0:VmGreet.obc");
+               DSt := Aegir_User.Files.Delete ("BD0:VmGreet.obc");
                St := Aegir_User.Files.Rename ("BD0:VmGreet.tmp",
                                               "BD0:VmGreet.obc");
             end if;
@@ -166,8 +169,10 @@ begin
                  ("o2c bytecode: published BD0:VmGreet.obc");
             else
                Aegir_User.Console.Put_Line
-                 ("o2c bytecode: publish failed, status"
-                  & Aegir_User.Syscalls.U64'Image (St));
+                 ("o2c bytecode: publish failed, rename status"
+                  & Aegir_User.Syscalls.U64'Image (St)
+                  & " delete status"
+                  & Aegir_User.Syscalls.U64'Image (DSt));
             end if;
          exception
             when E : others =>
