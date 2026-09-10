@@ -13,8 +13,10 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `docs/bytecode-vm.md` — plan for the bytecode backend + VM and the
   libgc (Boehm) integration that replaces the arena
 - `docs/obc-image.md` — the `.obc` image container format (v1 spec)
-- `vm/`      — the bytecode VM (`make vm-host` builds it for the host; it
-  is the reference implementation the golden tests diff against)
+- `vm/`      — the bytecode VM (`vm_main`) plus the emitter self-test
+  (`bc_emit`); `make vm-host` builds both for the host, where they are the
+  reference implementation the golden tests diff against
+- `compiler/o2c_bc.*` — bytecode emission state and the `.obc` encoder
 - `tools/obc_asm.py` — test-only assembler for `.obc` images
 - `crate/`   — build project for the `o2c.elf` Aegir program
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)

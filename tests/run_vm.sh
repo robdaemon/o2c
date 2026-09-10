@@ -44,6 +44,24 @@ else
    bad "slice.asm did not run: $(cat "$WORK/slice.err")"
 fi
 
+#  ---- positive: the emitter's own encoder --------------------------------
+#  bc_emit builds, through O2c_BC, the program slice.asm hand-assembles.
+#  Same golden output, so this checks the encoder (offsets, pool layout,
+#  jump resolution) against the interpreter it feeds.
+if timeout 60 "$ROOT/vm/bin/bc_emit" "$WORK/emitted.obc" >"$WORK/emit.log" 2>&1; then
+   if timeout 60 "$VM" "$WORK/emitted.obc" >"$WORK/emitted.out" 2>"$WORK/emitted.err"; then
+      if ! diff -u "$ROOT/tests/vm/slice.out" "$WORK/emitted.out"; then
+         bad "bc_emit output differs from tests/vm/slice.out"
+      else
+         note "positive: bc_emit (O2c_BC.Encode) output matches the golden file"
+      fi
+   else
+      bad "bc_emit image did not run: $(cat "$WORK/emitted.err")"
+   fi
+else
+   bad "bc_emit failed: $(cat "$WORK/emit.log")"
+fi
+
 #  ---- negative: malformed images must be rejected -------------------------
 python3 - "$WORK" <<'PY'
 import struct, sys, os

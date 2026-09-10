@@ -6,3 +6,5 @@ vm/bin/
 /o2c_compiler.o
 /o2c_lexer.ali
 /o2c_lexer.o
+/o2c_bc.ali
+/o2c_bc.o

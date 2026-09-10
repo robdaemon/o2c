@@ -131,8 +131,32 @@ backend's regression still passes **and** the new VM path is exercised.
     `tests/run_vm.sh` — the positive diff plus six rejection cases (bad
     magic, future minor version, size mismatch, jump out of range,
     not-implemented opcode, native arity mismatch).  All pass.
-  Remaining for M53: the IR layer and the bytecode emitter, then running
-  compiler-produced images (the assembler is a test tool, not a backend).
+  **Progress — the emitter's encoder, verified.**  `compiler/o2c_bc.ads|adb`
+  holds the bytecode emission state: opcodes, code buffer with label fixups,
+  constant pool (integer words plus a string area), an interned globals
+  table, and a *computed* operand-stack high-water mark (so `stack_max` is
+  derived, not guessed).  `Encode` writes the v1 container.
+  `vm/bc_emit.adb` drives that API to build the same program
+  `tests/vm/slice.asm` hand-assembles, and `run_vm.sh` now checks its image
+  runs to the same golden output - so the encoder (offsets, pool layout,
+  jump resolution) is verified against the interpreter before any front-end
+  hook depends on it.  Three bugs it caught, all worth remembering:
+  - `2 ** 56` does not fit a 32-bit `Natural`, so the 64-bit header/table
+    writers use `Unsigned_64` shifts;
+  - interning a global before `Begin_Mode` is wiped by its reset - `Global`
+    now raises if called outside bytecode mode rather than silently losing
+    the slot;
+  - a negative INTEGER pool word must be built by hand in two's complement
+    (`U64'Last - (-(V + 1))`), because converting a negative value to
+    `Unsigned_64` zero-extends and the VM would read it back positive.
+
+  Remaining for M53: the front-end *hooks* that feed this package from real
+  Oberon source (the skip/emit sites are already scoped: integer/string/
+  TRUE/FALSE factors, the scalar-variable factor, the operator tails in
+  `Parse_Term`/`Parse_Simple`/`Parse_Expr`, `Parse_If`/`Parse_While`,
+  scalar assignment, and the `Out.Int`/`Out.String`/`Out.Ln` call
+  statements), plus a host build of the compiler to emit images without
+  QEMU (the guest driver only compiles the staged demo).
 - **M54 — data.** ARRAY (open and fixed), RECORD, POINTER, `NEW`, string
   builtins (`COPY`, `CHR`/`ORD` interactions, comparison), nested procedures.
 - **M55 — OOP.** Type extension, type-bound procedures, dynamic dispatch,

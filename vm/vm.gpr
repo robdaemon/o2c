@@ -3,10 +3,13 @@
 --  the reference tool the golden tests diff against, and it must stay
 --  runnable after the Ada backend is retired.
 project Vm is
-   for Source_Dirs use (".");
+   --  ../compiler provides O2c_BC: the VM project builds the emitter
+   --  self-test alongside the VM so the encoder is checked against the
+   --  interpreter it feeds.
+   for Source_Dirs use (".", "../compiler");
    for Object_Dir use "obj";
    for Exec_Dir use "bin";
-   for Main use ("vm_main.adb");
+   for Main use ("vm_main.adb", "bc_emit.adb");
    for Create_Missing_Dirs use "True";
 
    package Compiler is
