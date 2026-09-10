@@ -6,7 +6,9 @@ project Vm is
    --  ../compiler provides O2c_BC: the VM project builds the emitter
    --  self-test alongside the VM so the encoder is checked against the
    --  interpreter it feeds.
-   for Source_Dirs use (".", "../compiler");
+   --  compat-host supplies VM_IO's body (the Aegir build uses
+   --  compat-aegir instead).
+   for Source_Dirs use (".", "compat-host", "../compiler");
    for Object_Dir use "obj";
    for Exec_Dir use "bin";
    for Main use ("vm_main.adb", "bc_emit.adb");

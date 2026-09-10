@@ -6,23 +6,23 @@
 --  records) but this slice expects exactly one record - the module
 --  body - and executes no user procedures.
 with Ada.Exceptions;
-with Ada.Sequential_IO;
 with Ada.Text_IO;
 with Interfaces;
 with Ada.Unchecked_Conversion;
+with VM_IO;
 
 package body OBC_VM is
 
-   subtype Byte is Interfaces.Unsigned_8;
+   subtype Byte is VM_IO.Byte;
    subtype U32 is Interfaces.Unsigned_32;
    subtype U64 is Interfaces.Unsigned_64;
    subtype I64 is Interfaces.Integer_64;
 
-   type Byte_Array is array (Natural range <>) of Byte;
+   --  the byte/array types come from VM_IO so file input can be
+   --  platform-specific without touching the interpreter
+   subtype Byte_Array is VM_IO.Byte_Array;
 
-   package Byte_IO is new Ada.Sequential_IO (Byte);
-
-   use type Interfaces.Unsigned_8;
+   use type VM_IO.Byte;   --  Byte is VM_IO's type now
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
    use type Interfaces.Integer_64;
@@ -148,46 +148,6 @@ package body OBC_VM is
         when Trap_Range      => "value out of range",
         when Assert_Failed   => "assertion failed");
    end Image;
-
-   --  ---- file loading ---------------------------------------------------
-   procedure Close_If_Open (File : in out Byte_IO.File_Type) is
-   begin
-      if Byte_IO.Is_Open (File) then
-         Byte_IO.Close (File);
-      end if;
-   exception
-      when others =>
-         null;
-   end Close_If_Open;
-
-   function Read_File (Path : String; Data : out Byte_Array;
-                       Len : out Natural) return Status is
-      File : Byte_IO.File_Type;
-   begin
-      Len := 0;
-      Byte_IO.Open (File, Byte_IO.In_File, Path);
-      loop
-         declare
-            B : Byte;
-         begin
-            Byte_IO.Read (File, B);
-            if Len >= Data'Length then
-               Close_If_Open (File);
-               return Bad_Size;
-            end if;
-            Data (Len) := B;
-            Len := Len + 1;
-         end;
-      end loop;
-   exception
-      when Byte_IO.End_Error =>
-         Close_If_Open (File);
-         return Ok;
-      when others =>
-         Close_If_Open (File);
-         Len := 0;
-         return Bad_File;
-   end Read_File;
 
    --  ---- header, sections, procedure table ------------------------------
    function Decode (Data : Byte_Array; Len : Natural; Img : out Image_Info)
@@ -674,7 +634,19 @@ package body OBC_VM is
       Img  : Image_Info;
       Phase : Natural := 0;
    begin
-      St := Read_File (Path, Data, Len);
+      declare
+         Io_St : VM_IO.Status;
+      begin
+         VM_IO.Read_File (Path, Data, Len, Io_St);
+         case Io_St is
+            when VM_IO.Ok =>
+               null;
+            when VM_IO.Too_Big =>
+               St := Bad_Size;
+            when others =>
+               St := Bad_File;
+         end case;
+      end;
       if St /= Ok then
          Note (Image (St) & ": " & Path);
          return St;
