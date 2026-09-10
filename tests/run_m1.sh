@@ -103,5 +103,10 @@ if ! grep -aq 'O2cW!' "$QEMU_LOG"; then
    tail -30 "$QEMU_LOG" >&2
    exit 1
 fi
+if ! grep -aq 'res-ok' "$QEMU_LOG"; then
+   echo "run_m1: Files res/Close/Rename demo output not seen" >&2
+   tail -30 "$QEMU_LOG" >&2
+   exit 1
+fi
 
 echo "run_m1: PASS"

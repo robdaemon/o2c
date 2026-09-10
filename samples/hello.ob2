@@ -391,11 +391,16 @@ begin
   Out.Ln;
   Files.Wait("BD0:");
   Files.Delete("BD0:O2cDemo.TXT");
+  Files.Delete("BD0:O2cRen.TXT");
   fd := Files.New("BD0:O2cDemo.TXT");
   Files.Open(rr, fd);
   Files.WriteString(rr, "O2cW!");
-  fd := Files.Old("BD0:O2cDemo.TXT");
-  Files.Open(rr, fd);
+  if rr.res = 0 then Out.String("res-ok") else Out.String("res-bad") end;
+  Out.Ln;
+  Files.Close(rr);
+  Files.Rename("BD0:O2cDemo.TXT", "BD0:O2cRen.TXT");
+  fd := Files.Old("BD0:O2cRen.TXT");
+  Files.Set(rr, fd, 0);
   fi := 0;
   while (fi < 63) & ~rr.eof do
     Files.Read(rr, cc);

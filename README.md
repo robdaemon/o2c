@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M43 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M44 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M43 status
+## M44 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,21 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M44 — Files module surface completed**: the builtin `Files` gains
+the Oakwood rider/volume operations that were still missing — the
+`res*` status field on `Rider` (set by every operation: `Open`/`Set`
+clear it, `Read`/`Write`/`WriteString`/`Close` report the protocol
+status, with `Read`'s EOF still signalled through `eof`), `Close*(var
+r)`, `Set*(var r; f; pos)` and `Rename*(from, dst)`.  The FFI grew
+corresponding helpers: `O2c_FRead`/`O2c_FWrite` are now status-returning
+functions and `O2c_FClose` is new (`FRead`/`FWrite`/`FClose` are
+reserved *expressions* in the builtin module, replacing the old
+statement forms), plus the `FRename` statement for `Rename*`; `Delete*`
+and `FRename` report through the protocol status internally.  The demo
+now checks `rr.res`, closes the writer, renames `BD0:O2cDemo.TXT` to
+`BD0:O2cRen.TXT`, re-opens with `Set` at 0 and reads the file back
+(`res-ok` + `O2cW!`), and `run_m1` asserts both.
 
 **M43 — Ada-side mangling reaches the whole exported interface**: the
 `Ada_Id`/`Ada_Last` manglers now cover everything an exported interface

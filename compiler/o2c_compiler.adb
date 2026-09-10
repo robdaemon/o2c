@@ -2008,6 +2008,61 @@ package body O2c_Compiler is
                return R;
             end if;
             if To_String (Mod_Name) = "Files"
+              and then (Eq_No_Case (Cur.Text (1 .. Cur.Len), "FREAD")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
+                                            "FWRITE")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
+                                            "FCLOSE"))
+            then
+               --  M44 FFI: file I/O with a status result (builtin Files)
+               declare
+                  Nm   : constant String := Cur.Text (1 .. Cur.Len);
+                  Two  : constant Boolean :=
+                    not Eq_No_Case (Nm, "FCLOSE");
+                  Ada_Nm : constant String :=
+                    (if Eq_No_Case (Nm, "FREAD") then "O2c_FRead"
+                     elsif Eq_No_Case (Nm, "FWRITE") then "O2c_FWrite"
+                     else "O2c_FClose");
+                  A1, A2, A3 : Expr_Rec;
+               begin
+                  Next;
+                  Expect (Lex.Tok_LParen, "'(' after the file call");
+                  Next;
+                  A1 := Parse_Expr;
+                  if A1.Typ /= T_Str then
+                     raise O2c_Error with "a file path is required";
+                  end if;
+                  if Two then
+                     Expect (Lex.Tok_Comma, "','");
+                     Next;
+                     A2 := Parse_Expr;
+                     if not (A2.Typ = T_Int or else A2.Typ = T_Long) then
+                        raise O2c_Error with "the offset must be INTEGER "
+                          & "or LONGINT";
+                     end if;
+                     Expect (Lex.Tok_Comma, "','");
+                     Next;
+                     A3 := Parse_Expr;
+                     if A3.Typ /= T_Str then
+                        raise O2c_Error with "an ARRAY OF CHAR buffer is "
+                          & "required";
+                     end if;
+                  end if;
+                  Expect (Lex.Tok_RParen, "')'");
+                  Next;
+                  R.Text := To_Unbounded_String (Ada_Nm & " ("
+                                                 & To_String (A1.Text));
+                  if Two then
+                     R.Text := R.Text & ", " & To_String (A2.Text)
+                       & ", " & To_String (A3.Text);
+                  end if;
+                  R.Text := R.Text & ")";
+               end;
+               R.Typ := T_Int;
+               R.Lit := False;
+               return R;
+            end if;
+            if To_String (Mod_Name) = "Files"
               and then Eq_No_Case (Cur.Text (1 .. Cur.Len), "FSTAT")
             then
                --  M40 FFI: file size probe (builtin Files module only)
@@ -4591,40 +4646,6 @@ package body O2c_Compiler is
             H_Len := Cur.Len;
             Head (1 .. H_Len) := Cur.Text (1 .. H_Len);
             if To_String (Mod_Name) = "Files"
-              and then Eq_No_Case (Head (1 .. H_Len), "FREAD")
-            then
-               --  M40 FFI: named file read (builtin Files module only)
-               declare
-                  P1, P2, P3 : Expr_Rec;
-               begin
-                  Next;              --  past FRead
-                  Expect (Lex.Tok_LParen, "'(' after FRead");
-                  Next;
-                  P1 := Parse_Expr;
-                  if P1.Typ /= T_Str then
-                     raise O2c_Error with "FRead needs a file path";
-                  end if;
-                  Expect (Lex.Tok_Comma, "','");
-                  Next;
-                  P2 := Parse_Expr;
-                  if not (P2.Typ = T_Int or else P2.Typ = T_Long) then
-                     raise O2c_Error with "FRead offset must be INTEGER "
-                       & "or LONGINT";
-                  end if;
-                  Expect (Lex.Tok_Comma, "','");
-                  Next;
-                  P3 := Parse_Expr;
-                  if P3.Typ /= T_Str then
-                     raise O2c_Error with "FRead needs an ARRAY OF CHAR "
-                       & "buffer";
-                  end if;
-                  Expect (Lex.Tok_RParen, "')'");
-                  Next;
-                  Append_Body ("      O2c_FRead (" & To_String (P1.Text)
-                               & ", " & To_String (P2.Text) & ", "
-                               & To_String (P3.Text) & ");");
-               end;
-            elsif To_String (Mod_Name) = "Files"
               and then Eq_No_Case (Head (1 .. H_Len), "FDEL")
             then
                --  M42 FFI: delete a named file (builtin Files only)
@@ -4644,38 +4665,30 @@ package body O2c_Compiler is
                                & To_String (P1.Text) & ");");
                end;
             elsif To_String (Mod_Name) = "Files"
-              and then Eq_No_Case (Head (1 .. H_Len), "FWRITE")
+              and then Eq_No_Case (Head (1 .. H_Len), "FRENAME")
             then
-               --  M42 FFI: named write at an offset (builtin Files only)
+               --  M44 FFI: rename within a volume (builtin Files only)
                declare
-                  P1, P2, P3 : Expr_Rec;
+                  P1, P2 : Expr_Rec;
                begin
                   Next;
-                  Expect (Lex.Tok_LParen, "'(' after FWrite");
+                  Expect (Lex.Tok_LParen, "'(' after FRename");
                   Next;
                   P1 := Parse_Expr;
                   if P1.Typ /= T_Str then
-                     raise O2c_Error with "FWrite needs a file path";
+                     raise O2c_Error with "FRename needs a source path";
                   end if;
                   Expect (Lex.Tok_Comma, "','");
                   Next;
                   P2 := Parse_Expr;
-                  if not (P2.Typ = T_Int or else P2.Typ = T_Long) then
-                     raise O2c_Error with "FWrite offset must be INTEGER "
-                       & "or LONGINT";
-                  end if;
-                  Expect (Lex.Tok_Comma, "','");
-                  Next;
-                  P3 := Parse_Expr;
-                  if P3.Typ /= T_Str then
-                     raise O2c_Error with "FWrite needs an ARRAY OF CHAR "
-                       & "buffer";
+                  if P2.Typ /= T_Str then
+                     raise O2c_Error with "FRename needs a target path";
                   end if;
                   Expect (Lex.Tok_RParen, "')'");
                   Next;
-                  Append_Body ("      O2c_FWrite (" & To_String (P1.Text)
-                               & ", " & To_String (P2.Text) & ", "
-                               & To_String (P3.Text) & ");");
+                  Append_Body ("      O2c_FRename ("
+                               & To_String (P1.Text) & ", "
+                               & To_String (P2.Text) & ");");
                end;
             elsif Eq_No_Case (Head (1 .. H_Len), "INC")
               or else Eq_No_Case (Head (1 .. H_Len), "DEC")
@@ -6545,24 +6558,25 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "      end if;" & ASCII.LF
                  & "      return Long_Integer (Sz);" & ASCII.LF
                  & "   end O2c_FStat;" & ASCII.LF
-                 & "   procedure O2c_FRead (Nm : String; Off : Long_Integer;"
-                 & " Buf : in out String) is" & ASCII.LF
+                 & "   function O2c_FRead (Nm : String;"
+                 & " Off : Long_Integer;"
+                 & " Buf : in out String) return Integer is" & ASCII.LF
                  & "      use type Interfaces.Unsigned_64;" & ASCII.LF
                  & "      Sz, Cn, Lim : Interfaces.Unsigned_64;" & ASCII.LF
                  & "      St : Interfaces.Unsigned_64;" & ASCII.LF
                  & "   begin" & ASCII.LF
                  & "      Aegir_User.CLI.Init;" & ASCII.LF
                  & "      if Off < 0 then" & ASCII.LF
-                 & "         return;" & ASCII.LF
+                 & "         return 1;" & ASCII.LF
                  & "      end if;" & ASCII.LF
                  & "      St := Aegir_User.Files.Open (Nm, Sz);" & ASCII.LF
                  & "      if St /= Aegir_User.Files.Status_Ok then"
                  & ASCII.LF
-                 & "         return;" & ASCII.LF
+                 & "         return Integer (St);" & ASCII.LF
                  & "      end if;" & ASCII.LF
                  & "      if Interfaces.Unsigned_64 (Off) >= Sz then"
                  & ASCII.LF
-                 & "         return;" & ASCII.LF
+                 & "         return 0;" & ASCII.LF
                  & "      end if;" & ASCII.LF
                  & "      Lim := Interfaces.Unsigned_64 (Buf'Length);"
                  & ASCII.LF
@@ -6579,20 +6593,22 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "               Buf'Address, Lim, Cn);" & ASCII.LF
                  & "      if St /= Aegir_User.Files.Status_Ok then"
                  & ASCII.LF
-                 & "         return;" & ASCII.LF
+                 & "         return Integer (St);" & ASCII.LF
                  & "      end if;" & ASCII.LF
                  & "      if Cn = 0 then" & ASCII.LF
-                 & "         return;" & ASCII.LF
+                 & "         return 0;" & ASCII.LF
                  & "      end if;" & ASCII.LF
+                 & "      return 0;" & ASCII.LF
                  & "   end O2c_FRead;" & ASCII.LF
-                 & "   procedure O2c_FWrite (Nm : String; Off : Long_Integer;"
-                 & " Buf : String) is" & ASCII.LF
+                 & "   function O2c_FWrite (Nm : String;"
+                 & " Off : Long_Integer;"
+                 & " Buf : String) return Integer is" & ASCII.LF
                  & "      use type Interfaces.Unsigned_64;" & ASCII.LF
                  & "      Cn, St : Interfaces.Unsigned_64;" & ASCII.LF
                  & "   begin" & ASCII.LF
                  & "      Aegir_User.CLI.Init;" & ASCII.LF
                  & "      if Off < 0 then" & ASCII.LF
-                 & "         return;" & ASCII.LF
+                 & "         return 1;" & ASCII.LF
                  & "      end if;" & ASCII.LF
                  & "      St := Aegir_User.Files.Write"
                  & " (Nm, Interfaces.Unsigned_64 (Off)," & ASCII.LF
@@ -6600,18 +6616,46 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & " Interfaces.Unsigned_64 (Buf'Length), Cn);" & ASCII.LF
                  & "      if St /= Aegir_User.Files.Status_Ok then"
                  & ASCII.LF
-                 & "         return;" & ASCII.LF
+                 & "         return Integer (St);" & ASCII.LF
                  & "      end if;" & ASCII.LF
                  & "      if Cn = 0 then" & ASCII.LF
+                 & "         return 1;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      return 0;" & ASCII.LF
+                 & "   end O2c_FWrite;" & ASCII.LF
+                 & "   function O2c_FClose (Nm : String) return Integer is"
+                 & ASCII.LF
+                 & "      use type Interfaces.Unsigned_64;" & ASCII.LF
+                 & "      St : Interfaces.Unsigned_64;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      Aegir_User.CLI.Init;" & ASCII.LF
+                 & "      St := Aegir_User.Files.Close (Nm);" & ASCII.LF
+                 & "      if St /= Aegir_User.Files.Status_Ok then"
+                 & ASCII.LF
+                 & "         return Integer (St);" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      return 0;" & ASCII.LF
+                 & "   end O2c_FClose;" & ASCII.LF
+                 & "   procedure O2c_FRename (From, To : String) is"
+                 & ASCII.LF
+                 & "      use type Interfaces.Unsigned_64;" & ASCII.LF
+                 & "      St : Interfaces.Unsigned_64;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      Aegir_User.CLI.Init;" & ASCII.LF
+                 & "      St := Aegir_User.Files.Rename (From, To);" & ASCII.LF
+                 & "      if St = 0 then" & ASCII.LF
                  & "         return;" & ASCII.LF
                  & "      end if;" & ASCII.LF
-                 & "   end O2c_FWrite;" & ASCII.LF
+                 & "   end O2c_FRename;" & ASCII.LF
                  & "   procedure O2c_FDel (Nm : String) is" & ASCII.LF
                  & "      use type Interfaces.Unsigned_64;" & ASCII.LF
                  & "      St : Interfaces.Unsigned_64;" & ASCII.LF
                  & "   begin" & ASCII.LF
                  & "      Aegir_User.CLI.Init;" & ASCII.LF
                  & "      St := Aegir_User.Files.Delete (Nm);" & ASCII.LF
+                 & "      if St = 0 then" & ASCII.LF
+                 & "         return;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
                  & "   end O2c_FDel;" & ASCII.LF;
             end if;
             S := S & To_String (Decl_Buf);
@@ -6773,7 +6817,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       S := S & "type A1* = array 1 of char;" & ASCII.LF;
       S := S & "type File* = pointer to FileDesc;" & ASCII.LF;
       S := S & "type FileDesc = record name: A64; size: longint end;" & ASCII.LF;
-      S := S & "type Rider* = record f: File; pos: longint; eof*: boolean; cur: A1 end;" & ASCII.LF;
+      S := S & "type Rider* = record f: File; pos: longint; eof*: boolean; res*: integer; cur: A1 end;" & ASCII.LF;
       S := S & "procedure Old*(name: array of char): File;" & ASCII.LF;
       S := S & "  var i: integer; f: File;" & ASCII.LF;
       S := S & "begin" & ASCII.LF;
@@ -6817,7 +6861,8 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       S := S & "begin" & ASCII.LF;
       S := S & "  r.f := f;" & ASCII.LF;
       S := S & "  r.pos := 0;" & ASCII.LF;
-      S := S & "  r.eof := false" & ASCII.LF;
+      S := S & "  r.eof := false;" & ASCII.LF;
+      S := S & "  r.res := 0" & ASCII.LF;
       S := S & "end Open;" & ASCII.LF;
       S := S & "procedure Base*(var r: Rider): File;" & ASCII.LF;
       S := S & "begin" & ASCII.LF;
@@ -6841,10 +6886,25 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       S := S & "    r.eof := true;" & ASCII.LF;
       S := S & "    return" & ASCII.LF;
       S := S & "  end;" & ASCII.LF;
-      S := S & "  FRead(r.f^.name, r.pos, r.cur);" & ASCII.LF;
+      S := S & "  r.res := FRead(r.f^.name, r.pos, r.cur);" & ASCII.LF;
       S := S & "  ch := r.cur[0];" & ASCII.LF;
       S := S & "  r.pos := r.pos + 1" & ASCII.LF;
       S := S & "end Read;" & ASCII.LF;
+      S := S & "procedure Close*(var r: Rider);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  r.res := FClose(r.f^.name)" & ASCII.LF;
+      S := S & "end Close;" & ASCII.LF;
+      S := S & "procedure Set*(var r: Rider; f: File; pos: longint);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  r.f := f;" & ASCII.LF;
+      S := S & "  r.pos := pos;" & ASCII.LF;
+      S := S & "  r.eof := false;" & ASCII.LF;
+      S := S & "  r.res := 0" & ASCII.LF;
+      S := S & "end Set;" & ASCII.LF;
+      S := S & "procedure Rename*(from: array of char; dst: array of char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  FRename(from, dst)" & ASCII.LF;
+      S := S & "end Rename;" & ASCII.LF;
       S := S & "procedure Delete*(name: array of char);" & ASCII.LF;
       S := S & "begin" & ASCII.LF;
       S := S & "  FDel(name)" & ASCII.LF;
@@ -6852,7 +6912,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       S := S & "procedure Write*(var r: Rider; ch: char);" & ASCII.LF;
       S := S & "begin" & ASCII.LF;
       S := S & "  r.cur[0] := ch;" & ASCII.LF;
-      S := S & "  FWrite(r.f^.name, r.pos, r.cur);" & ASCII.LF;
+      S := S & "  r.res := FWrite(r.f^.name, r.pos, r.cur);" & ASCII.LF;
       S := S & "  r.pos := r.pos + 1" & ASCII.LF;
       S := S & "end Write;" & ASCII.LF;
       S := S & "procedure WriteString*(var r: Rider; s: array of char);" & ASCII.LF;
@@ -6863,7 +6923,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       S := S & "      return" & ASCII.LF;
       S := S & "    end;" & ASCII.LF;
       S := S & "    r.cur[0] := s[i];" & ASCII.LF;
-      S := S & "    FWrite(r.f^.name, r.pos, r.cur);" & ASCII.LF;
+      S := S & "    r.res := FWrite(r.f^.name, r.pos, r.cur);" & ASCII.LF;
       S := S & "    r.pos := r.pos + 1" & ASCII.LF;
       S := S & "  end" & ASCII.LF;
       S := S & "end WriteString;" & ASCII.LF;
