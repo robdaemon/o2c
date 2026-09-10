@@ -1,6 +1,6 @@
 module Hello;
 import Out, Geom, Geo, Math, MathL, Strings, Texts, Files, In,
-       Input, Reals, Term, XYplane, Args, Err;
+       Input, Reals, Term, XYplane, Args, Err, Env;
 
 type Vector = array 4 of integer;
 type Pair = record a, b: integer end;
@@ -463,6 +463,13 @@ begin
   Out.LongReal(MathL.power(2.0D0, 3.0D0), 0);
   Out.Ln;
   Out.LongReal(MathL.pi, 0);
+  Out.Ln;
+  Env.Set("O2CENV", "hello-env");
+  Env.Get("O2CENV", fl);
+  Out.String(fl);
+  Out.Ln;
+  Env.Get("O2CNOPE", fl);
+  if fl[0] = CHR(0) then Out.Int(8300, 0) else Out.Int(8301, 0) end;
   Out.Ln;
   Out.Int(8200 + Args.count, 0);
   Out.Ln;

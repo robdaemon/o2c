@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M50 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M51 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -14,7 +14,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M50 status
+## M51 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -92,6 +92,25 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M51 — `Env` (OBNC extension module)**: `Get(name; VAR value: ARRAY OF
+CHAR)` and `Set(name, value)` over `Aegir_User.CLI.Get_Env`/`Set_Env`
+— aegir keeps environment variables as `ENV:<Name>` files, global by
+construction, so a `Set` is visible to a later `Get` in the same
+program (and to other programs).  An unset name yields the empty
+string.  Reserved names `EnvGet`/`EnvSet` are recognised only inside
+the builtin `Env`.
+
+  The milestone also **strengthened the regression**: the boot-1
+  source capture (`O2C|` lines) contains every string and number
+  literal the demo uses, so the demo assertions used to be able to
+  pass without the code running.  `run_m1` now filters the capture out
+  (`grep -av '^O2C|'`) and checks the runtime console only — the
+  markers are computed values, so they can only appear if the demo
+  actually executed.
+
+  Demo markers `hello-env` (round-tripped variable) and `8300`
+  (unset name) are asserted by `run_m1`.
 
 **M50 — `Args` and `Err` (OBNC extension modules)**: the first two
 modules from the `obnc-libext` comparison land.  `Args` exports

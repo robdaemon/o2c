@@ -4923,7 +4923,38 @@ package body O2c_Compiler is
          elsif Cur.Kind = Lex.Tok_Ident then
             H_Len := Cur.Len;
             Head (1 .. H_Len) := Cur.Text (1 .. H_Len);
-            if To_String (Mod_Name) = "Args"
+            if To_String (Mod_Name) = "Env"
+              and then (Eq_No_Case (Head (1 .. H_Len), "ENVGET")
+                        or else Eq_No_Case (Head (1 .. H_Len), "ENVSET"))
+            then
+               --  M51 FFI: environment access (builtin Env only)
+               declare
+                  Is_Get : constant Boolean :=
+                    Eq_No_Case (Head (1 .. H_Len), "ENVGET");
+                  P1, P2 : Expr_Rec;
+               begin
+                  Next;
+                  Expect (Lex.Tok_LParen, "'(' after the Env call");
+                  Next;
+                  P1 := Parse_Expr;
+                  if P1.Typ /= T_Str then
+                     raise O2c_Error with "an ARRAY OF CHAR name is required";
+                  end if;
+                  Expect (Lex.Tok_Comma, "','");
+                  Next;
+                  P2 := Parse_Expr;
+                  if P2.Typ /= T_Str then
+                     raise O2c_Error with "an ARRAY OF CHAR value is required";
+                  end if;
+                  Expect (Lex.Tok_RParen, "')'");
+                  Next;
+                  Append_Body ("      "
+                               & (if Is_Get then "O2c_Env_Get ("
+                                  else "O2c_Env_Set (")
+                               & To_String (P1.Text) & ", "
+                               & To_String (P2.Text) & ");");
+               end;
+            elsif To_String (Mod_Name) = "Args"
               and then Eq_No_Case (Head (1 .. H_Len), "ARGGET")
             then
                --  M50 FFI: argument fetch (builtin Args only)
@@ -7054,6 +7085,9 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
             if To_String (Mod_Name) = "Args" then
                S := S & "with Aegir_User.CLI;" & ASCII.LF;
             end if;
+            if To_String (Mod_Name) = "Env" then
+               S := S & "with Aegir_User.CLI;" & ASCII.LF;
+            end if;
             if Length (S) > 0 then
                S := S & ASCII.LF;
             end if;
@@ -7602,6 +7636,34 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "         end if;" & ASCII.LF
                  & "      end loop;" & ASCII.LF
                  & "   end O2c_Arg_Get;" & ASCII.LF
+                 & "";
+            end if;
+            if To_String (Mod_Name) = "Env" then
+               --  M51 FFI: environment variables (builtin Env only).
+               --  aegir keeps them as ENV:<Name> files, global by
+               --  construction; Get answers "" for an unset name.
+               S := S
+                 & "   procedure O2c_Env_Get (Name : String; Value : out String) is" & ASCII.LF
+                 & "      V : constant String := Aegir_User.CLI.Get_Env (Name);" & ASCII.LF
+                 & "      L : constant Natural :=" & ASCII.LF
+                 & "        (if V'Length < Value'Length then V'Length else Value'Length);" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      for I in 1 .. L loop" & ASCII.LF
+                 & "         Value (Value'First + I - 1) := V (V'First + I - 1);" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      for I in L + 1 .. Value'Length loop" & ASCII.LF
+                 & "         Value (Value'First + I - 1) := Character'Val (0);" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "   end O2c_Env_Get;" & ASCII.LF
+                 & "   procedure O2c_Env_Set (Name : String; Value : String) is" & ASCII.LF
+                 & "      use type Aegir_User.CLI.U64;" & ASCII.LF
+                 & "      St : Aegir_User.CLI.U64;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      St := Aegir_User.CLI.Set_Env (Name, Value);" & ASCII.LF
+                 & "      if St = 0 then" & ASCII.LF
+                 & "         return;                  --  Status_Ok" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "   end O2c_Env_Set;" & ASCII.LF
                  & "";
             end if;
             if To_String (Mod_Name) = "Reals" then
@@ -8462,6 +8524,23 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
    end Oak_Err_Src;
 
 
+   function Oak_Env_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module Env;" & ASCII.LF;
+      S := S & "procedure Get*(name: array of char; var value: array of char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  EnvGet(name, value)" & ASCII.LF;
+      S := S & "end Get;" & ASCII.LF;
+      S := S & "procedure Set*(name: array of char; value: array of char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  EnvSet(name, value)" & ASCII.LF;
+      S := S & "end Set;" & ASCII.LF;
+      S := S & "end Env." & ASCII.LF;
+      return To_String (S);
+   end Oak_Env_Src;
+
+
    function Compile_Multi (Main_Source : String; Libs : Lib_Array;
                            N_Libs : Natural; Count : out Natural)
                            return Unit_Array
@@ -8573,6 +8652,14 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Err_Src, True, M_T, S_T, B_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
+      if Length (B_T) > 0 then
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
+      N_Prov := N_Prov + 1;
+      Provided (N_Prov) := Mod_Name;
+
+      Compile_Module (Oak_Env_Src, True, M_T, S_T, B_T);
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);

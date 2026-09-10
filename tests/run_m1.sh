@@ -93,52 +93,64 @@ echo "run_m1: boot 2/2 - assert hello output incl. shared O2c_Types"
 echo "  exports (406) and the Files module reading the staged"
 echo "  Tests/O2cLib/Sample.txt (M40)"
 boot_once "O2C_HELLO_ELF=$WORK/bin/hello.elf" '406'
-if ! grep -aq 'O2c files demo ok' "$QEMU_LOG"; then
+#  The boot-1 source capture also contains every string/number literal the
+#  demo uses, so the demo assertions below must look at the runtime console
+#  only - never at the O2C| capture lines.
+RUNTIME_LOG="$WORK/boot_runtime.log"
+grep -av '^O2C|' "$QEMU_LOG" > "$RUNTIME_LOG" || true
+
+if ! grep -aq 'O2c files demo ok' "$RUNTIME_LOG"; then
    echo "run_m1: Files read demo output not seen in boot 2 (tail below)" >&2
-   tail -30 "$QEMU_LOG" >&2
+   tail -30 "$RUNTIME_LOG" >&2
    exit 1
 fi
-if ! grep -aq 'O2cW!' "$QEMU_LOG"; then
+if ! grep -aq 'O2cW!' "$RUNTIME_LOG"; then
    echo "run_m1: Files write demo (BD0: roundtrip) output not seen" >&2
-   tail -30 "$QEMU_LOG" >&2
+   tail -30 "$RUNTIME_LOG" >&2
    exit 1
 fi
-if ! grep -aq 'res-ok' "$QEMU_LOG"; then
+if ! grep -aq 'res-ok' "$RUNTIME_LOG"; then
    echo "run_m1: Files res/Close/Rename demo output not seen" >&2
-   tail -30 "$QEMU_LOG" >&2
+   tail -30 "$RUNTIME_LOG" >&2
    exit 1
 fi
-if ! grep -aq 'in-eof' "$QEMU_LOG"; then
+if ! grep -aq 'in-eof' "$RUNTIME_LOG"; then
    echo "run_m1: In module demo output not seen" >&2
-   tail -30 "$QEMU_LOG" >&2
+   tail -30 "$RUNTIME_LOG" >&2
    exit 1
 fi
-if ! grep -aq '2.50000E+00' "$QEMU_LOG" || ! grep -aq 'term-ok' "$QEMU_LOG"; then
+if ! grep -aq '2.50000E+00' "$RUNTIME_LOG" || ! grep -aq 'term-ok' "$RUNTIME_LOG"; then
    echo "run_m1: Reals/Term demo output not seen" >&2
-   tail -30 "$QEMU_LOG" >&2
+   tail -30 "$RUNTIME_LOG" >&2
    exit 1
 fi
-if ! grep -aq '8.000000' "$QEMU_LOG" || ! grep -aq '3.141593' "$QEMU_LOG"; then
+if ! grep -aq '8.000000' "$RUNTIME_LOG" || ! grep -aq '3.141593' "$RUNTIME_LOG"; then
    echo "run_m1: LONGREAL/MathL demo output not seen" >&2
-   tail -30 "$QEMU_LOG" >&2
+   tail -30 "$RUNTIME_LOG" >&2
    exit 1
 fi
-if ! grep -aq '8000' "$QEMU_LOG" || ! grep -aq '8001' "$QEMU_LOG" \
-   || ! grep -aq '8002' "$QEMU_LOG" || ! grep -aq '8003' "$QEMU_LOG"; then
+if ! grep -aq '8000' "$RUNTIME_LOG" || ! grep -aq '8001' "$RUNTIME_LOG" \
+   || ! grep -aq '8002' "$RUNTIME_LOG" || ! grep -aq '8003' "$RUNTIME_LOG"; then
    echo "run_m1: Input module demo output not seen" >&2
-   tail -30 "$QEMU_LOG" >&2
+   tail -30 "$RUNTIME_LOG" >&2
    exit 1
 fi
-if ! grep -aq '8100' "$QEMU_LOG" || ! grep -aq '8103' "$QEMU_LOG" \
-   || ! grep -aq '8105' "$QEMU_LOG"; then
+if ! grep -aq '8100' "$RUNTIME_LOG" || ! grep -aq '8103' "$RUNTIME_LOG" \
+   || ! grep -aq '8105' "$RUNTIME_LOG"; then
    echo "run_m1: XYplane module demo output not seen" >&2
-   tail -30 "$QEMU_LOG" >&2
+   tail -30 "$RUNTIME_LOG" >&2
    exit 1
 fi
-if ! grep -aq '8210' "$QEMU_LOG" || ! grep -aq '8212' "$QEMU_LOG" \
-   || ! grep -aq 'err-ok' "$QEMU_LOG"; then
+if ! grep -aq '8210' "$RUNTIME_LOG" \
+   || ! grep -aqE '^(8211|8212)$' "$RUNTIME_LOG" \
+   || ! grep -aq 'err-ok' "$RUNTIME_LOG"; then
    echo "run_m1: Args/Err demo output not seen" >&2
-   tail -30 "$QEMU_LOG" >&2
+   tail -30 "$RUNTIME_LOG" >&2
+   exit 1
+fi
+if ! grep -aq 'hello-env' "$RUNTIME_LOG" || ! grep -aq '8300' "$RUNTIME_LOG"; then
+   echo "run_m1: Env demo output not seen" >&2
+   tail -30 "$RUNTIME_LOG" >&2
    exit 1
 fi
 
