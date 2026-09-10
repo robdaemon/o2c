@@ -1,16 +1,10 @@
 --  File input for the bytecode VM.
 --
---  The spec is shared; only the body differs, chosen by the project's
---  source directories, because the two platforms read files very
---  differently: the host build has Ada.Sequential_IO, while the Aegir
---  runtime has neither Sequential_IO nor Ada.Streams and must go through
---  Aegir_User.Files (which reads into a caller buffer at an offset).
---
---      vm/compat-host/vm_io.adb    Ada.Sequential_IO     (make vm-host)
---      vm/compat-aegir/vm_io.adb   Aegir_User.Files      (make vm-aegir)
---
---  Keeping this seam explicit means obc_vm.adb - the interpreter, which
---  is where the real logic lives - is platform-independent.
+--  Kept as its own unit so obc_vm.adb - the interpreter - owns no file
+--  I/O.  One implementation serves both platforms: Ada.Sequential_IO is
+--  available in the Aegir runtime as well as on the host (see the body).
+--  Only the program lifecycle differs per platform, and that is
+--  VM_Platform.
 package VM_IO is
 
    type Byte is mod 256;

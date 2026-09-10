@@ -1,8 +1,8 @@
---  Aegir (riscv64) build of the bytecode VM: the same driver and
---  interpreter as the host build, with the platform bodies from
---  compat-aegir (Aegir_User.Files for image input, CLI for the program
---  lifecycle) and the Aegir runtime.  Separate object/exec directories so
---  it never collides with the host build in obj/ and bin/.
+--  Aegir (riscv64) build of the bytecode VM: the same driver, interpreter
+--  and image input as the host build, with only VM_Platform's body coming
+--  from compat-aegir (CLI.Init/CLI.Exit_With instead of an exit status).
+--  Separate object/exec directories so it never collides with the host
+--  build in obj/ and bin/.
 --
 --  Build via the repo Makefile: make vm-aegir (AEGIR_ROOT must be set).
 project Vm_Aegir extends "aegir_program.gpr" is

@@ -1,5 +1,13 @@
---  Host body of VM_IO: plain Ada file I/O (the Aegir body lives in
---  ../compat-aegir and is selected by the Aegir project).
+--  The VM's image input, one implementation for both platforms: the Aegir
+--  runtime *does* provide Ada.Sequential_IO (it is part of the vendored
+--  file-I/O stack in userspace/gnat-rts/gnat_full, and built into adalib
+--  alongside s-fileio/s-ficobl/s-crtl; userspace/copy links against
+--  Ada.Streams.Stream_IO the same way), so no platform split is needed
+--  here.
+--
+--  What *is* platform-specific is the program lifecycle - CLI.Init and
+--  CLI.Exit_With in the guest versus a plain exit status on the host - and
+--  that stays in VM_Platform with one body per platform.
 with Ada.Sequential_IO;
 
 package body VM_IO is

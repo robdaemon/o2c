@@ -180,24 +180,42 @@ backend's regression still passes **and** the new VM path is exercised.
 
   **Progress — the VM builds for Aegir.**  `make vm-aegir` produces
   `vm/bin-aegir/vm.elf` (riscv64, statically linked, warning-free) with the
-  same driver and interpreter as the host build; only the platform bodies
-  differ:
+  same driver, interpreter *and* image input as the host build; only the
+  program lifecycle is platform-specific:
 
-      vm/compat-host/vm_io.adb    Ada.Sequential_IO   (make vm-host)
-      vm/compat-aegir/vm_io.adb   Aegir_User.Files    (make vm-aegir)
-      vm/compat-*/vm_platform.adb exit status via Ada.Command_Line vs
-                                  CLI.Init/CLI.Exit_With
+      vm/vm_io.adb                    Ada.Sequential_IO  (both platforms)
+      vm/compat-host/vm_platform.adb  exit status
+      vm/compat-aegir/vm_platform.adb CLI.Init / CLI.Exit_With
 
-  Two things the port turned on, both verified rather than assumed:
-  `Ada.Command_Line` and console `Ada.Text_IO` *do* work in the guest
+  **Correction to an earlier note in this document.**  An earlier revision
+  claimed the runtime has no `Sequential_IO`/`Direct_IO`/`Ada.Streams`, so
+  image input was split per platform through `Aegir_User.Files`.  That was
+  wrong, and the split has been removed.  The runtime is a near-complete
+  libgnat: `ada_source_path = gnarl_user gnat_user gnat_full gnat`,
+  `ada_object_path = adalib`, **608 source units with 607 built**, and the
+  units are all there - `a-sequio`, `a-direio`, `Ada.Streams.Stream_IO`
+  (which GCC 15 names `a-ststio`, which is why the first search missed it),
+  the narrow `Ada.Text_IO` family with its children, `Ada.Directories`,
+  `Ada.Environment_Variables`, calendars, containers, sockets - plus the
+  vendored C support in `gnat_full/` (`adaint.c`, `argv.c`, `cstreams.c`,
+  `env.c`, `i-cstrea`, `s-fileio`, `sysdep.c`, `targext.c`).  The mistake
+  was searching only `gnat/` (the pool directory) and not `gnat_full/` and
+  `adalib/`.  Proof beyond file listings: `userspace/copy` recompiles and
+  links against `Ada.Streams.Stream_IO`, and `vm.elf` itself now links
+  `Ada.Sequential_IO`.
+
+  What the port *did* require, verified rather than assumed:
+  `Ada.Command_Line` and console `Ada.Text_IO` work in the guest
   (`userspace/echo` documents the chain: Text_IO -> newlib stdio -> gloss
   fd 1 -> console, composing with redirection), so the driver and the
-  `Out.*` natives needed no changes; but the RTS ships **no**
-  `Sequential_IO`, `Direct_IO` or `Ada.Streams`, so image input goes
-  through `Aegir_User.Files` (`Open` + `Read` into a caller buffer at an
-  offset), the pattern `userspace/libman` uses to stage a file.  Object and
-  exec directories are separate (`obj-aegir`, `bin-aegir`) so the riscv64
-  build never collides with the host one.
+  `Out.*` natives needed no changes.  Object and exec directories are
+  separate (`obj-aegir`, `bin-aegir`) so the riscv64 build never collides
+  with the host one.
+
+  The one genuine gap in the runtime, for the record: **no wide-character
+  units** (no `Wide_Character`/`Wide_String`, no `Wide_Text_IO` or
+  `Wide_Wide_*`); `gnat_full/` vendors only the narrow `Text_IO` family.
+  Nothing references them today.
 
   Remaining for M53: staging `vm.elf` into the initrd with a Manifest entry
   and asserting its output in a boot, so the guest proves it *runs* an
