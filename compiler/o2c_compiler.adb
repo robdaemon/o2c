@@ -7373,13 +7373,34 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
             if To_String (Mod_Name) = "Files" then
                --  M40 FFI: private named-read helpers on the file server
                S := S
+                 & "   --  Oberon ARRAY OF CHAR names are space-filled (Oakwood"
+                 & ASCII.LF
+                 & "   --  convention) and may carry a terminating NUL; the file"
+                 & ASCII.LF
+                 & "   --  server wants the bare name, so trim at the first NUL"
+                 & ASCII.LF
+                 & "   --  and then drop trailing spaces." & ASCII.LF
+                 & "   function O2c_Name (S : String) return String is" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      for I in S'Range loop" & ASCII.LF
+                 & "         if S (I) = ASCII.NUL then" & ASCII.LF
+                 & "            return S (S'First .. I - 1);" & ASCII.LF
+                 & "         end if;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      for I in reverse S'Range loop" & ASCII.LF
+                 & "         if S (I) /= ' ' then" & ASCII.LF
+                 & "            return S (S'First .. I);" & ASCII.LF
+                 & "         end if;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      return """";" & ASCII.LF
+                 & "   end O2c_Name;" & ASCII.LF
                  & "   function O2c_FStat (Nm : String) return Long_Integer is"
                  & ASCII.LF
                  & "      use type Interfaces.Unsigned_64;" & ASCII.LF
                  & "      Sz : Interfaces.Unsigned_64;" & ASCII.LF
                  & "   begin" & ASCII.LF
                  & "      Aegir_User.CLI.Init;" & ASCII.LF
-                 & "      if Aegir_User.Files.Stat (Nm, Sz) /= "
+                 & "      if Aegir_User.Files.Stat (O2c_Name (Nm), Sz) /= "
                  & "Aegir_User.Files.Status_Ok then" & ASCII.LF
                  & "         return -1;" & ASCII.LF
                  & "      end if;" & ASCII.LF
@@ -7396,7 +7417,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "      if Off < 0 then" & ASCII.LF
                  & "         return 1;" & ASCII.LF
                  & "      end if;" & ASCII.LF
-                 & "      St := Aegir_User.Files.Open (Nm, Sz);" & ASCII.LF
+                 & "      St := Aegir_User.Files.Open (O2c_Name (Nm), Sz);" & ASCII.LF
                  & "      if St /= Aegir_User.Files.Status_Ok then"
                  & ASCII.LF
                  & "         return Integer (St);" & ASCII.LF
@@ -7416,7 +7437,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & ASCII.LF
                  & "      end if;" & ASCII.LF
                  & "      St := Aegir_User.Files.Read"
-                 & " (Nm, Interfaces.Unsigned_64 (Off)," & ASCII.LF
+                 & " (O2c_Name (Nm), Interfaces.Unsigned_64 (Off)," & ASCII.LF
                  & "               Buf'Address, Lim, Cn);" & ASCII.LF
                  & "      if St /= Aegir_User.Files.Status_Ok then"
                  & ASCII.LF
@@ -7438,7 +7459,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "         return 1;" & ASCII.LF
                  & "      end if;" & ASCII.LF
                  & "      St := Aegir_User.Files.Write"
-                 & " (Nm, Interfaces.Unsigned_64 (Off)," & ASCII.LF
+                 & " (O2c_Name (Nm), Interfaces.Unsigned_64 (Off)," & ASCII.LF
                  & "               Buf'Address,"
                  & " Interfaces.Unsigned_64 (Buf'Length), Cn);" & ASCII.LF
                  & "      if St /= Aegir_User.Files.Status_Ok then"
@@ -7456,7 +7477,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "      St : Interfaces.Unsigned_64;" & ASCII.LF
                  & "   begin" & ASCII.LF
                  & "      Aegir_User.CLI.Init;" & ASCII.LF
-                 & "      St := Aegir_User.Files.Close (Nm);" & ASCII.LF
+                 & "      St := Aegir_User.Files.Close (O2c_Name (Nm));" & ASCII.LF
                  & "      if St /= Aegir_User.Files.Status_Ok then"
                  & ASCII.LF
                  & "         return Integer (St);" & ASCII.LF
@@ -7469,7 +7490,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "      St : Interfaces.Unsigned_64;" & ASCII.LF
                  & "   begin" & ASCII.LF
                  & "      Aegir_User.CLI.Init;" & ASCII.LF
-                 & "      St := Aegir_User.Files.Rename (From, To);" & ASCII.LF
+                 & "      St := Aegir_User.Files.Rename (O2c_Name (From), O2c_Name (To));" & ASCII.LF
                  & "      if St = 0 then" & ASCII.LF
                  & "         return;" & ASCII.LF
                  & "      end if;" & ASCII.LF
@@ -7479,7 +7500,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "      St : Interfaces.Unsigned_64;" & ASCII.LF
                  & "   begin" & ASCII.LF
                  & "      Aegir_User.CLI.Init;" & ASCII.LF
-                 & "      St := Aegir_User.Files.Delete (Nm);" & ASCII.LF
+                 & "      St := Aegir_User.Files.Delete (O2c_Name (Nm));" & ASCII.LF
                  & "      if St = 0 then" & ASCII.LF
                  & "         return;" & ASCII.LF
                  & "      end if;" & ASCII.LF
