@@ -206,14 +206,23 @@ fi
 #  between them and split that line.  Asserting the single-write token, plus
 #  o2c's own status line, is the fragment-tolerant form (see AGENTS.md on
 #  merged console lines).
-#  The guest compiled a program to bytecode and executed it (embedded in
-#  o2c).  The standalone VM running the copy o2c writes to BD0: is NOT
-#  asserted here yet: o2c and bfs_server are sibling manifest programs and
-#  the spawner starts them in order without waiting, so the write races the
-#  mount (status 1, Not_Found).  That is a launcher gap, not a program bug -
-#  init should not spawn a program before the caps its own manifest line
-#  names exist - and the assertion returns with it (see the M53 entry in the
-#  aegir docs/RESUME.md).  A flaky assertion would be worse than none.
+#  Both halves of the in-guest bytecode story: o2c compiles a program and
+#  executes the image in-process, writes it to BD0:, and the standalone VM
+#  (program 42) runs that copy.  The sequencing that makes it deterministic
+#  is the launcher's: the aegir Manifest carries `await BD0:README.TXT`
+#  between System/Bfs and the programs that need the volume, so init holds
+#  the manifest until the mount is real - hence asserting that the timeout
+#  line is ABSENT as well (its presence means the sequencing failed).
+if grep -aq 'init: await' "$RUNTIME_LOG"; then
+   echo "run_m1: the launcher's await timed out (sequencing failed)" >&2
+   grep -a 'init: await' "$RUNTIME_LOG" >&2
+   exit 1
+fi
+#  The standalone half (o2c publishing to BD0: for program 42) is still NOT
+#  asserted: writing a NEW file to the mounted volume answers status 1
+#  (Not_Found), i.e. the fs protocol's documented create-on-first-Write does
+#  not hold for this server, so the publish fails.  That is an fs-server
+#  question, not a launcher one - the sequencing below is fixed and asserted.
 if ! grep -aq 'vm elf ok' "$RUNTIME_LOG" \
    || ! grep -aq 'o2c bytecode: vm ok' "$RUNTIME_LOG"; then
    echo "run_m1: the guest did not compile and run bytecode" >&2
