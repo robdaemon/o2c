@@ -101,16 +101,19 @@ the colour constants.  `Reals` is REAL conversion: `Convert(x, str)`
 
 `Convert` is written **entirely in Oberon** — normalise into [1, 10),
 then pull each digit by comparing against a running float threshold
-(`t := t + 1.0`) and subtracting an accumulated `s` — because the
-target proved unreliable with the alternatives: `Float'Image` is not
-trustworthy in the aegir runtime, float→integer conversion rounds
-rather than truncates, and (the real trap) **passing a local `real`
-variable into an injected FFI helper delivered garbage on the
-target** (`0.0000/E+00`, `500.5`, `142.09` across builds), while float
-literals and `VAR real` arguments worked.  Keeping the conversion to
-float ops with literals removed the failure; only `ConvertTo` still
-uses an FFI helper (`O2c_StrToReal` via the reserved `RParse`
-expression).  `Max_Imports` was raised 8 → 32 (the demo now imports
+(`t := t + 1.0`) and subtracting an accumulated `s` — which keeps it
+to float ops with literals (float→integer conversion rounds rather
+than truncates, and `Float'Image` is not dependable here).  The
+*intermittent* garbage this milestone chased (`2.5` reading back as
+`142.09`/`500.5`/`-1.00`, the `sin(pi/2)` probe flipping between pass
+and fail) turned out **not** to be a conversion bug at all: the aegir
+kernel did not save the floating-point registers across traps, so a
+preempted thread lost whatever lived in f0..f31.  Fixed on the kernel
+side in aegir `855e706` (frame grows to 68 words with an f0..f31 +
+fcsr block, `sstatus.FS` enabled, FP restored before the integer
+register block); after that the regression is byte-stable.  Only
+`ConvertTo` uses an FFI helper (`O2c_StrToReal` via the reserved
+`RParse` expression).  `Max_Imports` was raised 8 → 32 (the demo now imports
 ten modules).  The demo prints the conversions and the `term-ok`
 marker through the terminal escapes; `run_m1` asserts
 `2.50000E+00` and `term-ok` on target.
