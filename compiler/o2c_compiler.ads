@@ -48,6 +48,16 @@ package O2c_Compiler is
    function Compile_Multi (Main_Source : String; Libs : Lib_Array;
                            N_Libs : Natural; Count : out Natural)
                            return Unit_Array;
+   --  Bytecode backend (M53): when Bytecode_Requested is set,
+   --  Compile_Multi additionally emits the program as a .obc image
+   --  (Bytecode_Image, valid after the call).  The slice covers the
+   --  module body of a program that uses INTEGER/CHAR/BOOLEAN module
+   --  variables, IF/WHILE and Out.Int/Out.String/Out.Ln; anything else
+   --  raises so a wrong image is never produced.
+   Bytecode_Requested : Boolean := False;
+
+   function Bytecode_Image return String;
+
    --  Compiles Main_Source against the library modules Libs(1 ..
    --  N_Libs) and returns one Ada source per generated unit.  Count
    --  holds the number of units; units 1 .. Count of the result are

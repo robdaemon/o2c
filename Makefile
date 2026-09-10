@@ -40,7 +40,7 @@ VM_GNAT_BIN := $(firstword $(wildcard $(HOME)/.local/share/alire/toolchains/gnat
 VM_GPR_BIN := $(firstword $(wildcard $(HOME)/.local/share/alire/toolchains/gprbuild_*/bin))
 VM_GPRBUILD := $(if $(VM_GPR_BIN),$(VM_GPR_BIN)/gprbuild,gprbuild)
 
-.PHONY: vm-host vm-clean
+.PHONY: vm-host vm-clean tools-host tools-clean
 vm-host:
 	@if [ -z "$(VM_GNAT_BIN)" ]; then \
 	   echo "vm-host: no native GNAT toolchain found under" \
@@ -53,3 +53,15 @@ vm-host:
 
 vm-clean:
 	rm -rf vm/obj vm/bin
+
+#  Host build of the bytecode front end (tools/o2c_bc_host): compiles an
+#  Oberon-2 module to a .obc image with no Aegir runtime and no QEMU.
+tools-host:
+	@if [ -z "$(VM_GNAT_BIN)" ]; then \
+	   echo "tools-host: no native GNAT toolchain found; set VM_GNAT_BIN"; \
+	   exit 1; \
+	fi
+	PATH="$(VM_GNAT_BIN):$(VM_GPR_BIN):$(PATH)" $(VM_GPRBUILD) -p -P $(CURDIR)/tools/tools.gpr
+
+tools-clean:
+	rm -rf tools/obj tools/bin

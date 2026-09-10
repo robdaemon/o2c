@@ -20,8 +20,12 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `tools/obc_asm.py` — test-only assembler for `.obc` images
 - `crate/`   — build project for the `o2c.elf` Aegir program
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
-- `tests/`   — `run_m1.sh` (end-to-end under Aegir) and `run_vm.sh` (the
-  VM: golden output plus malformed-image rejection)
+- `tools/o2c_bc_host` — host front end: compiles a module to a `.obc`
+  image with no Aegir runtime and no QEMU
+- `tests/`   — `run_m1.sh` (end-to-end under Aegir), `run_vm.sh` (the VM:
+  golden output plus malformed-image rejection) and `run_bc.sh` (Oberon
+  source through the emitter to the VM, plus the unsupported-construct
+  contract)
 
 ## M52 status
 

@@ -150,13 +150,39 @@ backend's regression still passes **and** the new VM path is exercised.
     (`U64'Last - (-(V + 1))`), because converting a negative value to
     `Unsigned_64` zero-extends and the VM would read it back positive.
 
-  Remaining for M53: the front-end *hooks* that feed this package from real
-  Oberon source (the skip/emit sites are already scoped: integer/string/
-  TRUE/FALSE factors, the scalar-variable factor, the operator tails in
-  `Parse_Term`/`Parse_Simple`/`Parse_Expr`, `Parse_If`/`Parse_While`,
-  scalar assignment, and the `Out.Int`/`Out.String`/`Out.Ln` call
-  statements), plus a host build of the compiler to emit images without
-  QEMU (the guest driver only compiles the staged demo).
+  **Progress — the front-end hooks, end to end.**  `o2c` now emits bytecode
+  from real Oberon-2 source.  The hooks are gated on
+  `O2c_BC.Bytecode_Mode`, which only `Compile_Multi` sets - around the
+  *main* module's body, never the builtin modules - so the Ada backend's
+  output is untouched when bytecode mode is off.  Wired so far:
+  integer/string/`TRUE`/`FALSE` factors, the scalar-variable factor, the
+  operator tails in `Parse_Term`/`Parse_Simple`/`Parse_Expr` (INTEGER and
+  CHAR only), `Parse_If`/`Parse_While` (via a monotonic label counter),
+  scalar assignment, and `Out.Int`/`Out.String`/`Out.Ln`.  Constructs
+  outside the slice raise `Wrong_Construct` with a specific message rather
+  than emitting a wrong image; a module body that declares procedures is
+  refused wholesale.
+
+  `tools/o2c_bc_host` compiles one module to an image with **no Aegir
+  runtime and no QEMU** (the compiler core withs only Ada and the lexer),
+  so the emitter is testable in seconds; `tests/run_bc.sh` compiles
+  `tests/bc/sum.ob2` (globals, `WHILE`, arithmetic, `Out.*`) and
+  `tests/bc/ifelsif.ob2` (`IF`/`ELSIF`/`ELSE`) to images, runs them on the
+  host VM and diffs the golden output, then checks that
+  `tests/bc/unsupported.ob2` (a REAL literal) fails the compile with a
+  clear diagnostic.  All pass, and `run_m1` still passes, so the Ada path
+  is unaffected.
+
+  Two bugs the golden test caught: a string literal's token text is
+  *unquoted* (the Ada text is quoted separately), so trimming the ends ate
+  one byte at each end; and the 64-bit header/table writers needed
+  `Unsigned_64` shifts.
+
+  Remaining for M53: more of the language in the slice (REAL, SET, `FOR`,
+  `REPEAT`, `CASE`, arrays, pointers, procedures - each with its own
+  opcodes already reserved), then an Aegir build of the VM so the in-guest
+  pipeline can compile *and run* without a host toolchain, and the
+  Ada-vs-VM diff in `run_m1`.
 - **M54 — data.** ARRAY (open and fixed), RECORD, POINTER, `NEW`, string
   builtins (`COPY`, `CHR`/`ORD` interactions, comparison), nested procedures.
 - **M55 — OOP.** Type extension, type-bound procedures, dynamic dispatch,

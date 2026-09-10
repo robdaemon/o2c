@@ -1,5 +1,6 @@
 with Ada.Strings.Unbounded;
 with O2c_Lexer;
+with O2c_BC;
 
 package body O2c_Compiler is
 
@@ -7,6 +8,23 @@ package body O2c_Compiler is
    use type O2c_Lexer.Token_Kind;
 
    package Lex renames O2c_Lexer;
+
+   --  Bytecode backend (M53).  Control-flow hooks need labels and label
+   --  ids must be unique across the whole program, so they come from one
+   --  counter that only ever grows.
+   Bc_Labels : Natural := 0;
+
+   function New_Bc_Label return Natural is
+   begin
+      Bc_Labels := Bc_Labels + 1;
+      return Bc_Labels;
+   end New_Bc_Label;
+
+   --  The encoded image of the last bytecode-mode compilation.
+   Bc_Image : Unbounded_String;
+
+   function Bytecode_Image return String is
+     (To_String (Bc_Image));
 
    --  T_Ptr and T_Nil are typing sentinels (never reach Ada_Type):
    --  T_Ptr marks a pointer-value operand (Ptr_UT names its pointer
@@ -1826,6 +1844,21 @@ package body O2c_Compiler is
                else
                   R.Typ := T_Int;
                end if;
+               if O2c_BC.Bytecode_Mode then
+                  if Has_D or else Has_Dot then
+                     raise O2c_BC.Wrong_Construct with
+                       "bytecode backend: REAL/LONGREAL literals are not "
+                       & "yet supported";
+                  end if;
+                  begin
+                     O2c_BC.Push_Int (Integer'Value (Raw));
+                  exception
+                     when Constraint_Error =>
+                        raise O2c_BC.Wrong_Construct with
+                          "bytecode backend: integer literal out of range: "
+                          & Raw;
+                  end;
+               end if;
             end;
             R.Lit := True;
             Next;
@@ -1833,14 +1866,27 @@ package body O2c_Compiler is
             R.Text := To_Unbounded_String
               (Ada_String_Literal (Cur.Text (1 .. Cur.Len)));
             R.Typ := T_Str;
+            if O2c_BC.Bytecode_Mode then
+               --  Cur.Text holds the literal's bytes with no quotes (the
+               --  Ada text is quoted separately by Ada_String_Literal), so
+               --  the whole token is the string.  The pool word holds its
+               --  offset in the CONST payload.
+               O2c_BC.Push_Str (Cur.Text (1 .. Cur.Len));
+            end if;
             Next;
          when Lex.Tok_True =>
             R.Text := To_Unbounded_String ("True");
             R.Typ := T_Bool;
+            if O2c_BC.Bytecode_Mode then
+               O2c_BC.Push_Bool (True);
+            end if;
             Next;
          when Lex.Tok_False =>
             R.Text := To_Unbounded_String ("False");
             R.Typ := T_Bool;
+            if O2c_BC.Bytecode_Mode then
+               O2c_BC.Push_Bool (False);
+            end if;
             Next;
          when Lex.Tok_Nil =>
             R.Text := To_Unbounded_String ("null");
@@ -2896,6 +2942,24 @@ package body O2c_Compiler is
                   return R;
                end;
             else
+               if O2c_BC.Bytecode_Mode then
+                  if Syms (Id).Kind /= S_Var then
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: '"
+                       & Cur.Text (1 .. Cur.Len)
+                       & "' is not a module variable";
+                  elsif Syms (Id).UT /= 0 or else Syms (Id).Open_Arr then
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & "pointers and arrays are not yet supported";
+                  elsif Syms (Id).Typ /= T_Int
+                    and then Syms (Id).Typ /= T_Char
+                    and then Syms (Id).Typ /= T_Bool
+                  then
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & "only INTEGER/CHAR/BOOLEAN variables are supported";
+                  end if;
+                  O2c_BC.Load
+                    (O2c_BC.Global (Ada_Id (Cur.Text (1 .. Cur.Len))));
+               end if;
                R.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
                R.Typ := Syms (Id).Typ;
                Next;
@@ -2973,12 +3037,23 @@ package body O2c_Compiler is
                Res : EType;
             begin
                if R.Typ = T_Set and then X.Typ = T_Set then
+                  if O2c_BC.Bytecode_Mode then
+                     raise O2c_BC.Wrong_Construct with
+                       "bytecode backend: SET operands are not yet supported";
+                  end if;
                   R.Text := "(" & R.Text & " and " & X.Text & ")";
                   R.Lit := False;
                elsif Int_Like (R, X, Res) then
                   R.Text := R.Text & " * " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
+                  if O2c_BC.Bytecode_Mode then
+                     if Res /= T_Int then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "LONGINT is not yet supported";
+                     end if;
+                     O2c_BC.Bin (O2c_BC.Mul);
+                  end if;
                elsif Real_Like (R, X, Res) then
                   declare
                      Conv : constant String :=
@@ -3017,6 +3092,13 @@ package body O2c_Compiler is
                R.Text := R.Text & " / " & X.Text;
                R.Typ := Res;
                R.Lit := False;
+               if O2c_BC.Bytecode_Mode then
+                  if Res /= T_Int then
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & "LONGINT is not yet supported";
+                  end if;
+                  O2c_BC.Bin (O2c_BC.IDiv);
+               end if;
             end;
          elsif Cur.Kind = Lex.Tok_Mod then
             Next;
@@ -3030,6 +3112,13 @@ package body O2c_Compiler is
                R.Text := R.Text & " rem " & X.Text;
                R.Typ := Res;
                R.Lit := False;
+               if O2c_BC.Bytecode_Mode then
+                  if Res /= T_Int then
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & "LONGINT is not yet supported";
+                  end if;
+                  O2c_BC.Bin (O2c_BC.IMod);
+               end if;
             end;
          elsif Cur.Kind = Lex.Tok_Slash then
             --  '/' is REAL division, or SET symmetric difference
@@ -3039,6 +3128,10 @@ package body O2c_Compiler is
                Res : EType;
             begin
                if R.Typ = T_Set and then X.Typ = T_Set then
+                  if O2c_BC.Bytecode_Mode then
+                     raise O2c_BC.Wrong_Construct with
+                       "bytecode backend: SET operands are not yet supported";
+                  end if;
                   R.Text := "(" & R.Text & " xor " & X.Text & ")";
                   R.Lit := False;
                elsif Real_Like (R, X, Res) then
@@ -3073,6 +3166,10 @@ package body O2c_Compiler is
                if R.Typ /= T_Bool or else X.Typ /= T_Bool then
                   raise O2c_Error with "'&' needs BOOLEAN operands";
                end if;
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with
+                    "bytecode backend: '&' is not yet supported";
+               end if;
                R.Text := R.Text & " and " & X.Text;
                R.Lit := False;
             end;
@@ -3094,12 +3191,23 @@ package body O2c_Compiler is
                Res : EType;
             begin
                if R.Typ = T_Set and then X.Typ = T_Set then
+                  if O2c_BC.Bytecode_Mode then
+                     raise O2c_BC.Wrong_Construct with
+                       "bytecode backend: SET operands are not yet supported";
+                  end if;
                   R.Text := "(" & R.Text & " or " & X.Text & ")";
                   R.Lit := False;
                elsif Int_Like (R, X, Res) then
                   R.Text := R.Text & " + " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
+                  if O2c_BC.Bytecode_Mode then
+                     if Res /= T_Int then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "LONGINT is not yet supported";
+                     end if;
+                     O2c_BC.Bin (O2c_BC.Add);
+                  end if;
                elsif Real_Like (R, X, Res) then
                   declare
                      Conv : constant String :=
@@ -3132,12 +3240,23 @@ package body O2c_Compiler is
                Res : EType;
             begin
                if R.Typ = T_Set and then X.Typ = T_Set then
+                  if O2c_BC.Bytecode_Mode then
+                     raise O2c_BC.Wrong_Construct with
+                       "bytecode backend: SET operands are not yet supported";
+                  end if;
                   R.Text := "(" & R.Text & " and not " & X.Text & ")";
                   R.Lit := False;
                elsif Int_Like (R, X, Res) then
                   R.Text := R.Text & " - " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
+                  if O2c_BC.Bytecode_Mode then
+                     if Res /= T_Int then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "LONGINT is not yet supported";
+                     end if;
+                     O2c_BC.Bin (O2c_BC.Sub);
+                  end if;
                elsif Real_Like (R, X, Res) then
                   declare
                      Conv : constant String :=
@@ -3170,6 +3289,11 @@ package body O2c_Compiler is
             begin
                if R.Typ /= T_Bool or else X.Typ /= T_Bool then
                   raise O2c_Error with "OR needs BOOLEAN operands";
+               end if;
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with
+                    "bytecode backend: BOOLEAN operators are not yet "
+                    & "supported";
                end if;
                R.Text := R.Text & " or " & X.Text;
                R.Lit := False;
@@ -3354,6 +3478,29 @@ package body O2c_Compiler is
                then
                   R.Text := To_Unbounded_String
                     ("Long_Float (" & To_String (R.Text) & ")");
+               end if;
+               if O2c_BC.Bytecode_Mode then
+                  --  the slice compares INTEGER and CHAR (CHAR shares
+                  --  INTEGER's slot layout, so the I* opcodes apply)
+                  if not ((R.Typ = T_Int and then X.Typ = T_Int)
+                          or else (R.Typ = T_Char and then X.Typ = T_Char))
+                  then
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & "only INTEGER/CHAR comparisons are supported";
+                  end if;
+                  if Op = " = " then
+                     O2c_BC.Bin (O2c_BC.Eq);
+                  elsif Op = " /= " then
+                     O2c_BC.Bin (O2c_BC.Ne);
+                  elsif Op = " < " then
+                     O2c_BC.Bin (O2c_BC.Lt);
+                  elsif Op = " <= " then
+                     O2c_BC.Bin (O2c_BC.Le);
+                  elsif Op = " > " then
+                     O2c_BC.Bin (O2c_BC.Gt);
+                  else
+                     O2c_BC.Bin (O2c_BC.Ge);
+                  end if;
                end if;
                R.Text := "(" & R.Text & Op & X.Text & ")";
                R.Typ := T_Bool;
@@ -4466,7 +4613,12 @@ package body O2c_Compiler is
    procedure Parse_If is
       Cond : Expr_Rec;
       Branch : Boolean := True;      --  True: emit "if", later "elsif"
+      L_End  : Natural := 0;         --  after the whole IF
+      L_Next : Natural := 0;         --  this branch's alternate
    begin
+      if O2c_BC.Bytecode_Mode then
+         L_End := New_Bc_Label;
+      end if;
       loop
          Next;                       --  consume IF / ELSIF
          Cond := Parse_Expr;
@@ -4476,6 +4628,10 @@ package body O2c_Compiler is
          end if;
          Expect (Lex.Tok_Then, "'THEN'");
          Next;
+         if O2c_BC.Bytecode_Mode then
+            L_Next := New_Bc_Label;
+            O2c_BC.Jump (O2c_BC.Jz, L_Next);
+         end if;
          Append_Body ("      " & (if Branch then "if " else "elsif ")
                       & To_String (Cond.Text) & " then");
          Branch := False;
@@ -4489,6 +4645,10 @@ package body O2c_Compiler is
                Append_Body ("         null;");
             end if;
          end;
+         if O2c_BC.Bytecode_Mode then
+            O2c_BC.Jump (O2c_BC.Jmp, L_End);
+            O2c_BC.Mark (L_Next);
+         end if;
          if Cur.Kind = Lex.Tok_Elsif then
             null;                    --  loop consumes the ELSIF
          elsif Cur.Kind = Lex.Tok_Else then
@@ -4511,13 +4671,23 @@ package body O2c_Compiler is
       end loop;
       Expect (Lex.Tok_End, "'END' closing the IF");
       Next;
+      if O2c_BC.Bytecode_Mode then
+         O2c_BC.Mark (L_End);
+      end if;
       Append_Body ("      end if;");
    end Parse_If;
 
    procedure Parse_While is
-      Cond : Expr_Rec;
+      Cond  : Expr_Rec;
+      L_Top : Natural := 0;
+      L_End : Natural := 0;
    begin
       Next;                          --  WHILE
+      if O2c_BC.Bytecode_Mode then
+         L_Top := New_Bc_Label;
+         L_End := New_Bc_Label;
+         O2c_BC.Mark (L_Top);
+      end if;
       Cond := Parse_Expr;
       if Cond.Typ /= T_Bool then
          raise O2c_Error with "WHILE condition must be BOOLEAN (line "
@@ -4525,6 +4695,9 @@ package body O2c_Compiler is
       end if;
       Expect (Lex.Tok_Do, "'DO'");
       Next;
+      if O2c_BC.Bytecode_Mode then
+         O2c_BC.Jump (O2c_BC.Jz, L_End);
+      end if;
       Append_Body ("      while " & To_String (Cond.Text) & " loop");
       declare
          Before : constant Natural := Length (Body_Buf);
@@ -4538,6 +4711,10 @@ package body O2c_Compiler is
       end;
       Expect (Lex.Tok_End, "'END' closing the WHILE");
       Next;
+      if O2c_BC.Bytecode_Mode then
+         O2c_BC.Jump (O2c_BC.Jmp, L_Top);
+         O2c_BC.Mark (L_End);
+      end if;
       Append_Body ("      end loop;");
    end Parse_While;
 
@@ -4857,6 +5034,12 @@ package body O2c_Compiler is
    begin
       loop
          exit when At_Stop (Stop_On_Else, Stop_On_Until, Stop_On_Bar);
+         if O2c_BC.Bytecode_Mode and then In_Proc then
+            --  the slice emits the module body only; a procedure body
+            --  would land in the same code buffer
+            raise O2c_BC.Wrong_Construct with "bytecode backend: procedure "
+              & "bodies are not yet supported";
+         end if;
 
          if Cur.Kind = Lex.Tok_Case then
             Parse_Case;
@@ -6158,6 +6341,7 @@ package body O2c_Compiler is
                   Member : constant String := Cur.Text (1 .. Cur.Len);
                   M : Unbounded_String;
                   CArg : Boolean := False;
+                  Had_Width : Boolean := False;
                begin
                   if Head (1 .. H_Len) /= "Out" then
                      raise O2c_Error with "M3 calls only module Out (found '"
@@ -6166,6 +6350,9 @@ package body O2c_Compiler is
                   Used_Console := True;
                   Next;
                   if Member = "Ln" then
+                     if O2c_BC.Bytecode_Mode then
+                        O2c_BC.Native_Call (2, 0);
+                     end if;
                      Append_Body ("      Aegir_User.Console.Put_Line ("""");");
                   elsif Member = "String" or else Member = "Int"
                     or else Member = "Real" or else Member = "LongReal"
@@ -6226,6 +6413,7 @@ package body O2c_Compiler is
                         end;
                      end if;
                      if Cur.Kind = Lex.Tok_Comma then
+                        Had_Width := True;
                         Next;
                         declare
                            W : Expr_Rec := Parse_Expr;
@@ -6237,6 +6425,20 @@ package body O2c_Compiler is
                      end if;
                      Expect (Lex.Tok_RParen, "')'");
                      Next;
+                     if O2c_BC.Bytecode_Mode then
+                        if Member = "Int" then
+                           if not Had_Width then
+                              O2c_BC.Push_Int (0);   --  omitted width: 0
+                           end if;
+                           O2c_BC.Native_Call (0, 2);
+                        elsif Member = "String" then
+                           O2c_BC.Native_Call (1, 1);
+                        else
+                           raise O2c_BC.Wrong_Construct with
+                             "bytecode backend: Out." & Member
+                             & " is not yet supported";
+                        end if;
+                     end if;
                      if Member = "String" then
                         if CArg then
                            Used_CStr := True;
@@ -6322,6 +6524,18 @@ package body O2c_Compiler is
                   declare
                      V : Expr_Rec := Parse_Expr;
                   begin
+                     if O2c_BC.Bytecode_Mode then
+                        if Syms (Idx).Typ /= T_Int
+                          and then Syms (Idx).Typ /= T_Char
+                          and then Syms (Idx).Typ /= T_Bool
+                        then
+                           raise O2c_BC.Wrong_Construct with "bytecode "
+                             & "backend: only INTEGER/CHAR/BOOLEAN "
+                             & "assignments are supported";
+                        end if;
+                        O2c_BC.Store
+                          (O2c_BC.Global (Ada_Id (Head (1 .. H_Len))));
+                     end if;
                      if Syms (Idx).Typ = T_LReal then
                         if V.Typ = T_Int
                           or else (V.Typ = T_Real and then V.Lit)
@@ -8914,7 +9128,17 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
             Provided (N_Prov) := Mod_Name;
          end if;
       end loop;
+      if Bytecode_Requested then
+         O2c_BC.Begin_Mode;
+      end if;
       Compile_Module (Main_Source, False, M_T, S_T, B_T);
+      if O2c_BC.Bytecode_Mode then
+         --  the program ends where the module body ends; Encode resolves
+         --  the control-flow fixups the hooks recorded
+         O2c_BC.Halt_Program;
+         Bc_Image := To_Unbounded_String (O2c_BC.Encode);
+         O2c_BC.Finish;
+      end if;
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", M_T);
       Count := C;
       return Res;
