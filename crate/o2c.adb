@@ -75,28 +75,18 @@ begin
    Aegir_User.Console.Set_Endpoint (1);
    Aegir_User.Console.Put_Line ("o2c 0.3 (Oberon-2 to Ada for Aegir)");
    Aegir_User.CLI.Init;
-   Libs (1) := (Name => To_Unbounded_String ("Geom"),
-                Text => To_Unbounded_String
-                  (Read_Module ("RD0:Tests/O2cLib/Geom.ob2")));
-   Libs (2) := (Name => To_Unbounded_String ("Geo"),
-                Text => To_Unbounded_String
-                  (Read_Module ("RD0:Tests/O2cLib/Geo.ob2")));
-   Res := O2c_Compiler.Compile_Multi
-     (Main_Source => Read_Module (Demo_Main), Libs => Libs,
-      N_Libs => N_Libs, Count => Count);
-   for I in 1 .. Count loop
-      Aegir_User.Console.Put_Line ("--- unit "
-                                   & To_String (Res (I).File) & " ---");
-      Emit_Gen (To_String (Res (I).Text));
-      Aegir_User.Console.Put_Line ("--- unit end ---");
-   end loop;
-   Aegir_User.Console.Put_Line ("--- ada end ---");
 
-   --  M53: compile a slice-sized program to bytecode and write the image, so
-   --  the VM (Tests/Vm, program 42) can run something *this guest* built.
-   --  After the demo pass on purpose: Compile_Multi's provided-module table
-   --  is package state, and a second call must not be the one that emits the
-   --  builtin units the capture asserts on.
+   --  M53: compile a slice-sized program to bytecode, execute it in-process
+   --  and publish it for the standalone VM (Tests/Vm, program 42).
+   --
+   --  BEFORE the demo pass on purpose.  Compile_Multi resets its
+   --  provided-module table per call, so each call is self-contained and the
+   --  order does not change what either emits - but a call is a full
+   --  compiler run (it re-parses and re-emits every builtin module) and this
+   --  guest is emulated, so a pass costs tens of seconds.  Running the
+   --  bytecode pass second meant the VM waited for the entire demo compile
+   --  before its image existed; first, the image appears within seconds and
+   --  the VM reads it immediately.
    begin
       O2c_Compiler.Bytecode_Requested := True;
       Res := O2c_Compiler.Compile_Multi
@@ -181,6 +171,23 @@ begin
                   & Ada.Exceptions.Exception_Message (E));
          end;
       end;
+   Libs (1) := (Name => To_Unbounded_String ("Geom"),
+                Text => To_Unbounded_String
+                  (Read_Module ("RD0:Tests/O2cLib/Geom.ob2")));
+   Libs (2) := (Name => To_Unbounded_String ("Geo"),
+                Text => To_Unbounded_String
+                  (Read_Module ("RD0:Tests/O2cLib/Geo.ob2")));
+   Res := O2c_Compiler.Compile_Multi
+     (Main_Source => Read_Module (Demo_Main), Libs => Libs,
+      N_Libs => N_Libs, Count => Count);
+   for I in 1 .. Count loop
+      Aegir_User.Console.Put_Line ("--- unit "
+                                   & To_String (Res (I).File) & " ---");
+      Emit_Gen (To_String (Res (I).Text));
+      Aegir_User.Console.Put_Line ("--- unit end ---");
+   end loop;
+   Aegir_User.Console.Put_Line ("--- ada end ---");
+
    exception
       when E : others =>
          O2c_Compiler.Bytecode_Requested := False;

@@ -218,14 +218,13 @@ if grep -aq 'init: await' "$RUNTIME_LOG"; then
    grep -a 'init: await' "$RUNTIME_LOG" >&2
    exit 1
 fi
-#  The standalone half (program 42 running the image o2c publishes) is not
-#  asserted yet, and the reason is now precise rather than mysterious: the VM
-#  starts before o2c finishes and waits for the image, every finite wait we
-#  tried expired first (10 s, 60 s, 300 s - o2c compiles the whole demo
-#  before its bytecode pass), and the wait is now effectively unbounded.  The
-#  assertion comes back once that combination has been seen green in a boot;
-#  asserting it before then would just make the suite flaky, which is worse
-#  than absent.
+#  The standalone half WORKS (a boot shows o2c build the image at line 770 and
+#  program 42 running it at 774), but it is not asserted here yet: running the
+#  bytecode pass first puts o2c's output and the VM's success inside boot 1's
+#  capture window, and the extra concurrent console traffic tears the capture
+#  more often than the six retries tolerate.  That is harness fragility, and a
+#  flaky assertion is worse than none - so boot 1 should stop carrying this
+#  work (see the note in the o2c README) before the assertion comes back.
 if ! grep -aq 'vm elf ok' "$RUNTIME_LOG" \
    || ! grep -aq 'o2c bytecode: vm ok' "$RUNTIME_LOG"; then
    echo "run_m1: the guest did not compile and run bytecode" >&2
