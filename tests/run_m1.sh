@@ -153,5 +153,11 @@ if ! grep -aq 'hello-env' "$RUNTIME_LOG" || ! grep -aq '8300' "$RUNTIME_LOG"; th
    tail -30 "$RUNTIME_LOG" >&2
    exit 1
 fi
+if ! grep -aq '8310' "$RUNTIME_LOG" || ! grep -aq '8315' "$RUNTIME_LOG" \
+   || ! grep -aq '8320' "$RUNTIME_LOG" || ! grep -aq -- '-123' "$RUNTIME_LOG"; then
+   echo "run_m1: Convert demo output not seen" >&2
+   tail -30 "$RUNTIME_LOG" >&2
+   exit 1
+fi
 
 echo "run_m1: PASS"

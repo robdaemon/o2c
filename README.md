@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M51 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M52 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -14,7 +14,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M51 status
+## M52 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -92,6 +92,24 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M52 — `Convert` (OBNC extension module)**: number <-> string, the
+last applicable `obnc-libext` module.  `ToInt(str; VAR x: INTEGER; VAR
+res: INTEGER)` and `ToReal(str; VAR x: REAL; VAR res: INTEGER)` parse
+leading spaces, an optional sign, digits (and a decimal point for
+REAL) and report `res = 0` on success / `-1` when the text holds no
+number; `FromInt(x; VAR str)` renders decimals (via `'Image`, so it
+handles negatives) and `FromReal(x; VAR str)` delegates to
+`Reals.Convert`.  Reserved names `ConvToInt`/`ConvToReal`/`ConvFromInt`
+are recognised only inside the builtin `Convert`.
+
+  That closes the `obnc-libext` comparison: `extArgs` (M50),
+  `extErr` (M50), `extEnv` (M51) and `extConvert` (M52) are shipped in
+  `docs/obnc-libext.md`; `extTrap` stays N/A (the kernel owns traps).
+
+  Demo markers `8310` (parse ok), `8315` (parse failure), `8320`
+  (REAL parse) and the `-123` round-trip are asserted by `run_m1` —
+  now against the runtime-only log, so they prove the code ran.
 
 **M51 — `Env` (OBNC extension module)**: `Get(name; VAR value: ARRAY OF
 CHAR)` and `Set(name, value)` over `Aegir_User.CLI.Get_Env`/`Set_Env`

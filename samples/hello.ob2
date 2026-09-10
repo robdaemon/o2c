@@ -1,6 +1,6 @@
 module Hello;
 import Out, Geom, Geo, Math, MathL, Strings, Texts, Files, In,
-       Input, Reals, Term, XYplane, Args, Err, Env;
+       Input, Reals, Term, XYplane, Args, Err, Env, Convert;
 
 type Vector = array 4 of integer;
 type Pair = record a, b: integer end;
@@ -25,6 +25,7 @@ var sac: Tote;
 var s2: set; l2: longint;
 var r: real;
 var lre: longreal;
+var res: integer;
 var m: integer;
 var a, b: Geom.Point;
 var tw: Texts.Writer;
@@ -463,6 +464,22 @@ begin
   Out.LongReal(MathL.power(2.0D0, 3.0D0), 0);
   Out.Ln;
   Out.LongReal(MathL.pi, 0);
+  Out.Ln;
+  Convert.ToInt("8311", n, res);
+  if (res = 0) & (n = 8311) then Out.Int(8310, 0) else Out.Int(8319, 0) end;
+  Out.Ln;
+  Convert.ToInt("nope", n, res);
+  if res = -1 then Out.Int(8315, 0) else Out.Int(8316, 0) end;
+  Out.Ln;
+  Convert.ToReal("2.5", r, res);
+  if (res = 0) & (r > 2.4) & (r < 2.6) then
+    Out.Int(8320, 0)
+  else
+    Out.Int(8329, 0)
+  end;
+  Out.Ln;
+  Convert.FromInt(-123, fl);
+  Out.String(fl);
   Out.Ln;
   Env.Set("O2CENV", "hello-env");
   Env.Get("O2CENV", fl);

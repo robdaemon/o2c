@@ -4923,7 +4923,69 @@ package body O2c_Compiler is
          elsif Cur.Kind = Lex.Tok_Ident then
             H_Len := Cur.Len;
             Head (1 .. H_Len) := Cur.Text (1 .. H_Len);
-            if To_String (Mod_Name) = "Env"
+            if To_String (Mod_Name) = "Convert"
+              and then (Eq_No_Case (Head (1 .. H_Len), "CONVTOINT")
+                        or else Eq_No_Case (Head (1 .. H_Len),
+                                            "CONVTOREAL")
+                        or else Eq_No_Case (Head (1 .. H_Len),
+                                            "CONVFROMINT"))
+            then
+               --  M52 FFI: number <-> string (builtin Convert only)
+               declare
+                  Kind : constant String := Head (1 .. H_Len);
+                  P1, P2, P3 : Expr_Rec;
+               begin
+                  if Eq_No_Case (Kind, "CONVFROMINT") then
+                     Next;
+                     Expect (Lex.Tok_LParen, "'(' after ConvFromInt");
+                     Next;
+                     P1 := Parse_Expr;
+                     if P1.Typ /= T_Int then
+                        raise O2c_Error with "ConvFromInt needs an INTEGER";
+                     end if;
+                     Expect (Lex.Tok_Comma, "','");
+                     Next;
+                     P2 := Parse_Expr;
+                     if P2.Typ /= T_Str then
+                        raise O2c_Error with "ConvFromInt needs an ARRAY "
+                          & "OF CHAR buffer";
+                     end if;
+                     Expect (Lex.Tok_RParen, "')'");
+                     Next;
+                     Append_Body ("      O2c_Conv_FromInt ("
+                                  & To_String (P1.Text) & ", "
+                                  & To_String (P2.Text) & ");");
+                  else
+                     Next;
+                     Expect (Lex.Tok_LParen, "'(' after the Convert call");
+                     Next;
+                     P1 := Parse_Expr;
+                     if P1.Typ /= T_Str then
+                        raise O2c_Error with "an ARRAY OF CHAR value is "
+                          & "required";
+                     end if;
+                     Expect (Lex.Tok_Comma, "','");
+                     Next;
+                     P2 := Parse_Expr;
+                     Expect (Lex.Tok_Comma, "','");
+                     Next;
+                     P3 := Parse_Expr;
+                     if P3.Typ /= T_Int then
+                        raise O2c_Error with "the result must be an INTEGER "
+                          & "variable";
+                     end if;
+                     Expect (Lex.Tok_RParen, "')'");
+                     Next;
+                     Append_Body ("      "
+                                  & (if Eq_No_Case (Kind, "CONVTOINT")
+                                     then "O2c_Conv_ToInt ("
+                                     else "O2c_Conv_ToReal (")
+                                  & To_String (P1.Text) & ", "
+                                  & To_String (P2.Text) & ", "
+                                  & To_String (P3.Text) & ");");
+                  end if;
+               end;
+            elsif To_String (Mod_Name) = "Env"
               and then (Eq_No_Case (Head (1 .. H_Len), "ENVGET")
                         or else Eq_No_Case (Head (1 .. H_Len), "ENVSET"))
             then
@@ -7666,6 +7728,120 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "   end O2c_Env_Set;" & ASCII.LF
                  & "";
             end if;
+            if To_String (Mod_Name) = "Convert" then
+               --  M52 FFI: number <-> string (builtin Convert only).
+               --  ToInt/ToReal report 0 on success and -1 when the
+               --  text holds no number; FromInt renders via 'Image.
+               S := S
+                 & "   procedure O2c_Conv_ToInt (S : String; X : out Integer; Res : out Integer)" & ASCII.LF
+                 & "   is" & ASCII.LF
+                 & "      V : Integer := 0;" & ASCII.LF
+                 & "      Neg : Boolean := False;" & ASCII.LF
+                 & "      Seen : Boolean := False;" & ASCII.LF
+                 & "      K : Natural := 1;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      while K <= S'Length and then S (S'First + K - 1) = ' ' loop" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      if K <= S'Length and then S (S'First + K - 1) = '-' then" & ASCII.LF
+                 & "         Neg := True;" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      elsif K <= S'Length and then S (S'First + K - 1) = '+' then" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      while K <= S'Length and then S (S'First + K - 1) in '0' .. '9' loop" & ASCII.LF
+                 & "         V := V * 10" & ASCII.LF
+                 & "           + (Character'Pos (S (S'First + K - 1)) - Character'Pos ('0'));" & ASCII.LF
+                 & "         Seen := True;" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      if Seen then" & ASCII.LF
+                 & "         if Neg then" & ASCII.LF
+                 & "            X := -V;" & ASCII.LF
+                 & "         else" & ASCII.LF
+                 & "            X := V;" & ASCII.LF
+                 & "         end if;" & ASCII.LF
+                 & "         Res := 0;" & ASCII.LF
+                 & "      else" & ASCII.LF
+                 & "         X := 0;" & ASCII.LF
+                 & "         Res := -1;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "   end O2c_Conv_ToInt;" & ASCII.LF
+                 & "   procedure O2c_Conv_ToReal (S : String; X : out Float;" & ASCII.LF
+                 & "                              Res : out Integer) is" & ASCII.LF
+                 & "      V : Float := 0.0;" & ASCII.LF
+                 & "      Frac : Float := 0.1;" & ASCII.LF
+                 & "      Neg : Boolean := False;" & ASCII.LF
+                 & "      Dot : Boolean := False;" & ASCII.LF
+                 & "      Seen : Boolean := False;" & ASCII.LF
+                 & "      K : Natural := 1;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      while K <= S'Length and then S (S'First + K - 1) = ' ' loop" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      if K <= S'Length and then S (S'First + K - 1) = '-' then" & ASCII.LF
+                 & "         Neg := True;" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      elsif K <= S'Length and then S (S'First + K - 1) = '+' then" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      loop" & ASCII.LF
+                 & "         exit when K > S'Length;" & ASCII.LF
+                 & "         declare" & ASCII.LF
+                 & "            C : constant Character := S (S'First + K - 1);" & ASCII.LF
+                 & "         begin" & ASCII.LF
+                 & "            if C in '0' .. '9' then" & ASCII.LF
+                 & "               Seen := True;" & ASCII.LF
+                 & "               if Dot then" & ASCII.LF
+                 & "                  V := V + Float (Character'Pos (C) - Character'Pos ('0'))" & ASCII.LF
+                 & "                    * Frac;" & ASCII.LF
+                 & "                  Frac := Frac / 10.0;" & ASCII.LF
+                 & "               else" & ASCII.LF
+                 & "                  V := V * 10.0" & ASCII.LF
+                 & "                    + Float (Character'Pos (C) - Character'Pos ('0'));" & ASCII.LF
+                 & "               end if;" & ASCII.LF
+                 & "               K := K + 1;" & ASCII.LF
+                 & "            elsif C = '.' and then not Dot then" & ASCII.LF
+                 & "               Dot := True;" & ASCII.LF
+                 & "               K := K + 1;" & ASCII.LF
+                 & "            else" & ASCII.LF
+                 & "               exit;" & ASCII.LF
+                 & "            end if;" & ASCII.LF
+                 & "         end;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      if Seen then" & ASCII.LF
+                 & "         if Neg then" & ASCII.LF
+                 & "            X := -V;" & ASCII.LF
+                 & "         else" & ASCII.LF
+                 & "            X := V;" & ASCII.LF
+                 & "         end if;" & ASCII.LF
+                 & "         Res := 0;" & ASCII.LF
+                 & "      else" & ASCII.LF
+                 & "         X := 0.0;" & ASCII.LF
+                 & "         Res := -1;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "   end O2c_Conv_ToReal;" & ASCII.LF
+                 & "   procedure O2c_Conv_FromInt (X : Integer; S : out String) is" & ASCII.LF
+                 & "      Img : constant String := Integer'Image (X);" & ASCII.LF
+                 & "      L : Natural := 0;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      for I in Img'Range loop" & ASCII.LF
+                 & "         if not (L = 0 and then Img (I) = ' ') then" & ASCII.LF
+                 & "            L := L + 1;" & ASCII.LF
+                 & "            if L <= S'Length then" & ASCII.LF
+                 & "               S (S'First + L - 1) := Img (I);" & ASCII.LF
+                 & "            end if;" & ASCII.LF
+                 & "         end if;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      if L > S'Length then" & ASCII.LF
+                 & "         L := S'Length;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      for I in L + 1 .. S'Length loop" & ASCII.LF
+                 & "         S (S'First + I - 1) := Character'Val (0);" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "   end O2c_Conv_FromInt;" & ASCII.LF
+                 & "";
+            end if;
             if To_String (Mod_Name) = "Reals" then
                --  M46 FFI: string -> REAL (ConvertTo only; the
                --  REAL -> string direction is pure Oberon).
@@ -8541,6 +8717,32 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
    end Oak_Env_Src;
 
 
+   function Oak_Convert_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module Convert;" & ASCII.LF;
+      S := S & "import Reals;" & ASCII.LF;
+      S := S & "procedure ToInt*(str: array of char; var x: integer; var res: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  ConvToInt(str, x, res)" & ASCII.LF;
+      S := S & "end ToInt;" & ASCII.LF;
+      S := S & "procedure ToReal*(str: array of char; var x: real; var res: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  ConvToReal(str, x, res)" & ASCII.LF;
+      S := S & "end ToReal;" & ASCII.LF;
+      S := S & "procedure FromInt*(x: integer; var str: array of char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  ConvFromInt(x, str)" & ASCII.LF;
+      S := S & "end FromInt;" & ASCII.LF;
+      S := S & "procedure FromReal*(x: real; var str: array of char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Reals.Convert(x, str)" & ASCII.LF;
+      S := S & "end FromReal;" & ASCII.LF;
+      S := S & "end Convert." & ASCII.LF;
+      return To_String (S);
+   end Oak_Convert_Src;
+
+
    function Compile_Multi (Main_Source : String; Libs : Lib_Array;
                            N_Libs : Natural; Count : out Natural)
                            return Unit_Array
@@ -8684,6 +8886,14 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Term_Src, True, M_T, S_T, B_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
+      if Length (B_T) > 0 then
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
+      N_Prov := N_Prov + 1;
+      Provided (N_Prov) := Mod_Name;
+
+      Compile_Module (Oak_Convert_Src, True, M_T, S_T, B_T);
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);

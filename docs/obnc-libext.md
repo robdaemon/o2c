@@ -33,7 +33,7 @@ control).
 |--------------|-------------------------------------------------------|----------------------------------------------------------------------------|
 | `extArgs`    | `Aegir_User.CLI.Arg_Count` / `Argument (Index)`       | **shipped (M50)** — `Args`: `count*`, `Get(n; VAR arg; VAR res)`, 1-based  |
 | `extEnv`     | `Aegir_User.CLI.Get_Env` / `Set_Env` (`ENV:<Name>`)   | **shipped (M51)** — `Env`: `Get(name; VAR value)`, `Set(name, value)`      |
-| `extConvert` | none needed (pure Oberon)                             | **partly covered** by `Reals` (REAL side); integer side is a gap          |
+| `extConvert` | none needed (pure Oberon)                             | **shipped (M52)** — `Convert`: `ToInt`/`ToReal`/`FromInt`/`FromReal`      |
 | `extErr`     | fd 2 *is* the console — aegir has no separate stderr  | **shipped (M50)** as console-backed `Err` (documented deviation)           |
 | `extTrap`    | traps belong to the kernel; no user handler exists    | **not planned** — documented as not applicable                             |
 
@@ -51,9 +51,8 @@ Two naming/indexing decisions to record with the modules:
 1. ~~**M50 — `Args` + `Err`**~~ **done**: `Args.count*`/`Get` (1-based)
    and the console-backed `Err` (`Write`/`WriteInt`/`WriteReal`/`WriteLn`).
 2. ~~**M51 — `Env`**~~ **done**: `Get`/`Set` over `CLI.Get_Env`/`Set_Env`.
-3. **M52 — `Convert`**: `ToInt`/`ToReal`/`FromInt` (and `FromReal` by
-   delegating to `Reals.Convert`), closing the integer side that
-   `Reals` leaves open.
+3. ~~**M52 — `Convert`**~~ **done**: `ToInt`/`ToReal`/`FromInt`, with
+   `FromReal` delegating to `Reals.Convert`.
 
 `extTrap` stays out: with a real kernel there is nothing for a user
 trap handler to install.
