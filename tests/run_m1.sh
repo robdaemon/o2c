@@ -123,5 +123,11 @@ if ! grep -aq '8.000000' "$QEMU_LOG" || ! grep -aq '3.141593' "$QEMU_LOG"; then
    tail -30 "$QEMU_LOG" >&2
    exit 1
 fi
+if ! grep -aq '8000' "$QEMU_LOG" || ! grep -aq '8001' "$QEMU_LOG" \
+   || ! grep -aq '8002' "$QEMU_LOG" || ! grep -aq '8003' "$QEMU_LOG"; then
+   echo "run_m1: Input module demo output not seen" >&2
+   tail -30 "$QEMU_LOG" >&2
+   exit 1
+fi
 
 echo "run_m1: PASS"

@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M47 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M48 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M47 status
+## M48 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,36 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M48 — Oakwood `Input` module**: `TimeUnit*` (1000 ms), `Available`,
+`Read(VAR ch: CHAR)`, `Time(): LONGINT`, `Mouse(VAR keys: SET; VAR x, y:
+INTEGER)` and `SetMouseLimits(w, h)`.  The console ABI has no keyboard
+or mouse queue, so `Read` drains the same stdin `in_path` the `In`
+module uses — keeping the newline between lines that `In` discards —
+and answers `CHR(0)` at end of input; `Mouse`/`SetMouseLimits` are
+documented no-ops (empty set, zero coordinates); `Time` comes from
+`Aegir_User.Syscalls.Read_Clock`.  Reserved factors `InAvail`,
+`InReadCh` and `InTime` are recognised only inside the builtin.
+
+  It needed one language fix: **exported SET parameters** are allowed
+  now that every multi-module unit shares `O2c_Types.O2c_Set`, so
+  `Mouse(VAR keys: SET)` can cross a module boundary (the SET-element
+  ARRAY restriction stays).
+
+  The Aegir side needed one too: the compiler process ran out of heap
+  (`STORAGE_ERROR` from `s-memory.adb`) once the demo reached eleven
+  imports, because the GNAT heap was capped at **8 chunks x 256 KiB
+  (2 MiB)**.  That static ceiling is gone — the heap now grows chunk
+  by chunk on demand inside a 20 MiB VA window (`0x4000_0000 ..
+  0x4140_0000`, below the text at `0x4600_0000` and the Files client
+  buffer at `0x4400_8000`), with the window itself as the only bound.
+  o2c's `make build` also forces a relink when an aegir runtime
+  archive is newer than the ELF: those archives are linked with
+  `-L/-l`, so gprbuild otherwise skips the relink and a runtime fix
+  silently never reaches the compiler.
+
+  Demo markers `8000`–`8003` (Read/`Available`, `Time`, `Mouse`,
+  `TimeUnit`) are asserted by `run_m1`.
 
 **M47 — LONGREAL and the Oakwood `MathL` module**: LONGREAL joins
 REAL as the second real kind.  It maps to Ada `Long_Float`, and its

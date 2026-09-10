@@ -1,6 +1,6 @@
 module Hello;
 import Out, Geom, Geo, Math, MathL, Strings, Texts, Files, In,
-       Reals, Term;
+       Input, Reals, Term;
 
 type Vector = array 4 of integer;
 type Pair = record a, b: integer end;
@@ -442,6 +442,20 @@ begin
   Term.SetColor(2, 0);
   Term.Reset;
   Out.String("term-ok");
+  Out.Ln;
+  Input.Read(ch);
+  Out.Int(8000 + ORD(ch) + Input.Available, 0);
+  Out.Ln;
+  if Input.Time > 0 then Out.Int(8001, 0) else Out.Int(8011, 0) end;
+  Out.Ln;
+  Input.Mouse(s2, n, m);
+  if (s2 = {}) & (n = 0) & (m = 0) then
+    Out.Int(8002, 0)
+  else
+    Out.Int(8012, 0)
+  end;
+  Out.Ln;
+  if Input.TimeUnit = 1000 then Out.Int(8003, 0) else Out.Int(8013, 0) end;
   Out.Ln;
   lre := MathL.ln(MathL.e);
   Out.LongReal(lre, 0);

@@ -31,6 +31,10 @@ Aegir runtime.
 ## Repository conventions
 
 - Builds are serial; never `make -jN`.
+- Changing the aegir runtime (`userspace/rts`, `userspace/gnat-rts`)
+  needs a `make build`; the Makefile drops the ELF first when a
+  runtime archive is newer, because those archives are linked with
+  `-L/-l` and gprbuild would otherwise skip the relink.
 - `alr` (reached through aegir's crates when `make build AEGIR_ROOT=...`
   runs) needs a writable temp dir: this sandbox's `/run/user/1000` is
   read-only, so set `XDG_RUNTIME_DIR=/tmp/alrrt TMPDIR=/tmp` (plus

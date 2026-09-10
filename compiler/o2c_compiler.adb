@@ -2123,6 +2123,37 @@ package body O2c_Compiler is
                R.Lit := False;
                return R;
             end if;
+            if To_String (Mod_Name) = "Input"
+              and then (Eq_No_Case (Cur.Text (1 .. Cur.Len), "INAVAIL")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
+                                            "INREADCH")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
+                                            "INTIME"))
+            then
+               --  M48 FFI: Input primitives (builtin Input module only)
+               declare
+                  Nm : constant String := Cur.Text (1 .. Cur.Len);
+               begin
+                  Next;
+                  if Cur.Kind = Lex.Tok_LParen then
+                     Next;
+                     Expect (Lex.Tok_RParen, "')'");
+                     Next;
+                  end if;
+                  if Eq_No_Case (Nm, "INAVAIL") then
+                     R.Text := To_Unbounded_String ("O2c_In_Avail");
+                     R.Typ := T_Int;
+                  elsif Eq_No_Case (Nm, "INREADCH") then
+                     R.Text := To_Unbounded_String ("O2c_In_ReadCh");
+                     R.Typ := T_Char;
+                  else
+                     R.Text := To_Unbounded_String ("O2c_In_Time");
+                     R.Typ := T_Long;
+                  end if;
+               end;
+               R.Lit := False;
+               return R;
+            end if;
             if To_String (Mod_Name) = "In"
               and then (Eq_No_Case (Cur.Text (1 .. Cur.Len), "INCHAR")
                         or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
@@ -4068,10 +4099,8 @@ package body O2c_Compiler is
                  & "': SET-element ARRAY OF parameters are not "
                  & "exportable (M21)";
             end if;
-            if PTyp (I) = T_Set then
-               raise O2c_Error with "exported method '" & Name
-                 & "': SET parameters are not exportable (M20c)";
-            end if;
+            --  M48: SET parameters export now that every unit shares
+            --  O2c_Types.O2c_Set (Mouse in the Oakwood Input module).
             if PUT (I) /= 0 then
                if UTypes (PUT (I)).Imported
                  or else not UTypes (PUT (I)).ExpT
@@ -4134,10 +4163,8 @@ package body O2c_Compiler is
                  & "': SET-element ARRAY OF parameters are not "
                  & "exportable (M21)";
             end if;
-            if PTyp (I) = T_Set then
-               raise O2c_Error with "exported procedure '" & Name
-                 & "': SET parameters are not exportable (M20b)";
-            end if;
+            --  M48: SET parameters export now that every unit shares
+            --  O2c_Types.O2c_Set (Mouse in the Oakwood Input module).
             if PUT (I) /= 0 then
                if UTypes (PUT (I)).Imported then
                   raise O2c_Error with "exported procedure '" & Name
@@ -6873,6 +6900,10 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
             if To_String (Mod_Name) = "In" then
                S := S & "with Aegir_User.CLI;" & ASCII.LF;
             end if;
+            if To_String (Mod_Name) = "Input" then
+               S := S & "with Aegir_User.CLI;" & ASCII.LF
+                 & "with Aegir_User.Syscalls;" & ASCII.LF;
+            end if;
             if Length (S) > 0 then
                S := S & ASCII.LF;
             end if;
@@ -7232,6 +7263,64 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "      end loop;" & ASCII.LF
                  & "      Done := N > 0;" & ASCII.LF
                  & "   end O2c_In_Name;" & ASCII.LF
+                 & "";
+            end if;
+            if To_String (Mod_Name) = "Input" then
+               --  M48 FFI: keyboard/clock access for the Oakwood Input
+               --  module.  The console ABI has no keyboard queue, so
+               --  Read drains the same stdin in_path that In uses (a
+               --  newline is kept between lines) and answers CHR(0)
+               --  at end of input; Time comes from the wall clock.
+               S := S
+                 & "   In_C_Buf : String (1 .. 4096);" & ASCII.LF
+                 & "   In_C_Len : Natural := 0;" & ASCII.LF
+                 & "   In_C_Pos : Natural := 1;" & ASCII.LF
+                 & "   In_C_Rdy : Boolean := False;" & ASCII.LF
+                 & "   procedure O2c_In_Cload is" & ASCII.LF
+                 & "      S : String (1 .. 512);" & ASCII.LF
+                 & "      L : Natural;" & ASCII.LF
+                 & "      E : Boolean;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      Aegir_User.CLI.Init;" & ASCII.LF
+                 & "      if In_C_Rdy then" & ASCII.LF
+                 & "         return;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      In_C_Rdy := True;" & ASCII.LF
+                 & "      loop" & ASCII.LF
+                 & "         Aegir_User.CLI.Get_Line (S, L, E);" & ASCII.LF
+                 & "         exit when E;" & ASCII.LF
+                 & "         exit when In_C_Len + L + 2 > 4096;" & ASCII.LF
+                 & "         for I in 1 .. L loop" & ASCII.LF
+                 & "            In_C_Len := In_C_Len + 1;" & ASCII.LF
+                 & "            In_C_Buf (In_C_Len) := S (I);" & ASCII.LF
+                 & "         end loop;" & ASCII.LF
+                 & "         In_C_Len := In_C_Len + 1;" & ASCII.LF
+                 & "         In_C_Buf (In_C_Len) := ASCII.LF;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "   end O2c_In_Cload;" & ASCII.LF
+                 & "   function O2c_In_Avail return Integer is" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      O2c_In_Cload;" & ASCII.LF
+                 & "      return Integer (In_C_Len - In_C_Pos + 1);" & ASCII.LF
+                 & "   end O2c_In_Avail;" & ASCII.LF
+                 & "   function O2c_In_ReadCh return Character is" & ASCII.LF
+                 & "      C : Character;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      O2c_In_Cload;" & ASCII.LF
+                 & "      if In_C_Pos > In_C_Len then" & ASCII.LF
+                 & "         return Character'Val (0);" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      C := In_C_Buf (In_C_Pos);" & ASCII.LF
+                 & "      In_C_Pos := In_C_Pos + 1;" & ASCII.LF
+                 & "      return C;" & ASCII.LF
+                 & "   end O2c_In_ReadCh;" & ASCII.LF
+                 & "   function O2c_In_Time return Long_Integer is" & ASCII.LF
+                 & "      use type Aegir_User.Syscalls.U64;" & ASCII.LF
+                 & "      Sec, Ns : Aegir_User.Syscalls.U64;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      Aegir_User.Syscalls.Read_Clock (Sec, Ns);" & ASCII.LF
+                 & "      return Long_Integer (Sec) * 1000 + Long_Integer (Ns / 1000000);" & ASCII.LF
+                 & "   end O2c_In_Time;" & ASCII.LF
                  & "";
             end if;
             if To_String (Mod_Name) = "Reals" then
@@ -7979,6 +8068,39 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
    end Oak_MathL_Src;
 
 
+   function Oak_Input_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module Input;" & ASCII.LF;
+      S := S & "var TimeUnit*: longint;" & ASCII.LF;
+      S := S & "procedure Available*: integer;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return InAvail" & ASCII.LF;
+      S := S & "end Available;" & ASCII.LF;
+      S := S & "procedure Read*(var ch: char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  ch := InReadCh" & ASCII.LF;
+      S := S & "end Read;" & ASCII.LF;
+      S := S & "procedure Time*: longint;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return InTime" & ASCII.LF;
+      S := S & "end Time;" & ASCII.LF;
+      S := S & "procedure Mouse*(var keys: set; var x: integer; var y: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  keys := {};" & ASCII.LF;
+      S := S & "  x := 0;" & ASCII.LF;
+      S := S & "  y := 0" & ASCII.LF;
+      S := S & "end Mouse;" & ASCII.LF;
+      S := S & "procedure SetMouseLimits*(w: integer; h: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "end SetMouseLimits;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  TimeUnit := 1000" & ASCII.LF;
+      S := S & "end Input." & ASCII.LF;
+      return To_String (S);
+   end Oak_Input_Src;
+
+
    function Compile_Multi (Main_Source : String; Libs : Lib_Array;
                            N_Libs : Natural; Count : out Natural)
                            return Unit_Array
@@ -8058,6 +8180,14 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       end if;
 
       Compile_Module (Oak_MathL_Src, True, M_T, S_T, B_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
+      if Length (B_T) > 0 then
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
+      N_Prov := N_Prov + 1;
+      Provided (N_Prov) := Mod_Name;
+
+      Compile_Module (Oak_Input_Src, True, M_T, S_T, B_T);
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
