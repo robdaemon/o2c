@@ -351,6 +351,22 @@ package body O2c_Compiler is
       return Nm;
    end Ada_Id;
 
+   --  Like Ada_Id, but for a qualified Oberon reference ('Math.Point'):
+   --  only the final component is an Ada identifier emitted as-is.
+   function Ada_Last (Q : String) return String is
+      D : Natural := 0;
+   begin
+      for I in Q'Range loop
+         if Q (I) = '.' then
+            D := I;
+         end if;
+      end loop;
+      if D = 0 then
+         return Ada_Id (Q);
+      end if;
+      return Q (Q'First .. D) & Ada_Id (Q (D + 1 .. Q'Last));
+   end Ada_Last;
+
    function Is_Provided (Nm : String) return Boolean is
    begin
       for I in 1 .. N_Prov loop
@@ -992,7 +1008,7 @@ package body O2c_Compiler is
             return "O2c_Bool_Arr";
          end if;
       elsif P.UT /= 0 then
-         return To_String (UTypes (P.UT).Name);
+         return Ada_Last (To_String (UTypes (P.UT).Name));
       else
          return Ada_Type (P.Typ);
       end if;
@@ -1012,7 +1028,8 @@ package body O2c_Compiler is
          end if;
          H := H & To_String (S.P (I).Name)
            & (if S.P (I).By_Ref then " : in out " else " : ")
-           & (if I = 1 then To_String (UTypes (B).Name) & "'Class"
+           & (if I = 1 then Ada_Last (To_String (UTypes (B).Name))
+                            & "'Class"
               else P_Ada_Type (S.P (I)));
       end loop;
       H := H & ") return "
@@ -1036,7 +1053,8 @@ package body O2c_Compiler is
          end if;
          H := H & To_String (S.P (I).Name)
            & (if S.P (I).By_Ref then " : in out " else " : ")
-           & (if I = 1 then To_String (UTypes (B).Name) & "'Class"
+           & (if I = 1 then Ada_Last (To_String (UTypes (B).Name))
+                            & "'Class"
               else P_Ada_Type (S.P (I)));
       end loop;
       H := H & ")";
@@ -1099,11 +1117,11 @@ package body O2c_Compiler is
             if N_C > 0 then
                for I in 1 .. N_C loop
                   Append_Decl ("      if " & Rcvr & " in "
-                               & To_String (UTypes (Cand (I)).Name)
+                               & Ada_Last (To_String (UTypes (Cand (I)).Name))
                                & "'Class then");
                   Append_Decl ("         return "
                                & Method_Impl_Name (DN, Cand (I)) & " ("
-                               & To_String (UTypes (Cand (I)).Name) & " ("
+                               & Ada_Last (To_String (UTypes (Cand (I)).Name)) & " ("
                                & Rcvr & ")"
                                & (if NArg > 1
                                   then ", " & To_String (ArgL)
@@ -1113,7 +1131,7 @@ package body O2c_Compiler is
                Append_Decl ("      else");
             end if;
             Append_Decl ("         return " & Method_Impl_Name (DN, B)
-                         & " (" & To_String (UTypes (B).Name) & " (" & Rcvr
+                         & " (" & Ada_Last (To_String (UTypes (B).Name)) & " (" & Rcvr
                          & ")"
                          & (if NArg > 1 then ", " & To_String (ArgL) else "")
                          & ");");
@@ -1192,7 +1210,8 @@ package body O2c_Compiler is
                if Length (S) > 0 then
                   S := S & ", ";
                end if;
-               S := S & To_String (UTypes (U).F (F).Name) & " => "
+               S := S & Ada_Id (To_String (UTypes (U).F (F).Name))
+                 & " => "
                  & (if UTypes (U).F (F).UT /= 0
                     then Value_Init (UTypes (U).F (F).UT)
                     else Scalar_Init (UTypes (U).F (F).Typ));
@@ -1348,7 +1367,8 @@ package body O2c_Compiler is
                     & "' of " & To_String (UTypes (FO).Name)
                     & " is not exported";
                end if;
-               D.Text := D.Text & "." & To_String (UTypes (FO).F (F).Name);
+               D.Text := D.Text & "."
+                 & Ada_Id (To_String (UTypes (FO).F (F).Name));
                if UTypes (FO).F (F).UT = 0 then
                   D.K := D_Scalar;
                   D.Sc := UTypes (FO).F (F).Typ;
@@ -1685,11 +1705,11 @@ package body O2c_Compiler is
          --  dynamic dispatch: tag chain, deepest override first
          for I in 1 .. N_C loop
             Append_Body ("      " & (if I = 1 then "if " else "elsif ")
-                         & Recv & " in " & To_String (UTypes (Cand (I)).Name)
+                         & Recv & " in " & Ada_Last (To_String (UTypes (Cand (I)).Name))
                          & "'Class then");
             Append_Body ("         "
                          & Method_Impl_Name (MName, Cand (I)) & " ("
-                         & To_String (UTypes (Cand (I)).Name) & " (" & Recv
+                         & Ada_Last (To_String (UTypes (Cand (I)).Name)) & " (" & Recv
                          & ")"
                          & (if N_A > 0 then ", " & To_String (ArgT) else "")
                          & ");");
@@ -1697,7 +1717,7 @@ package body O2c_Compiler is
          Append_Body ("      else");
          Append_Body ("         "
                       & Method_Impl_Name (MName, BaseB) & " ("
-                      & To_String (UTypes (BaseB).Name) & " (" & Recv & ")"
+                      & Ada_Last (To_String (UTypes (BaseB).Name)) & " (" & Recv & ")"
                       & (if N_A > 0 then ", " & To_String (ArgT) else "")
                       & ");");
          Append_Body ("      end if;");
@@ -1707,7 +1727,8 @@ package body O2c_Compiler is
             RecvA : String := Recv;
          begin
             if Td /= 0 then
-               RecvA := To_String (UTypes (BaseB).Name) & " (" & Recv & ")";
+               RecvA := Ada_Last (To_String (UTypes (BaseB).Name))
+                 & " (" & Recv & ")";
             end if;
             Append_Body ("      " & Method_Impl_Name (MName, BaseB)
                          & " (" & RecvA
@@ -2151,7 +2172,7 @@ package body O2c_Compiler is
                                  end if;
                                  declare
                                     D : Desig := Parse_Rec_Ptr_Chain
-                                      (FNm & "." & MName, U);
+                                      (FNm & "." & Ada_Id (MName), U);
                                  begin
                                     if D.K = D_Scalar then
                                        R.Typ := D.Sc;
@@ -3165,7 +3186,7 @@ package body O2c_Compiler is
                   end if;
                   RVar_Specs (RVar_N) := To_Unbounded_String
                     ("   " & Ada_Id (To_String (Names (I))) & " : "
-                     & To_String (UTypes (UT).Name) & " := "
+                     & Ada_Last (To_String (UTypes (UT).Name)) & " := "
                      & To_String (Init_Txt) & ";");
                   declare
                      E : X_Entry :=
@@ -3176,9 +3197,10 @@ package body O2c_Compiler is
                      X_Add (To_String (Mod_Name), E);
                   end;
                else
-                  Append_Decl ("   " & To_String (Names (I)) & " : "
-                               & To_String (UTypes (UT).Name) & " := "
-                               & To_String (Init_Txt) & ";");
+                  Append_Decl ("   " & Ada_Id (To_String (Names (I)))
+                               & " : "
+                               & Ada_Last (To_String (UTypes (UT).Name))
+                               & " := " & To_String (Init_Txt) & ";");
                end if;
             end loop;
          else
@@ -3341,7 +3363,8 @@ package body O2c_Compiler is
                     & "pointer (M26)";
                end if;
                UTypes (UTI).Ptr_Tgt := TGT;
-               Append_Decl ("   type " & Name & " is access all " & TName
+               Append_Decl ("   type " & Ada_Id (Name)
+                         & " is access all " & Ada_Last (TName)
                          & "'Class;");
             end if;
          end;
@@ -3516,29 +3539,32 @@ package body O2c_Compiler is
                  and then To_String (UTypes (P).Pend_Nm) = Name
                then
                   if First_Pend then
-                     Append_Decl ("   type " & Name & ";");
+                     Append_Decl ("   type " & Ada_Id (Name) & ";");
                      First_Pend := False;
                   end if;
                   UTypes (P).Ptr_Tgt := UTI;
                   UTypes (P).Pend := False;
-                  Append_Decl ("   type " & To_String (UTypes (P).Name)
-                               & " is access all " & Name & "'Class;");
+                  Append_Decl ("   type "
+                               & Ada_Id (To_String (UTypes (P).Name))
+                               & " is access all " & Ada_Id (Name)
+                               & "'Class;");
                end if;
             end loop;
          end;
-         Append_Decl ("   type " & Name
+         Append_Decl ("   type " & Ada_Id (Name)
                       & (if UTypes (UTI).Is_Ext then
-                           " is new " & To_String
-                             (UTypes (UTypes (UTI).Parent).Name)
+                           " is new " & Ada_Last (To_String
+                             (UTypes (UTypes (UTI).Parent).Name))
                            & " with record"
                          else " is tagged record"));
          for F in 1 .. UTypes (UTI).N_F loop
             declare
                Fl : UField renames UTypes (UTI).F (F);
             begin
-               Append_Decl ("      " & To_String (Fl.Name) & " : "
+               Append_Decl ("      " & Ada_Id (To_String (Fl.Name))
+                            & " : "
                             & (if Fl.UT /= 0
-                              then To_String (UTypes (Fl.UT).Name)
+                              then Ada_Last (To_String (UTypes (Fl.UT).Name))
                               else Ada_Type (Fl.Typ))
                             & " := " & Field_Init (Fl) & ";");
             end;
@@ -3578,7 +3604,8 @@ package body O2c_Compiler is
       begin
          if I = 1 and then Recv_UT /= 0 then
             --  method receiver: class-wide view of the bound record (M13)
-            return To_String (UTypes (Recv_UT).Name) & "'Class";
+            return Ada_Last (To_String (UTypes (Recv_UT).Name))
+              & "'Class";
          end if;
          if POpen (I) then
             if PTyp (I) = T_Char then
@@ -3589,7 +3616,7 @@ package body O2c_Compiler is
                return "O2c_Bool_Arr";
             end if;
          elsif PUT (I) /= 0 then
-            return To_String (UTypes (PUT (I)).Name);
+            return Ada_Last (To_String (UTypes (PUT (I)).Name));
          else
             return Ada_Type (PTyp (I));
          end if;
@@ -4755,8 +4782,8 @@ package body O2c_Compiler is
                           & "here (M26)";
                      end if;
                      Append_Body ("      " & To_String (D.Text) & " := new "
-                                  & To_String
-                                    (UTypes (UTypes (D.UT).Ptr_Tgt).Name)
+                                  & Ada_Last (To_String
+                                    (UTypes (UTypes (D.UT).Ptr_Tgt).Name))
                                   & ";");
                   end;
                end;
@@ -4906,7 +4933,8 @@ package body O2c_Compiler is
                                           then
                                              Rhs := To_Unbounded_String
                                                (MN2 & "."
-                                                & Cur.Text (1 .. Cur.Len));
+                                                & Ada_Id
+                                                    (Cur.Text (1 .. Cur.Len)));
                                           end if;
                                           Next;
                                        end;
@@ -5586,7 +5614,8 @@ package body O2c_Compiler is
                                           if TY = Syms (Idx).UT then
                                              Rhs := To_Unbounded_String
                                                (MN2 & "."
-                                                & Cur.Text (1 .. Cur.Len));
+                                                & Ada_Id
+                                                    (Cur.Text (1 .. Cur.Len)));
                                           end if;
                                        end;
                                     end if;
@@ -5937,7 +5966,7 @@ package body O2c_Compiler is
                      if N_C > 0 then
                         for I in 1 .. N_C loop
                            Append_Decl ("      if " & Rcvr & " in "
-                                        & To_String (UTypes (Cand (I)).Name)
+                                        & Ada_Last (To_String (UTypes (Cand (I)).Name))
                                         & "'Class then");
                            Append_Decl ("         "
                                         & Method_Impl_Name (DN, Cand (I))
@@ -6011,7 +6040,7 @@ package body O2c_Compiler is
                     & PSh & " (" & RcvrN
                     & (if Syms (SIdx).P (1).By_Ref
                        then " : in out " else " : ")
-                    & PNm & "'Class";
+                    & Ada_Last (PNm) & "'Class";
                   for I in 2 .. Syms (SIdx).Params loop
                      Hdr := Hdr & "; " & To_String (Syms (SIdx).P (I).Name)
                        & (if Syms (SIdx).P (I).By_Ref
@@ -6068,7 +6097,7 @@ package body O2c_Compiler is
                         Append_Decl ("      "
                                      & (if I = 1 then "if " else "elsif ")
                                      & RcvrN & " in "
-                                     & To_String (UTypes (Cand (I)).Name)
+                                     & Ada_Last (To_String (UTypes (Cand (I)).Name))
                                      & "'Class then");
                         Append_Decl ("         " & Rpre
                                      & Method_Impl_Name (DN, Cand (I))
@@ -6084,11 +6113,11 @@ package body O2c_Compiler is
                   --  this module's override subtree first, then the
                   --  base module's dispatcher for everything else
                   Append_Decl ("         if " & RcvrN & " in "
-                               & To_String (UTypes (R).Name)
+                               & Ada_Last (To_String (UTypes (R).Name))
                                & "'Class then");
                   Append_Decl ("            " & Rpre
                                & Method_Impl_Name (DN, R) & " ("
-                               & To_String (UTypes (R).Name) & " (" & RcvrN
+                               & Ada_Last (To_String (UTypes (R).Name)) & " (" & RcvrN
                                & ")"
                                & (if Syms (SIdx).Params > 1
                                   then ", " & To_String (ArgL)

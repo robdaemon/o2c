@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M42 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M43 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M42 status
+## M43 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,26 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M43 — Ada-side mangling reaches the whole exported interface**: the
+`Ada_Id`/`Ada_Last` manglers now cover everything an exported interface
+can put into generated Ada — record **fields** (declarations,
+designator chains, value-init and literal aggregates), **exported types**
+(record/pointer/forward declarations, extension parents, parameter and
+dispatcher receiver types, view conversions, class-wide membership
+tests, `NEW` targets, imported-type variable declarations), **exported
+CONST/VARIABLE** names (including RECORD VARIABLEs and whole-record
+copies from them) and **method dispatchers/shadows**.  Oberon-2 keeps
+every name as written; only the Ada spelling changes (`Range` →
+`Range_o2c`, `Pragma_Disp_O2c_Range` stays composed and legal).
+Verified with a scratch copy of the demo in which *every* exported name
+is an Ada reserved word (`Point`→`Range`, `Scale`→`New`, `Sum`→`Pragma`,
+`Pi`→`Delay`, `count`→`Task`, `marks`→`Access`, `origin`→`Body`,
+`Sqr`→`Delta`, `Translate`→`Select`, `Bump`→`Reverse`,
+`SetBase`→`Accept`, `Next`→`Abort`, private field `tag`→`Raise`): it
+generates, compiles and runs on the host with the demo's exact output
+(`... O2cW! 71 73 75 77 406`), and `tests/run_m1.sh` still PASSes for
+the normal demo.
 
 **M42 — Files write path, and Ada-side reserved-word mangling**: the
 builtin `Files` gains `Write*(var r: Rider; ch: char)`,
