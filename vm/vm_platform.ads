@@ -13,4 +13,10 @@ package VM_Platform is
    --  Terminate the process, reporting success or failure.
    procedure Exit_With (Ok : Boolean);
 
+   --  Turn a path the user typed (or a default path) into one the file
+   --  server understands.  The guest resolves it against the current
+   --  directory via Aegir_User.CLI, the way every CLI program does; on the
+   --  host a path is already a host path, so this is the identity.
+   function Resolve_Path (Path : String) return String;
+
 end VM_Platform;

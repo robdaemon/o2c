@@ -10,6 +10,11 @@ package body VM_Platform is
       Aegir_User.CLI.Init;
    end Init;
 
+   function Resolve_Path (Path : String) return String is
+   begin
+      return Aegir_User.CLI.Resolve_Path (Path);
+   end Resolve_Path;
+
    procedure Exit_With (Ok : Boolean) is
    begin
       if Ok then

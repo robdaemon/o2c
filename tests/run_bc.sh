@@ -32,7 +32,7 @@ if ! ( cd "$ROOT" && make tools-host vm-host AEGIR_ROOT="$AEGIR_ROOT" >"$WORK/bu
 fi
 
 #  ---- positives: source -> image -> VM output vs golden -------------------
-for name in sum ifelsif; do
+for name in sum ifelsif vmgreet; do
    src="$ROOT/tests/bc/$name.ob2"
    gold="$ROOT/tests/bc/$name.out"
    if ! timeout 120 "$FRONT" "$src" "$WORK/$name.obc" >"$WORK/$name.compile" 2>&1; then

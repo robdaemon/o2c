@@ -22,6 +22,13 @@ package body OBC_VM is
    --  platform-specific without touching the interpreter
    subtype Byte_Array is VM_IO.Byte_Array;
 
+   --  The image slab and the per-payload copies are HEAP objects, not
+   --  stack ones: a guest user stack is 64 pages (256 KiB, the kernel's
+   --  User_Stack_Pages), while an image may be up to Max_File.  Declaring
+   --  them locally overflowed the stack and trapped on the first store
+   --  into Run's frame.
+   type Byte_Array_Access is access Byte_Array;
+
    use type VM_IO.Byte;   --  Byte is VM_IO's type now
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
@@ -111,6 +118,10 @@ package body OBC_VM is
       Consts_Len  : Natural := 0;
       Code_Off    : Natural := 0;
       Code_Len    : Natural := 0;
+      --  The CODE and CONST payloads as 0-based heap copies, shared by the
+      --  verifier and the interpreter (see the note in Decode).
+      Code        : Byte_Array_Access := null;
+      Consts_Copy : Byte_Array_Access := null;
    end record;
 
    --  ---- diagnostics ----------------------------------------------------
@@ -231,12 +242,18 @@ package body OBC_VM is
          return Bad_Code;
       end if;
 
+      --  One 0-based copy per payload, on the HEAP: the guest user stack
+      --  is 64 pages (256 KiB) while an image may be up to Max_File, and
+      --  a slice of the slab cannot be used directly because it would keep
+      --  the slab's 'First (the format's offsets are payload-relative).
+      Img.Code := new Byte_Array (0 .. Img.Code_Len - 1);
+      Img.Code.all := Data (Img.Code_Off .. Img.Code_Off + Img.Code_Len - 1);
+      Img.Consts_Copy := new Byte_Array (0 .. Img.Consts_Len - 1);
+      Img.Consts_Copy.all :=
+        Data (Img.Consts_Off .. Img.Consts_Off + Img.Consts_Len - 1);
+
       declare
-         --  a copy re-based to 0: the format's offsets are relative to the
-         --  section payload, and a slice of Data would keep Data's 'First
-         --  (every offset read would then be out of range).
-         Code : constant Byte_Array (0 .. Img.Code_Len - 1) :=
-           Data (Img.Code_Off .. Img.Code_Off + Img.Code_Len - 1);
+         Code : Byte_Array renames Img.Code.all;
          N_Procs : constant Natural := Natural (LE32 (Code, 0));
       begin
          if N_Procs /= 1 then
@@ -447,10 +464,8 @@ package body OBC_VM is
 
    --  ---- interpreter ----------------------------------------------------
    function Execute (Data : Byte_Array; Img : Image_Info) return Status is
-      Code : constant Byte_Array (0 .. Img.Code_Len - 1) :=
-        Data (Img.Code_Off .. Img.Code_Off + Img.Code_Len - 1);
-      Consts : constant Byte_Array (0 .. Img.Consts_Len - 1) :=
-        Data (Img.Consts_Off .. Img.Consts_Off + Img.Consts_Len - 1);
+      Code   : Byte_Array renames Img.Code.all;
+      Consts : Byte_Array renames Img.Consts_Copy.all;
       Stack   : array (0 .. Max_Stack - 1) of U64 := (others => 0);
       Globals : array (0 .. Max_Globals - 1) of U64 := (others => 0);
       SP      : Natural := 0;
@@ -628,7 +643,7 @@ package body OBC_VM is
    end Execute;
 
    function Run (Path : String) return Status is
-      Data : Byte_Array (0 .. Max_File - 1) := (others => 0);
+      Data : constant Byte_Array_Access := new Byte_Array (0 .. Max_File - 1);
       Len  : Natural;
       St   : Status;
       Img  : Image_Info;
@@ -637,7 +652,7 @@ package body OBC_VM is
       declare
          Io_St : VM_IO.Status;
       begin
-         VM_IO.Read_File (Path, Data, Len, Io_St);
+         VM_IO.Read_File (Path, Data.all, Len, Io_St);
          case Io_St is
             when VM_IO.Ok =>
                null;
@@ -652,26 +667,19 @@ package body OBC_VM is
          return St;
       end if;
       Phase := 1;
-      St := Decode (Data, Len, Img);
+      St := Decode (Data.all, Len, Img);
       if St /= Ok then
          Note (Image (St) & ": " & Path);
          return St;
       end if;
       Phase := 2;
-      declare
-         --  a copy, not a conversion: a conversion keeps the operand's
-         --  bounds, and the format's offsets are relative to the payload.
-         Code : Byte_Array (0 .. Img.Code_Len - 1);
-      begin
-         Code := Data (Img.Code_Off .. Img.Code_Off + Img.Code_Len - 1);
-         St := Verify (Code, Img);
-      end;
+      St := Verify (Img.Code.all, Img);
       if St /= Ok then
          Note (Image (St) & ": " & Path);
          return St;
       end if;
       Phase := 3;
-      return Execute (Data (0 .. Len - 1), Img);
+      return Execute (Data.all, Img);
    exception
       --  A malformed image must be *rejected*, never crash the VM: the
       --  spec's verification rules are checked, but a bug in the checks

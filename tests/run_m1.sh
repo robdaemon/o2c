@@ -43,7 +43,10 @@ boot_once() {  # $1 = extra make vars, $2 = marker
 }
 
 echo "run_m1: building o2c.elf"
-make -C "$ROOT" build AEGIR_ROOT="$AEGIR_ROOT" >/dev/null
+#  build the Ada backend, the Aegir VM and the guest fixture image: the
+#  min-mode initrd stages vm.elf as Tests/Vm and the fixture at
+#  Tests/O2cBC/VmGreet.obc (see the aegir Makefile's O2C_VM_* vars).
+make -C "$ROOT" build vm-aegir vm-fixture AEGIR_ROOT="$AEGIR_ROOT" >/dev/null
 
 echo "run_m1: boot 1/2 - o2c compiles the demo modules (retry on torn capture)"
 ATT=0
@@ -156,6 +159,18 @@ fi
 if ! grep -aq '8310' "$RUNTIME_LOG" || ! grep -aq '8315' "$RUNTIME_LOG" \
    || ! grep -aq '8320' "$RUNTIME_LOG" || ! grep -aq -- '-123' "$RUNTIME_LOG"; then
    echo "run_m1: Convert demo output not seen" >&2
+   tail -30 "$RUNTIME_LOG" >&2
+   exit 1
+fi
+
+#  M53: the VM ran an image inside the guest.  The fixture's output line is
+#  unique on purpose, so it cannot be confused with the Ada backend's own
+#  markers - seeing it proves the Aegir build of the VM loaded, verified and
+#  executed a .obc image under Aegir.  (The image is emitted by the host
+#  front end for now; wiring the in-guest compiler to write its own .obc is
+#  the next step, at which point the fixture disappears.)
+if ! grep -aq 'vm elf ok 55' "$RUNTIME_LOG"; then
+   echo "run_m1: the staged VM did not run its image in-guest" >&2
    tail -30 "$RUNTIME_LOG" >&2
    exit 1
 fi

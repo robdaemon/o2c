@@ -8,6 +8,9 @@ package body VM_Platform is
       null;
    end Init;
 
+   function Resolve_Path (Path : String) return String is
+     (Path);
+
    procedure Exit_With (Ok : Boolean) is
    begin
       if Ok then
