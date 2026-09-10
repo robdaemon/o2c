@@ -2123,6 +2123,54 @@ package body O2c_Compiler is
                R.Lit := False;
                return R;
             end if;
+            if To_String (Mod_Name) = "XYplane"
+              and then (Eq_No_Case (Cur.Text (1 .. Cur.Len), "PLANEISDOT")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
+                                            "PLANEKEY"))
+            then
+               --  M49 FFI: plane query + key (builtin XYplane only)
+               declare
+                  Is_Dot : constant Boolean :=
+                    Eq_No_Case (Cur.Text (1 .. Cur.Len), "PLANEISDOT");
+                  A1, A2 : Expr_Rec;
+               begin
+                  Next;
+                  if not Is_Dot and then Cur.Kind /= Lex.Tok_LParen then
+                     --  PlaneKey takes no arguments: written bare
+                     R.Text := To_Unbounded_String ("O2c_Plane_Key");
+                     R.Typ := T_Char;
+                     R.Lit := False;
+                     return R;
+                  end if;
+                  Expect (Lex.Tok_LParen, "'(' after the plane call");
+                  Next;
+                  A1 := Parse_Expr;
+                  if A1.Typ /= T_Int then
+                     raise O2c_Error with "plane coordinates are INTEGER";
+                  end if;
+                  if Is_Dot then
+                     Expect (Lex.Tok_Comma, "','");
+                     Next;
+                     A2 := Parse_Expr;
+                     if A2.Typ /= T_Int then
+                        raise O2c_Error with "plane coordinates are INTEGER";
+                     end if;
+                  end if;
+                  Expect (Lex.Tok_RParen, "')'");
+                  Next;
+                  if Is_Dot then
+                     R.Text := To_Unbounded_String
+                       ("O2c_Plane_IsDot (" & To_String (A1.Text) & ", "
+                        & To_String (A2.Text) & ")");
+                     R.Typ := T_Bool;
+                  else
+                     R.Text := To_Unbounded_String ("O2c_Plane_Key");
+                     R.Typ := T_Char;
+                  end if;
+               end;
+               R.Lit := False;
+               return R;
+            end if;
             if To_String (Mod_Name) = "Input"
               and then (Eq_No_Case (Cur.Text (1 .. Cur.Len), "INAVAIL")
                         or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
@@ -4860,7 +4908,54 @@ package body O2c_Compiler is
          elsif Cur.Kind = Lex.Tok_Ident then
             H_Len := Cur.Len;
             Head (1 .. H_Len) := Cur.Text (1 .. H_Len);
-            if To_String (Mod_Name) = "In"
+            if To_String (Mod_Name) = "XYplane"
+              and then (Eq_No_Case (Head (1 .. H_Len), "PLANEOPEN")
+                        or else Eq_No_Case (Head (1 .. H_Len),
+                                            "PLANECLEAR")
+                        or else Eq_No_Case (Head (1 .. H_Len), "PLANEDOT"))
+            then
+               --  M49 FFI: plane operations (builtin XYplane only)
+               if Eq_No_Case (Head (1 .. H_Len), "PLANECLEAR") then
+                  Next;
+                  if Cur.Kind = Lex.Tok_LParen then
+                     Next;
+                     Expect (Lex.Tok_RParen, "')'");
+                     Next;
+                  end if;
+                  Append_Body ("      O2c_Plane_Clear;");
+               else
+                  declare
+                     Is_Open : constant Boolean :=
+                       Eq_No_Case (Head (1 .. H_Len), "PLANEOPEN");
+                     P1, P2, P3 : Expr_Rec;
+                  begin
+                     Next;
+                     Expect (Lex.Tok_LParen, "'(' after the plane call");
+                     Next;
+                     P1 := Parse_Expr;
+                     Expect (Lex.Tok_Comma, "','");
+                     Next;
+                     P2 := Parse_Expr;
+                     if Is_Open then
+                        Expect (Lex.Tok_RParen, "')'");
+                        Next;
+                        Append_Body ("      O2c_Plane_Open ("
+                                     & To_String (P1.Text) & ", "
+                                     & To_String (P2.Text) & ");");
+                     else
+                        Expect (Lex.Tok_Comma, "','");
+                        Next;
+                        P3 := Parse_Expr;
+                        Expect (Lex.Tok_RParen, "')'");
+                        Next;
+                        Append_Body ("      O2c_Plane_Dot ("
+                                     & To_String (P1.Text) & ", "
+                                     & To_String (P2.Text) & ", "
+                                     & To_String (P3.Text) & ");");
+                     end if;
+                  end;
+               end if;
+            elsif To_String (Mod_Name) = "In"
               and then (Eq_No_Case (Head (1 .. H_Len), "INOPEN")
                         or else Eq_No_Case (Head (1 .. H_Len), "INSTRING")
                         or else Eq_No_Case (Head (1 .. H_Len), "INNAME"))
@@ -6904,6 +6999,10 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                S := S & "with Aegir_User.CLI;" & ASCII.LF
                  & "with Aegir_User.Syscalls;" & ASCII.LF;
             end if;
+            if To_String (Mod_Name) = "XYplane" then
+               S := S & "with Aegir_User.CLI;" & ASCII.LF
+                 & "with Interfaces;" & ASCII.LF;
+            end if;
             if Length (S) > 0 then
                S := S & ASCII.LF;
             end if;
@@ -7321,6 +7420,97 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "      Aegir_User.Syscalls.Read_Clock (Sec, Ns);" & ASCII.LF
                  & "      return Long_Integer (Sec) * 1000 + Long_Integer (Ns / 1000000);" & ASCII.LF
                  & "   end O2c_In_Time;" & ASCII.LF
+                 & "";
+            end if;
+            if To_String (Mod_Name) = "XYplane" then
+               --  M49 FFI: the Oakwood XYplane drawing plane lives in
+               --  the module body as a byte array (640x400 plane
+               --  limits); Key drains stdin like the Input module.
+               S := S
+                 & "   use type Interfaces.Unsigned_8;" & ASCII.LF
+                 & "   Plane_W : Natural := 0;" & ASCII.LF
+                 & "   Plane_H : Natural := 0;" & ASCII.LF
+                 & "   Plane_Max : constant := 640 * 400;" & ASCII.LF
+                 & "   Plane : array (0 .. Plane_Max - 1) of Interfaces.Unsigned_8 :=" & ASCII.LF
+                 & "     (others => 0);" & ASCII.LF
+                 & "   procedure O2c_Plane_Open (W : Integer; H : Integer) is" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      if W > 0 and then H > 0 and then W * H <= Plane_Max then" & ASCII.LF
+                 & "         Plane_W := W;" & ASCII.LF
+                 & "         Plane_H := H;" & ASCII.LF
+                 & "      else" & ASCII.LF
+                 & "         Plane_W := 0;" & ASCII.LF
+                 & "         Plane_H := 0;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      Plane := (others => 0);" & ASCII.LF
+                 & "   end O2c_Plane_Open;" & ASCII.LF
+                 & "   procedure O2c_Plane_Clear is" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      Plane := (others => 0);" & ASCII.LF
+                 & "   end O2c_Plane_Clear;" & ASCII.LF
+                 & "   procedure O2c_Plane_Dot (X : Integer; Y : Integer; Mode : Integer) is" & ASCII.LF
+                 & "      Idx : Integer;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      if Plane_W = 0 or else X < 0 or else Y < 0" & ASCII.LF
+                 & "        or else X >= Plane_W or else Y >= Plane_H" & ASCII.LF
+                 & "      then" & ASCII.LF
+                 & "         return;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      Idx := Y * Plane_W + X;" & ASCII.LF
+                 & "      if Mode = 0 then" & ASCII.LF
+                 & "         Plane (Idx) := 0;" & ASCII.LF
+                 & "      else" & ASCII.LF
+                 & "         Plane (Idx) := 1;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "   end O2c_Plane_Dot;" & ASCII.LF
+                 & "   function O2c_Plane_IsDot (X : Integer; Y : Integer) return Boolean is" & ASCII.LF
+                 & "      Idx : Integer;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      if Plane_W = 0 or else X < 0 or else Y < 0" & ASCII.LF
+                 & "        or else X >= Plane_W or else Y >= Plane_H" & ASCII.LF
+                 & "      then" & ASCII.LF
+                 & "         return False;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      Idx := Y * Plane_W + X;" & ASCII.LF
+                 & "      return Plane (Idx) /= 0;" & ASCII.LF
+                 & "   end O2c_Plane_IsDot;" & ASCII.LF
+                 & "   Key_Buf : String (1 .. 4096);" & ASCII.LF
+                 & "   Key_Len : Natural := 0;" & ASCII.LF
+                 & "   Key_Pos : Natural := 1;" & ASCII.LF
+                 & "   Key_Rdy : Boolean := False;" & ASCII.LF
+                 & "   procedure O2c_Key_Load is" & ASCII.LF
+                 & "      S : String (1 .. 512);" & ASCII.LF
+                 & "      L : Natural;" & ASCII.LF
+                 & "      E : Boolean;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      Aegir_User.CLI.Init;" & ASCII.LF
+                 & "      if Key_Rdy then" & ASCII.LF
+                 & "         return;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      Key_Rdy := True;" & ASCII.LF
+                 & "      loop" & ASCII.LF
+                 & "         Aegir_User.CLI.Get_Line (S, L, E);" & ASCII.LF
+                 & "         exit when E;" & ASCII.LF
+                 & "         exit when Key_Len + L + 2 > 4096;" & ASCII.LF
+                 & "         for I in 1 .. L loop" & ASCII.LF
+                 & "            Key_Len := Key_Len + 1;" & ASCII.LF
+                 & "            Key_Buf (Key_Len) := S (I);" & ASCII.LF
+                 & "         end loop;" & ASCII.LF
+                 & "         Key_Len := Key_Len + 1;" & ASCII.LF
+                 & "         Key_Buf (Key_Len) := ASCII.LF;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "   end O2c_Key_Load;" & ASCII.LF
+                 & "   function O2c_Plane_Key return Character is" & ASCII.LF
+                 & "      C : Character;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      O2c_Key_Load;" & ASCII.LF
+                 & "      if Key_Pos > Key_Len then" & ASCII.LF
+                 & "         return Character'Val (0);   --  no keyboard in this ABI" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      C := Key_Buf (Key_Pos);" & ASCII.LF
+                 & "      Key_Pos := Key_Pos + 1;" & ASCII.LF
+                 & "      return C;" & ASCII.LF
+                 & "   end O2c_Plane_Key;" & ASCII.LF
                  & "";
             end if;
             if To_String (Mod_Name) = "Reals" then
@@ -8101,6 +8291,45 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
    end Oak_Input_Src;
 
 
+   function Oak_XYplane_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module XYplane;" & ASCII.LF;
+      S := S & "const draw* = 1;" & ASCII.LF;
+      S := S & "const erase* = 0;" & ASCII.LF;
+      S := S & "var X*: integer;" & ASCII.LF;
+      S := S & "var Y*: integer;" & ASCII.LF;
+      S := S & "var W*: integer;" & ASCII.LF;
+      S := S & "var H*: integer;" & ASCII.LF;
+      S := S & "procedure Open*;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  X := 0;" & ASCII.LF;
+      S := S & "  Y := 0;" & ASCII.LF;
+      S := S & "  W := 640;" & ASCII.LF;
+      S := S & "  H := 400;" & ASCII.LF;
+      S := S & "  PlaneOpen(W, H)" & ASCII.LF;
+      S := S & "end Open;" & ASCII.LF;
+      S := S & "procedure Clear*;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  PlaneClear" & ASCII.LF;
+      S := S & "end Clear;" & ASCII.LF;
+      S := S & "procedure Dot*(x: integer; y: integer; mode: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  PlaneDot(x, y, mode)" & ASCII.LF;
+      S := S & "end Dot;" & ASCII.LF;
+      S := S & "procedure IsDot*(x: integer; y: integer): boolean;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return PlaneIsDot(x, y)" & ASCII.LF;
+      S := S & "end IsDot;" & ASCII.LF;
+      S := S & "procedure Key*: char;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return PlaneKey" & ASCII.LF;
+      S := S & "end Key;" & ASCII.LF;
+      S := S & "end XYplane." & ASCII.LF;
+      return To_String (S);
+   end Oak_XYplane_Src;
+
+
    function Compile_Multi (Main_Source : String; Libs : Lib_Array;
                            N_Libs : Natural; Count : out Natural)
                            return Unit_Array
@@ -8188,6 +8417,14 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Input_Src, True, M_T, S_T, B_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
+      if Length (B_T) > 0 then
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
+      N_Prov := N_Prov + 1;
+      Provided (N_Prov) := Mod_Name;
+
+      Compile_Module (Oak_XYplane_Src, True, M_T, S_T, B_T);
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);

@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M48 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M49 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M48 status
+## M49 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,29 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M49 — Oakwood `XYplane` module (drawing plane)**: `draw*`/`erase*`,
+the plane variables `X*`, `Y*`, `W*`, `H*`, `Open`, `Clear`,
+`Dot(x, y, mode)`, `IsDot(x, y): BOOLEAN` and `Key(): CHAR`.  The
+plane is a real 640x400 byte array living in the builtin's package
+body (declared with `use type Interfaces.Unsigned_8`, bounded by the
+plane limits, dots outside the plane ignored); `Key` drains stdin the
+way `Input` does and answers `CHR(0)` when nothing is queued.  It is
+a *drawing plane*, not a window — presenting it would need the
+display service — so `Open` fixes `W`/`H` at 640x400 and `X`/`Y` at
+the origin.
+
+  That completes the **Oakwood basic module set**: `XYplane`,
+  `Input`, `In`, `Out`, `Files`, `Strings`, `Math` and `MathL` all
+  ship (plus our documented extensions `Reals` and `Term`).
+
+  Capacity note: `Max_Units` was raised 24 -> 64 because units are
+  counted per generated *file* (spec and body separately) and the
+  builtin set alone now costs ~20 slots — the same class of silent
+  ceiling as `Max_Imports` in M46.
+
+  Demo markers `8100`/`8103`/`8105` (dot set, dot erased, plane
+  cleared) are asserted by `run_m1`.
 
 **M48 — Oakwood `Input` module**: `TimeUnit*` (1000 ms), `Available`,
 `Read(VAR ch: CHAR)`, `Time(): LONGINT`, `Mouse(VAR keys: SET; VAR x, y:

@@ -1,6 +1,6 @@
 module Hello;
 import Out, Geom, Geo, Math, MathL, Strings, Texts, Files, In,
-       Input, Reals, Term;
+       Input, Reals, Term, XYplane;
 
 type Vector = array 4 of integer;
 type Pair = record a, b: integer end;
@@ -463,6 +463,16 @@ begin
   Out.LongReal(MathL.power(2.0D0, 3.0D0), 0);
   Out.Ln;
   Out.LongReal(MathL.pi, 0);
+  Out.Ln;
+  XYplane.Open;
+  XYplane.Dot(3, 4, XYplane.draw);
+  if XYplane.IsDot(3, 4) then Out.Int(8100, 0) else Out.Int(8101, 0) end;
+  Out.Ln;
+  XYplane.Dot(3, 4, XYplane.erase);
+  if XYplane.IsDot(3, 4) then Out.Int(8102, 0) else Out.Int(8103, 0) end;
+  Out.Ln;
+  XYplane.Clear;
+  if XYplane.IsDot(3, 4) then Out.Int(8104, 0) else Out.Int(8105, 0) end;
   Out.Ln;
   Out.Int(Geom.SumArr(w), 0);
   Out.Ln

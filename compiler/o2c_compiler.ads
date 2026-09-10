@@ -33,7 +33,10 @@ package O2c_Compiler is
 
    type Lib_Array is array (1 .. Max_Libs) of Lib_Rec;
 
-   Max_Units : constant := 24;
+   --  Units are counted per generated FILE (spec + body separately),
+   --  so the builtin set alone costs ~20 slots.  M49: raised from 24
+   --  with headroom now that XYplane joined the builtins.
+   Max_Units : constant := 64;
 
    type Unit_Rec is record
       File : Ada.Strings.Unbounded.Unbounded_String;
