@@ -279,7 +279,7 @@ package body O2c_Lexer is
             T.Text (N) := C;
             Advance;
          end loop;
-         --  REAL literals: digits '.' digits (M18)
+         --  REAL/LONGREAL literals: digits ['.' digits] [E|D [sign] digits]
          if Peek = '.' and then Pos + 1 < Len
            and then Src (Pos + 2) in '0' .. '9'
          then
@@ -293,6 +293,41 @@ package body O2c_Lexer is
                T.Text (N) := C;
                Advance;
             end loop;
+         end if;
+         --  scale factor (M47): 'E'/'e' for REAL, 'D'/'d' for LONGREAL
+         if Peek in 'E' | 'e' | 'D' | 'd' then
+            declare
+               Mk : constant Character := Peek;
+               Sign : Character := ' ';
+               Has_Digit : Boolean := False;
+            begin
+               if Pos + 1 < Len and then Src (Pos + 2) in '+' | '-' then
+                  Sign := Src (Pos + 2);
+                  if Pos + 2 < Len and then Src (Pos + 3) in '0' .. '9' then
+                     Has_Digit := True;
+                  end if;
+               elsif Pos + 1 < Len and then Src (Pos + 2) in '0' .. '9'
+               then
+                  Has_Digit := True;
+               end if;
+               if Has_Digit then
+                  Advance;           --  the marker
+                  N := N + 1;
+                  T.Text (N) := Mk;
+                  if Sign /= ' ' then
+                     Advance;
+                     N := N + 1;
+                     T.Text (N) := Sign;
+                  end if;
+                  loop
+                     C := Peek;
+                     exit when not (C in '0' .. '9');
+                     N := N + 1;
+                     T.Text (N) := C;
+                     Advance;
+                  end loop;
+               end if;
+            end;
          end if;
          T.Kind := Tok_Number;
          T.Len := N;

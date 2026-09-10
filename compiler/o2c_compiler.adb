@@ -12,7 +12,7 @@ package body O2c_Compiler is
    --  T_Ptr marks a pointer-value operand (Ptr_UT names its pointer
    --  user type), T_Nil marks the NIL literal.
    type EType is (T_Int, T_Bool, T_Str, T_Char, T_Long, T_Set, T_Real,
-                  T_Ptr, T_Nil);
+                  T_Ptr, T_Nil, T_LReal);
 
    type Expr_Rec is record
       Text   : Unbounded_String;
@@ -259,6 +259,7 @@ package body O2c_Compiler is
    Used_Bool_Arr : Boolean := False;  --  need O2c_Bool_Arr base (M12)
    Used_Set      : Boolean := False;  --  need O2c_Set type + Interfaces
    Used_Real     : Boolean := False;  --  need O2c_Put_Real helper (M18)
+   Used_LReal    : Boolean := False;  --  need O2c_Put_LReal helper (M47)
    Used_StrCmp   : Boolean := False;  --  need O2c_S_Cmp helper (M33)
    Nested_Depth : Natural := 0;    --  nested PROCEDURE declarations (M32)
    Loop_Depth : Natural := 0;      --  open LOOP statements (EXIT target)
@@ -569,6 +570,7 @@ package body O2c_Compiler is
    function Scalar_Exportable (T : EType) return Boolean is
    begin
       return T = T_Int or else T = T_Long or else T = T_Real
+        or else T = T_LReal
         or else T = T_Char or else T = T_Bool;
    end Scalar_Exportable;
 
@@ -1003,6 +1005,7 @@ package body O2c_Compiler is
          when T_Long => return "Long_Integer";
          when T_Set  => return "O2c_Set";
          when T_Real => return "Float";
+         when T_LReal => return "Long_Float";
          when T_Ptr | T_Nil =>
             raise O2c_Error
               with "internal: Ada_Type on a pointer/NIL typing sentinel";
@@ -1193,6 +1196,8 @@ package body O2c_Compiler is
          return T_Set;
       elsif Eq_No_Case (Name, "REAL") then
          return T_Real;
+      elsif Eq_No_Case (Name, "LONGREAL") then
+         return T_LReal;          --  M47
       end if;
       return T_Str;               --  sentinel: not a builtin scalar
    end Builtin_Type_Of;
@@ -1201,7 +1206,7 @@ package body O2c_Compiler is
    begin
       case T is
          when T_Int | T_Long | T_Set => return "0";
-         when T_Real => return "0.0";
+         when T_Real | T_LReal => return "0.0";
          when T_Char => return "ASCII.NUL";
          when T_Bool => return "False";
          when others =>
@@ -1593,6 +1598,12 @@ package body O2c_Compiler is
          elsif Formal.Typ = T_Real and then A.Typ = T_Int then
             A.Text := To_Unbounded_String ("Float (" & To_String (A.Text)
                                            & ")");   --  int widens (M18)
+         elsif Formal.Typ = T_LReal and then A.Typ = T_Int then
+            A.Text := To_Unbounded_String ("Long_Float ("
+                                           & To_String (A.Text) & ")");
+         elsif Formal.Typ = T_LReal and then A.Typ = T_Real then
+            A.Text := To_Unbounded_String ("Long_Float ("
+                                           & To_String (A.Text) & ")");
          elsif A.Typ /= Formal.Typ then
             raise O2c_Error with "argument has the wrong type (line "
               & Natural'Image (Cur.Line) & ")";
@@ -1789,13 +1800,33 @@ package body O2c_Compiler is
    begin
       case Cur.Kind is
          when Lex.Tok_Number =>
-            R.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
-            R.Typ := T_Int;
-            for I in 1 .. Cur.Len loop
-               if Cur.Text (I) = '.' then
-                  R.Typ := T_Real;      --  REAL literal (M18)
+            declare
+               Raw : constant String := Cur.Text (1 .. Cur.Len);
+               Norm : String (1 .. Raw'Length);
+               Has_D : Boolean := False;
+               Has_Dot : Boolean := False;
+            begin
+               for I in Raw'Range loop
+                  case Raw (I) is
+                     when 'D' | 'd' =>
+                        Has_D := True;
+                        Norm (I) := 'E';     --  Ada spells it with E
+                     when '.' =>
+                        Has_Dot := True;
+                        Norm (I) := '.';
+                     when others =>
+                        Norm (I) := Raw (I);
+                  end case;
+               end loop;
+               R.Text := To_Unbounded_String (Norm);
+               if Has_D then
+                  R.Typ := T_LReal;             --  LONGREAL literal (M47)
+               elsif Has_Dot then
+                  R.Typ := T_Real;              --  REAL literal (M18)
+               else
+                  R.Typ := T_Int;
                end if;
-            end loop;
+            end;
             R.Lit := True;
             Next;
          when Lex.Tok_String =>
@@ -1928,16 +1959,17 @@ package body O2c_Compiler is
                Next;
                R := Parse_Factor;
                if R.Typ /= T_Int and then R.Typ /= T_Long
-                 and then R.Typ /= T_Real
+                 and then R.Typ /= T_Real and then R.Typ /= T_LReal
                then
                   raise O2c_Error with "unary sign needs an INTEGER, "
-                    & "LONGINT or REAL (line "
+                    & "LONGINT, REAL or LONGREAL (line "
                     & Natural'Image (Cur.Line) & ")";
                end if;
                R.Text := (if Neg then "-" else "") & "(" & R.Text & ")";
             end;
          when Lex.Tok_Ident =>
-            if To_String (Mod_Name) = "Math"
+            if (To_String (Mod_Name) = "Math"
+                or else To_String (Mod_Name) = "MathL")
               and then (Eq_No_Case (Cur.Text (1 .. Cur.Len), "POWER")
                         or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "EXP")
                         or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "LN")
@@ -1951,9 +1983,17 @@ package body O2c_Compiler is
                         or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
                                             "ARCTAN2"))
             then
-               --  M41 FFI: REAL transcendental calls (builtin Math only)
+               --  M41/M47 FFI: REAL/LONGREAL transcendental calls
                declare
                   Nm   : constant String := Cur.Text (1 .. Cur.Len);
+                  Pkg  : constant String :=
+                    (if To_String (Mod_Name) = "MathL"
+                     then "Ada.Numerics.Long_Elementary_Functions."
+                     else "Ada.Numerics.Elementary_Functions.");
+                  Is_L : constant Boolean :=
+                    To_String (Mod_Name) = "MathL";
+                  Conv : constant String :=
+                    (if Is_L then "Long_Float (" else "Float (");
                   Two  : constant Boolean :=
                     (Eq_No_Case (Nm, "POWER")
                      or else Eq_No_Case (Nm, "LOG")
@@ -1962,7 +2002,18 @@ package body O2c_Compiler is
                   A1, A2 : Expr_Rec;
                   procedure Chk (A : Expr_Rec) is
                   begin
-                     if A.Typ /= T_Real
+                     if Is_L then
+                        if A.Typ = T_LReal then
+                           null;
+                        elsif A.Typ = T_Int and then A.Lit then
+                           null;
+                        elsif A.Typ = T_Real and then A.Lit then
+                           null;
+                        else
+                           raise O2c_Error with "MathL argument must be "
+                             & "LONGREAL";
+                        end if;
+                     elsif A.Typ /= T_Real
                        and then not (A.Typ = T_Int and then A.Lit)
                      then
                         raise O2c_Error with "Math argument must be REAL";
@@ -1984,10 +2035,8 @@ package body O2c_Compiler is
                   Next;
                   if Eq_No_Case (Nm, "POWER") then
                      --  Ada has no real-valued ** : use exp(ex*ln(base))
-                     R.Text := To_Unbounded_String
-                       ("Ada.Numerics.Elementary_Functions.Exp (")
-                       & To_String (A2.Text) & " * "
-                       & "Ada.Numerics.Elementary_Functions.Log ("
+                     R.Text := To_Unbounded_String (Pkg & "Exp (")
+                       & To_String (A2.Text) & " * " & Pkg & "Log ("
                        & To_String (A1.Text) & "))";
                   else
                      if Eq_No_Case (Nm, "LN") or else Eq_No_Case (Nm, "LOG")
@@ -1998,8 +2047,7 @@ package body O2c_Compiler is
                      else
                         Ada_Nm := To_Unbounded_String (Nm);
                      end if;
-                     R.Text := To_Unbounded_String
-                       ("Ada.Numerics.Elementary_Functions.") & Ada_Nm & " (";
+                     R.Text := To_Unbounded_String (Pkg) & Ada_Nm & " (";
                   end if;
                   if not Eq_No_Case (Nm, "POWER") then
                      if Eq_No_Case (Nm, "LOG") then
@@ -2015,8 +2063,8 @@ package body O2c_Compiler is
                      end if;
                      R.Text := R.Text & ")";
                   end if;
+                  R.Typ := (if Is_L then T_LReal else T_Real);
                end;
-               R.Typ := T_Real;
                R.Lit := False;
                return R;
             end if;
@@ -2800,6 +2848,22 @@ package body O2c_Compiler is
          Res := T_Real;
          return True;
       end if;
+      --  M47: LONGREAL mixes with literals and with the other real kind
+      --  only when that side is a plain literal (documented deviation).
+      if A.Typ = T_LReal and then B.Typ = T_LReal then
+         Res := T_LReal;
+         return True;
+      elsif A.Typ = T_LReal
+        and then (B.Typ = T_Int or else B.Typ = T_Real) and then B.Lit
+      then
+         Res := T_LReal;
+         return True;
+      elsif (A.Typ = T_Int or else A.Typ = T_Real) and then A.Lit
+        and then B.Typ = T_LReal
+      then
+         Res := T_LReal;
+         return True;
+      end if;
       Res := T_Real;
       return False;
    end Real_Like;
@@ -2822,13 +2886,22 @@ package body O2c_Compiler is
                   R.Typ := Res;
                   R.Lit := False;
                elsif Real_Like (R, X, Res) then
-                  if R.Typ = T_Int then
-                     R.Text := To_Unbounded_String
-                       ("Float (" & To_String (R.Text) & ")");
-                  elsif X.Typ = T_Int then
-                     X.Text := To_Unbounded_String
-                       ("Float (" & To_String (X.Text) & ")");
-                  end if;
+                  declare
+                     Conv : constant String :=
+                       (if Res = T_LReal then "Long_Float (" else "Float (");
+                  begin
+                     if R.Typ = T_Int
+                       or else (R.Typ = T_Real and then Res = T_LReal)
+                     then
+                        R.Text := To_Unbounded_String
+                          (Conv & To_String (R.Text) & ")");
+                     elsif X.Typ = T_Int
+                       or else (X.Typ = T_Real and then Res = T_LReal)
+                     then
+                        X.Text := To_Unbounded_String
+                          (Conv & To_String (X.Text) & ")");
+                     end if;
+                  end;
                   R.Text := R.Text & " * " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
@@ -2875,13 +2948,22 @@ package body O2c_Compiler is
                   R.Text := "(" & R.Text & " xor " & X.Text & ")";
                   R.Lit := False;
                elsif Real_Like (R, X, Res) then
-                  if R.Typ = T_Int then
-                     R.Text := To_Unbounded_String
-                       ("Float (" & To_String (R.Text) & ")");
-                  elsif X.Typ = T_Int then
-                     X.Text := To_Unbounded_String
-                       ("Float (" & To_String (X.Text) & ")");
-                  end if;
+                  declare
+                     Conv : constant String :=
+                       (if Res = T_LReal then "Long_Float (" else "Float (");
+                  begin
+                     if R.Typ = T_Int
+                       or else (R.Typ = T_Real and then Res = T_LReal)
+                     then
+                        R.Text := To_Unbounded_String
+                          (Conv & To_String (R.Text) & ")");
+                     elsif X.Typ = T_Int
+                       or else (X.Typ = T_Real and then Res = T_LReal)
+                     then
+                        X.Text := To_Unbounded_String
+                          (Conv & To_String (X.Text) & ")");
+                     end if;
+                  end;
                   R.Text := R.Text & " / " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
@@ -2925,13 +3007,22 @@ package body O2c_Compiler is
                   R.Typ := Res;
                   R.Lit := False;
                elsif Real_Like (R, X, Res) then
-                  if R.Typ = T_Int then
-                     R.Text := To_Unbounded_String
-                       ("Float (" & To_String (R.Text) & ")");
-                  elsif X.Typ = T_Int then
-                     X.Text := To_Unbounded_String
-                       ("Float (" & To_String (X.Text) & ")");
-                  end if;
+                  declare
+                     Conv : constant String :=
+                       (if Res = T_LReal then "Long_Float (" else "Float (");
+                  begin
+                     if R.Typ = T_Int
+                       or else (R.Typ = T_Real and then Res = T_LReal)
+                     then
+                        R.Text := To_Unbounded_String
+                          (Conv & To_String (R.Text) & ")");
+                     elsif X.Typ = T_Int
+                       or else (X.Typ = T_Real and then Res = T_LReal)
+                     then
+                        X.Text := To_Unbounded_String
+                          (Conv & To_String (X.Text) & ")");
+                     end if;
+                  end;
                   R.Text := R.Text & " + " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
@@ -2954,13 +3045,22 @@ package body O2c_Compiler is
                   R.Typ := Res;
                   R.Lit := False;
                elsif Real_Like (R, X, Res) then
-                  if R.Typ = T_Int then
-                     R.Text := To_Unbounded_String
-                       ("Float (" & To_String (R.Text) & ")");
-                  elsif X.Typ = T_Int then
-                     X.Text := To_Unbounded_String
-                       ("Float (" & To_String (X.Text) & ")");
-                  end if;
+                  declare
+                     Conv : constant String :=
+                       (if Res = T_LReal then "Long_Float (" else "Float (");
+                  begin
+                     if R.Typ = T_Int
+                       or else (R.Typ = T_Real and then Res = T_LReal)
+                     then
+                        R.Text := To_Unbounded_String
+                          (Conv & To_String (R.Text) & ")");
+                     elsif X.Typ = T_Int
+                       or else (X.Typ = T_Real and then Res = T_LReal)
+                     then
+                        X.Text := To_Unbounded_String
+                          (Conv & To_String (X.Text) & ")");
+                     end if;
+                  end;
                   R.Text := R.Text & " - " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
@@ -3150,6 +3250,16 @@ package body O2c_Compiler is
                elsif R.Typ = T_Int and then X.Typ = T_Real then
                   R.Text := To_Unbounded_String
                     ("Float (" & To_String (R.Text) & ")");
+               elsif R.Typ = T_LReal
+                 and then (X.Typ = T_Int or else X.Typ = T_Real)
+               then
+                  X.Text := To_Unbounded_String
+                    ("Long_Float (" & To_String (X.Text) & ")");
+               elsif (R.Typ = T_Int or else R.Typ = T_Real)
+                 and then X.Typ = T_LReal
+               then
+                  R.Text := To_Unbounded_String
+                    ("Long_Float (" & To_String (R.Text) & ")");
                end if;
                R.Text := "(" & R.Text & Op & X.Text & ")";
                R.Typ := T_Bool;
@@ -4684,6 +4794,12 @@ package body O2c_Compiler is
                   elsif Cur_Ret_Type = T_Real and then V.Typ = T_Int then
                      V.Text := To_Unbounded_String
                        ("Float (" & To_String (V.Text) & ")");
+                  elsif Cur_Ret_Type = T_LReal and then V.Typ = T_Int then
+                     V.Text := To_Unbounded_String
+                       ("Long_Float (" & To_String (V.Text) & ")");
+                  elsif Cur_Ret_Type = T_LReal and then V.Typ = T_Real then
+                     V.Text := To_Unbounded_String
+                       ("Long_Float (" & To_String (V.Text) & ")");
                   elsif V.Typ /= Cur_Ret_Type then
                      raise O2c_Error with "RETURN value type mismatch (line "
                        & Natural'Image (Cur.Line) & ")";
@@ -5376,6 +5492,19 @@ package body O2c_Compiler is
                                     V.Text := To_Unbounded_String
                                       ("Float (" & To_String (V.Text) & ")");
                                     V.Typ := T_Real;
+                                 elsif D.Sc = T_LReal
+                                   and then (V.Typ = T_Int
+                                             or else V.Typ = T_Real)
+                                 then
+                                    if V.Typ = T_Real and then not V.Lit then
+                                       raise O2c_Error with "type mismatch "
+                                         & "assigning "
+                                         & To_String (D.Text);
+                                    end if;
+                                    V.Text := To_Unbounded_String
+                                      ("Long_Float (" & To_String (V.Text)
+                                       & ")");
+                                    V.Typ := T_LReal;
                                  elsif D.Sc = T_Long and then V.Typ = T_Int then
                                     if not V.Lit then
                                        raise O2c_Error with "type mismatch "
@@ -5776,7 +5905,7 @@ package body O2c_Compiler is
                   if Member = "Ln" then
                      Append_Body ("      Aegir_User.Console.Put_Line ("""");");
                   elsif Member = "String" or else Member = "Int"
-                    or else Member = "Real"
+                    or else Member = "Real" or else Member = "LongReal"
                   then
                      Expect (Lex.Tok_LParen, "'(' after Out." & Member);
                      Next;
@@ -5801,6 +5930,24 @@ package body O2c_Compiler is
                            end if;
                            M := A.Text;
                            Used_Int := True;
+                        end;
+                     elsif Member = "LongReal" then
+                        --  Out.LongReal (M47)
+                        declare
+                           A : Expr_Rec := Parse_Expr;
+                        begin
+                           if A.Typ = T_LReal then
+                              M := A.Text;
+                           elsif A.Typ = T_Int
+                             or else (A.Typ = T_Real and then A.Lit)
+                           then
+                              M := To_Unbounded_String
+                                ("Long_Float (" & To_String (A.Text) & ")");
+                           else
+                              raise O2c_Error
+                                with "Out.LongReal needs a LONGREAL argument";
+                           end if;
+                           Used_LReal := True;
                         end;
                      else
                         --  Out.Real (M18)
@@ -5839,13 +5986,16 @@ package body O2c_Compiler is
                      elsif Member = "Int" then
                         Append_Body ("      O2c_Put_Int (" & To_String (M)
                                      & ");");
+                     elsif Member = "LongReal" then
+                        Append_Body ("      O2c_Put_LReal (" & To_String (M)
+                                     & ");");
                      else
                         Append_Body ("      O2c_Put_Real (" & To_String (M)
                                      & ");");
                      end if;
                   else
                      raise O2c_Error with "Out supports String/Int/Real/"
-                       & "Ln only (found Out." & Member & ")";
+                       & "LongReal/Ln only (found Out." & Member & ")";
                   end if;
                end;
             elsif Cur.Kind = Lex.Tok_LParen then
@@ -5909,7 +6059,21 @@ package body O2c_Compiler is
                   declare
                      V : Expr_Rec := Parse_Expr;
                   begin
-                     if Syms (Idx).Typ = T_Real then
+                     if Syms (Idx).Typ = T_LReal then
+                        if V.Typ = T_Int
+                          or else (V.Typ = T_Real and then V.Lit)
+                        then
+                           Append_Body ("      " & Head (1 .. H_Len)
+                                        & " := Long_Float ("
+                                        & To_String (V.Text) & ");");
+                        elsif V.Typ = T_LReal then
+                           Append_Body ("      " & Head (1 .. H_Len)
+                                        & " := " & To_String (V.Text) & ";");
+                        else
+                           raise O2c_Error with "type mismatch assigning "
+                             & Head (1 .. H_Len);
+                        end if;
+                     elsif Syms (Idx).Typ = T_Real then
                         if V.Typ = T_Int then
                            Append_Body ("      " & Head (1 .. H_Len)
                                         & " := Float (" & To_String (V.Text)
@@ -6327,6 +6491,8 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
               & "      if V < 0.0 then IP := IP + 1; end if;" & ASCII.LF
               & "      FR := Integer (abs (V - Float (IP)) * 1000.0);"
               & ASCII.LF
+              & "      if FR > 999 then IP := IP + 1; FR := 0; end if;"
+              & ASCII.LF
               & "      declare" & ASCII.LF
               & "         Img : constant String := Integer'Image (IP);"
               & ASCII.LF
@@ -6351,6 +6517,51 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
               & "         Aegir_User.Console.Put (D3);" & ASCII.LF
               & "      end;" & ASCII.LF
               & "   end O2c_Put_Real;" & ASCII.LF;
+         end if;
+         if Used_LReal then
+            S := S & "   procedure O2c_Put_LReal (V : Long_Float) is"
+              & ASCII.LF
+              & "      IP : Long_Integer;" & ASCII.LF
+              & "      FR : Long_Integer;" & ASCII.LF
+              & "   begin" & ASCII.LF
+              & "      IP := Long_Integer (V - 0.5);" & ASCII.LF
+              & "      if V < 0.0 then IP := IP + 1; end if;" & ASCII.LF
+              & "      FR := Long_Integer (abs (V - Long_Float (IP))"
+              & " * 1000000.0);" & ASCII.LF
+              & "      if FR > 999999 then IP := IP + 1; FR := 0; end if;"
+              & ASCII.LF
+              & "      declare" & ASCII.LF
+              & "         Img : constant String := Long_Integer'Image (IP);"
+              & ASCII.LF
+              & "      begin" & ASCII.LF
+              & "         if Img (Img'First) = '-' then" & ASCII.LF
+              & "            Aegir_User.Console.Put (Img);" & ASCII.LF
+              & "         elsif Img (Img'First) = ' ' then" & ASCII.LF
+              & "            Aegir_User.Console.Put (Img" & ASCII.LF
+              & "              (Img'First + 1 .. Img'Last));" & ASCII.LF
+              & "         else" & ASCII.LF
+              & "            Aegir_User.Console.Put (Img);" & ASCII.LF
+              & "         end if;" & ASCII.LF
+              & "      end;" & ASCII.LF
+              & "      Aegir_User.Console.Put (""."");" & ASCII.LF
+              & "      declare" & ASCII.LF
+              & "         D6 : constant String :=" & ASCII.LF
+              & "           Character'Val (48 + Integer (FR / 100000))"
+              & ASCII.LF
+              & "           & Character'Val (48 + Integer ((FR / 10000)"
+              & " mod 10))" & ASCII.LF
+              & "           & Character'Val (48 + Integer ((FR / 1000)"
+              & " mod 10))" & ASCII.LF
+              & "           & Character'Val (48 + Integer ((FR / 100)"
+              & " mod 10))" & ASCII.LF
+              & "           & Character'Val (48 + Integer ((FR / 10)"
+              & " mod 10))" & ASCII.LF
+              & "           & Character'Val (48 + Integer (FR mod 10));"
+              & ASCII.LF
+              & "      begin" & ASCII.LF
+              & "         Aegir_User.Console.Put (D6);" & ASCII.LF
+              & "      end;" & ASCII.LF
+              & "   end O2c_Put_LReal;" & ASCII.LF;
          end if;
          if Used_StrCmp then
             --  M33: string comparison over NUL-terminated content
@@ -6408,6 +6619,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       Used_Bool_Arr := False;
       Used_Set := False;
       Used_Real := False;
+      Used_LReal := False;
       Used_StrCmp := False;
       Used_Console := False;
       Base_In_Spec := False;
@@ -6653,6 +6865,10 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
             end if;
             if To_String (Mod_Name) = "Math" then
                S := S & "with Ada.Numerics.Elementary_Functions;" & ASCII.LF;
+            end if;
+            if To_String (Mod_Name) = "MathL" then
+               S := S & "with Ada.Numerics.Long_Elementary_Functions;"
+                 & ASCII.LF;
             end if;
             if To_String (Mod_Name) = "In" then
                S := S & "with Aegir_User.CLI;" & ASCII.LF;
@@ -7708,6 +7924,61 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       return To_String (S);
    end Oak_Reals_Src;
 
+   function Oak_MathL_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module MathL;" & ASCII.LF;
+      S := S & "const pi* = 3.141592653589793D0;" & ASCII.LF;
+      S := S & "const e* = 2.718281828459045D0;" & ASCII.LF;
+      S := S & "procedure power*(base: longreal; ex: longreal): longreal;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Power(base, ex)" & ASCII.LF;
+      S := S & "end power;" & ASCII.LF;
+      S := S & "procedure exp*(x: longreal): longreal;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Exp(x)" & ASCII.LF;
+      S := S & "end exp;" & ASCII.LF;
+      S := S & "procedure ln*(x: longreal): longreal;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Ln(x)" & ASCII.LF;
+      S := S & "end ln;" & ASCII.LF;
+      S := S & "procedure log*(x: longreal; base: longreal): longreal;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Log(x, base)" & ASCII.LF;
+      S := S & "end log;" & ASCII.LF;
+      S := S & "procedure sin*(x: longreal): longreal;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Sin(x)" & ASCII.LF;
+      S := S & "end sin;" & ASCII.LF;
+      S := S & "procedure cos*(x: longreal): longreal;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Cos(x)" & ASCII.LF;
+      S := S & "end cos;" & ASCII.LF;
+      S := S & "procedure tan*(x: longreal): longreal;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Tan(x)" & ASCII.LF;
+      S := S & "end tan;" & ASCII.LF;
+      S := S & "procedure arcsin*(x: longreal): longreal;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Arcsin(x)" & ASCII.LF;
+      S := S & "end arcsin;" & ASCII.LF;
+      S := S & "procedure arccos*(x: longreal): longreal;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Arccos(x)" & ASCII.LF;
+      S := S & "end arccos;" & ASCII.LF;
+      S := S & "procedure arctan*(x: longreal): longreal;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Arctan(x)" & ASCII.LF;
+      S := S & "end arctan;" & ASCII.LF;
+      S := S & "procedure arctan2*(y: longreal; x: longreal): longreal;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  return Arctan2(y, x)" & ASCII.LF;
+      S := S & "end arctan2;" & ASCII.LF;
+      S := S & "end MathL." & ASCII.LF;
+      return To_String (S);
+   end Oak_MathL_Src;
+
+
    function Compile_Multi (Main_Source : String; Libs : Lib_Array;
                            N_Libs : Natural; Count : out Natural)
                            return Unit_Array
@@ -7785,6 +8056,14 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
          N_Prov := N_Prov + 1;
          Provided (N_Prov) := Mod_Name;
       end if;
+
+      Compile_Module (Oak_MathL_Src, True, M_T, S_T, B_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
+      if Length (B_T) > 0 then
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
+      N_Prov := N_Prov + 1;
+      Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_In_Src, True, M_T, S_T, B_T);
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);

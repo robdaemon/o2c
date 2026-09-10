@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M46 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M47 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M46 status
+## M47 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,33 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M47 — LONGREAL and the Oakwood `MathL` module**: LONGREAL joins
+REAL as the second real kind.  It maps to Ada `Long_Float`, and its
+literals carry the Oberon-2 `D` scale factor (`1.5D0`, `1.0D-3`) —
+the lexer now also accepts `E`/`D` exponents on number literals (and
+the emitted Ada uses `E`).  LONGREAL works in variables, parameters,
+return types, record fields and aggregates, comparisons and
+arithmetic; exported LONGREAL constants export like other scalars.
+Mixing follows the REAL precedent with one deviation: besides plain
+integer and REAL *literals*, a REAL *variable* widens to LONGREAL
+(`Long_Float (x)`, mirroring INTEGER→REAL in M18) and everything else
+between the two real kinds is a type error.  `Out.LongReal(x, w)`
+prints six decimals through the new `O2c_Put_LReal` helper — which
+also exposed a carry bug shared with `Out.Real` (a fraction that
+rounded up to 1000/1000000 emitted a `:` character); both helpers now
+carry into the integer part.
+
+  `MathL` is the long-real counterpart of the M41 `Math` builtin:
+  `pi*`/`e*` LONGREAL constants plus `power`, `exp`, `ln`,
+  `log(x, base)`, `sin`, `cos`, `tan`, `arcsin`, `arccos`, `arctan`
+  and `arctan2(y, x)`, implemented over
+  `Ada.Numerics.Long_Elementary_Functions` (the aegir runtime already
+  ships `a-nlelfu`), with the same reserved-name FFI as `Math` — the
+  branch now selects the `Long_` package and LONGREAL typing.  Demo
+  output: `ln(e)` → `1.000000`, `power(2, 3)` → `8.000000`, `pi` →
+  `3.141593`, `log(8, 2)` → `3.000000`, `arctan2(1, 1)` →
+  `0.785398`; `run_m1` asserts `8.000000` and `3.141593`.
 
 **M46 — `Reals` and `Term` (extension modules)**: two non-Oakwood
 modules shipped as builtins (documented as extensions — the Oakwood

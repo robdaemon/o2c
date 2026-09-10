@@ -1,5 +1,6 @@
 module Hello;
-import Out, Geom, Geo, Math, Strings, Texts, Files, In, Reals, Term;
+import Out, Geom, Geo, Math, MathL, Strings, Texts, Files, In,
+       Reals, Term;
 
 type Vector = array 4 of integer;
 type Pair = record a, b: integer end;
@@ -23,6 +24,7 @@ var shp: PShape; circ: PCircle;
 var sac: Tote;
 var s2: set; l2: longint;
 var r: real;
+var lre: longreal;
 var m: integer;
 var a, b: Geom.Point;
 var tw: Texts.Writer;
@@ -440,6 +442,13 @@ begin
   Term.SetColor(2, 0);
   Term.Reset;
   Out.String("term-ok");
+  Out.Ln;
+  lre := MathL.ln(MathL.e);
+  Out.LongReal(lre, 0);
+  Out.Ln;
+  Out.LongReal(MathL.power(2.0D0, 3.0D0), 0);
+  Out.Ln;
+  Out.LongReal(MathL.pi, 0);
   Out.Ln;
   Out.Int(Geom.SumArr(w), 0);
   Out.Ln

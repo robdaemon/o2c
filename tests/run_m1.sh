@@ -118,5 +118,10 @@ if ! grep -aq '2.50000E+00' "$QEMU_LOG" || ! grep -aq 'term-ok' "$QEMU_LOG"; the
    tail -30 "$QEMU_LOG" >&2
    exit 1
 fi
+if ! grep -aq '8.000000' "$QEMU_LOG" || ! grep -aq '3.141593' "$QEMU_LOG"; then
+   echo "run_m1: LONGREAL/MathL demo output not seen" >&2
+   tail -30 "$QEMU_LOG" >&2
+   exit 1
+fi
 
 echo "run_m1: PASS"
