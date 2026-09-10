@@ -389,6 +389,24 @@ begin
   fl[fi] := CHR(0);
   Out.String(fl);
   Out.Ln;
+  Files.Wait("BD0:");
+  Files.Delete("BD0:O2cDemo.TXT");
+  fd := Files.New("BD0:O2cDemo.TXT");
+  Files.Open(rr, fd);
+  Files.WriteString(rr, "O2cW!");
+  fd := Files.Old("BD0:O2cDemo.TXT");
+  Files.Open(rr, fd);
+  fi := 0;
+  while (fi < 63) & ~rr.eof do
+    Files.Read(rr, cc);
+    if ~rr.eof then
+      fl[fi] := cc;
+      fi := fi + 1
+    end
+  end;
+  fl[fi] := CHR(0);
+  Out.String(fl);
+  Out.Ln;
   r := Math.ln(Math.e);
   if (r > 0.99) & (r < 1.01) then Out.Int(71, 0) else Out.Int(72, 0) end;
   Out.Ln;

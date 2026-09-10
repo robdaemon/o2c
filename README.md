@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M41 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M42 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M41 status
+## M42 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -91,6 +91,33 @@ demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
 
+**M42 — Files write path, and Ada-side reserved-word mangling**: the
+builtin `Files` gains `Write*(var r: Rider; ch: char)`,
+`WriteString*(var r: Rider; s: array of char)` (byte-wise, stops at
+NUL) and `Delete*(name)` over the file server's create-by-write /
+`Delete` operations, via new private `O2c_FWrite` / `O2c_FDel`
+helpers and reserved `FWrite(path, offset, buffer)` / `FDel(path)`
+statements.  A `Wait*(path)` helper polls `Stat` (with an inner
+delay so the poll costs ~400 IPC calls, not millions) so a demo can
+wait for a volume to mount.  `samples/hello.ob2` now waits for
+`BD0:`, deletes/creates/writes `BD0:O2cDemo.TXT`, reads it back and
+prints `O2cW!` — the first o2c program to write a real file on
+Aegir; the rig stages the demo programs after `Bfs` (spawn order is
+sequential, so they cannot see `BD0:` otherwise) and grants
+`Tests/Hello` the `part0 bfs_server` caps.
+
+Also fixes the M40 shortcut properly: Oberon-2 keeps the canonical
+name `Files.New` and the compiler only adjusts the **Ada** spelling.
+A new `Ada_Id` helper (case-insensitive reserved-word test, suffix
+`_o2c`) is applied at every point an exported interface identifier
+becomes Ada text — subprogram specs/bodies/`END` labels, exported
+CONST/VARIABLE specs (incl. exported RECORD variables) and all
+cross-module member references (reads, calls, assignments, record
+whole-copies, designator-chain seeds) — so `Files.New` compiles to
+`Files.New_o2c` with no Oberon-level rename.  (Exported type/field
+names and local identifiers are not yet mangled; they have not been
+needed.)
+
 **M41 — Math module (Oakwood REAL transcendentals)**: the fourth
 builtin module implements the Oakwood `Math` basic module — `CONST
 pi*`, `e*` and the REAL functions `power*`, `exp*`, `ln*`, `log*(x,
@@ -122,8 +149,9 @@ helpers (`Aegir_User.CLI.Init` + `Files.Stat/Open/Read`, offset- and
 bounds-safe, reads <= 32 KiB) plus the reserved `FStat(name)` /
 `FRead(path, offset, buffer)` names; a LONGINT designator-chain
 assignment bug (missing literal widening for `p^.field := 0`) was
-fixed along the way.  `New` is exported as `Create` (Ada reserves
-`new`).  The rig change grants `Tests/Hello` the `fs` cap and stages
+fixed along the way.  (`New` was briefly renamed `Create` on the
+Oberon side because Ada reserves `new`; M42 fixes that the right
+way, see below.)  The rig change grants `Tests/Hello` the `fs` cap and stages
 `Tests/O2cLib/Sample.txt`; the demo reads the staged file through a
 Rider and prints its content.  (Read-only: writes report failure.)
 

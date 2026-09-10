@@ -329,6 +329,28 @@ package body O2c_Compiler is
       return To_String (R);
    end Spec_With_Lines;
 
+
+   --  M42: an Oberon identifier that collides with an Ada reserved
+   --  word keeps its Oberon spelling everywhere in the language; only
+   --  the Ada-side spelling gets a suffix (Ada_Id).
+   function Ada_Id (Nm : String) return String is
+      L : String (Nm'Range);
+   begin
+      --  Ada identifiers are case-insensitive, so any casing of an
+      --  Ada reserved word needs the Ada-side suffix.
+      for I in Nm'Range loop
+         if Nm (I) in 'A' .. 'Z' then
+            L (I) := Character'Val (Character'Pos (Nm (I)) + 32);
+         else
+            L (I) := Nm (I);
+         end if;
+      end loop;
+      if L = "abort" or else L = "abstract" or else L = "accept" or else L = "access" or else L = "aliased" or else L = "all" or else L = "and" or else L = "array" or else L = "at" or else L = "begin" or else L = "body" or else L = "case" or else L = "constant" or else L = "declare" or else L = "delay" or else L = "delta" or else L = "digits" or else L = "do" or else L = "else" or else L = "elsif" or else L = "end" or else L = "entry" or else L = "exception" or else L = "exit" or else L = "for" or else L = "function" or else L = "generic" or else L = "goto" or else L = "if" or else L = "in" or else L = "interface" or else L = "is" or else L = "loop" or else L = "mod" or else L = "new" or else L = "not" or else L = "null" or else L = "of" or else L = "or" or else L = "others" or else L = "out" or else L = "overriding" or else L = "package" or else L = "pragma" or else L = "private" or else L = "procedure" or else L = "protected" or else L = "raise" or else L = "range" or else L = "record" or else L = "rem" or else L = "renames" or else L = "requeue" or else L = "return" or else L = "reverse" or else L = "select" or else L = "separate" or else L = "some" or else L = "subtype" or else L = "synchronized" or else L = "tagged" or else L = "task" or else L = "terminate" or else L = "then" or else L = "type" or else L = "until" or else L = "use" or else L = "when" or else L = "while" or else L = "with" or else L = "xor" then
+         return Nm & "_o2c";
+      end if;
+      return Nm;
+   end Ada_Id;
+
    function Is_Provided (Nm : String) return Boolean is
    begin
       for I in 1 .. N_Prov loop
@@ -2098,7 +2120,7 @@ package body O2c_Compiler is
                            end if;
                            if Xs (XI).Kind = S_Const then
                               R.Text := To_Unbounded_String
-                                (FNm & "." & MName);
+                                (FNm & "." & Ada_Id (MName));
                               R.Typ := Xs (XI).Typ;
                               R.Lit := False;
                               return R;
@@ -2107,7 +2129,7 @@ package body O2c_Compiler is
                              and then Length (Xs (XI).VT_Nm) = 0
                            then
                               R.Text := To_Unbounded_String
-                                (FNm & "." & MName);
+                                (FNm & "." & Ada_Id (MName));
                               R.Typ := Xs (XI).Typ;
                               R.Lit := False;
                               return R;
@@ -2189,7 +2211,8 @@ package body O2c_Compiler is
                                  end if;
                                  Expect (Lex.Tok_RParen, "')'");
                                  Next;
-                                 Call := Call & FNm & "." & MName & " (";
+                                 Call := Call & FNm & "."
+                             & Ada_Id (MName) & " (";
                                  for I in 1 .. N_A loop
                                     if I > 1 then
                                        Call := Call & ", ";
@@ -2204,7 +2227,7 @@ package body O2c_Compiler is
                                 & "' needs arguments";
                            else
                               R.Text := To_Unbounded_String
-                                (FNm & "." & MName);
+                                (FNm & "." & Ada_Id (MName));
                            end if;
                            return R;
                         end;
@@ -3024,7 +3047,8 @@ package body O2c_Compiler is
             raise O2c_Error with "exported constants: INTEGER/LONGINT/"
               & "REAL/CHAR/BOOLEAN/string only ('" & Name & "')";
          end if;
-         Append_Spec ("   " & Name & " : constant " & Ada_Type (V.Typ)
+         Append_Spec ("   " & Ada_Id (Name) & " : constant "
+                      & Ada_Type (V.Typ)
                       & " := " & To_String (V.Text) & ";");
          X_Add (To_String (Mod_Name),
                 (Kind => S_Const, Typ => V.Typ,
@@ -3140,7 +3164,7 @@ package body O2c_Compiler is
                        & "VARIABLEs";
                   end if;
                   RVar_Specs (RVar_N) := To_Unbounded_String
-                    ("   " & To_String (Names (I)) & " : "
+                    ("   " & Ada_Id (To_String (Names (I))) & " : "
                      & To_String (UTypes (UT).Name) & " := "
                      & To_String (Init_Txt) & ";");
                   declare
@@ -3171,8 +3195,8 @@ package body O2c_Compiler is
                                 Name => Names (I), Exp => Exps (I),
                                 others => <>);
                if Exps (I) and then Pkg_Mode then
-                  Append_Spec ("   " & To_String (Names (I)) & " : "
-                               & Ada_Type (Typ) & " := "
+                  Append_Spec ("   " & Ada_Id (To_String (Names (I)))
+                               & " : " & Ada_Type (Typ) & " := "
                                & Scalar_Init (Typ) & ";");
                   X_Add (To_String (Mod_Name),
                          (Kind => S_Var, Typ => Typ,
@@ -3586,7 +3610,7 @@ package body O2c_Compiler is
          PRef (1) := Recv_Var;
          POpen (1) := False;
       else
-         Impl_Nm := To_Unbounded_String (Name);
+         Impl_Nm := To_Unbounded_String (Ada_Id (Name));
       end if;
       Seen_Proc := True;
       Next;                       --  past the procedure name
@@ -4573,6 +4597,59 @@ package body O2c_Compiler is
                                & ", " & To_String (P2.Text) & ", "
                                & To_String (P3.Text) & ");");
                end;
+            elsif To_String (Mod_Name) = "Files"
+              and then Eq_No_Case (Head (1 .. H_Len), "FDEL")
+            then
+               --  M42 FFI: delete a named file (builtin Files only)
+               declare
+                  P1 : Expr_Rec;
+               begin
+                  Next;
+                  Expect (Lex.Tok_LParen, "'(' after FDel");
+                  Next;
+                  P1 := Parse_Expr;
+                  if P1.Typ /= T_Str then
+                     raise O2c_Error with "FDel needs a file path";
+                  end if;
+                  Expect (Lex.Tok_RParen, "')'");
+                  Next;
+                  Append_Body ("      O2c_FDel ("
+                               & To_String (P1.Text) & ");");
+               end;
+            elsif To_String (Mod_Name) = "Files"
+              and then Eq_No_Case (Head (1 .. H_Len), "FWRITE")
+            then
+               --  M42 FFI: named write at an offset (builtin Files only)
+               declare
+                  P1, P2, P3 : Expr_Rec;
+               begin
+                  Next;
+                  Expect (Lex.Tok_LParen, "'(' after FWrite");
+                  Next;
+                  P1 := Parse_Expr;
+                  if P1.Typ /= T_Str then
+                     raise O2c_Error with "FWrite needs a file path";
+                  end if;
+                  Expect (Lex.Tok_Comma, "','");
+                  Next;
+                  P2 := Parse_Expr;
+                  if not (P2.Typ = T_Int or else P2.Typ = T_Long) then
+                     raise O2c_Error with "FWrite offset must be INTEGER "
+                       & "or LONGINT";
+                  end if;
+                  Expect (Lex.Tok_Comma, "','");
+                  Next;
+                  P3 := Parse_Expr;
+                  if P3.Typ /= T_Str then
+                     raise O2c_Error with "FWrite needs an ARRAY OF CHAR "
+                       & "buffer";
+                  end if;
+                  Expect (Lex.Tok_RParen, "')'");
+                  Next;
+                  Append_Body ("      O2c_FWrite (" & To_String (P1.Text)
+                               & ", " & To_String (P2.Text) & ", "
+                               & To_String (P3.Text) & ");");
+               end;
             elsif Eq_No_Case (Head (1 .. H_Len), "INC")
               or else Eq_No_Case (Head (1 .. H_Len), "DEC")
             then
@@ -4742,8 +4819,8 @@ package body O2c_Compiler is
                            end if;
                            Expect (Lex.Tok_RParen, "')'");
                            Next;
-                           Call := Call & MNm & "." & To_String (MName)
-                             & " (";
+                           Call := Call & MNm & "."
+                             & Ada_Id (To_String (MName)) & " (";
                            for I in 1 .. N_A loop
                               if I > 1 then
                                  Call := Call & ", ";
@@ -4759,7 +4836,7 @@ package body O2c_Compiler is
                              & To_String (MName) & "' needs arguments";
                         end if;
                         Append_Body ("      " & MNm & "."
-                                     & To_String (MName) & ";");
+                                     & Ada_Id (To_String (MName)) & ";");
                      end if;
                   elsif Xs (XI).Kind = S_Var
                     and then Length (Xs (XI).VT_Nm) > 0
@@ -4844,13 +4921,15 @@ package body O2c_Compiler is
                                    & "record type (M22)";
                               end if;
                               Append_Body ("      " & MNm & "."
-                                           & To_String (MName) & " := "
+                                           & Ada_Id (To_String (MName))
+                                           & " := "
                                            & To_String (Rhs) & ";");
                            end;
                         else
                            declare
                               D : Desig := Parse_Rec_Ptr_Chain
-                                (MNm & "." & To_String (MName), U);
+                                (MNm & "."
+                                 & Ada_Id (To_String (MName)), U);
                            begin
                               Expect (Lex.Tok_Assign, "':='");
                               Next;
@@ -4910,12 +4989,12 @@ package body O2c_Compiler is
                         if Xs (XI).Typ = T_Real then
                            if V.Typ = T_Int then
                               Append_Body ("      " & MNm & "."
-                                           & To_String (MName)
+                                           & Ada_Id (To_String (MName))
                                            & " := Float ("
                                            & To_String (V.Text) & ");");
                            elsif V.Typ = T_Real then
                               Append_Body ("      " & MNm & "."
-                                           & To_String (MName)
+                                           & Ada_Id (To_String (MName))
                                            & " := " & To_String (V.Text)
                                            & ";");
                            else
@@ -4932,7 +5011,8 @@ package body O2c_Compiler is
                              & MNm & "." & To_String (MName);
                         else
                            Append_Body ("      " & MNm & "."
-                                        & To_String (MName) & " := "
+                                        & Ada_Id (To_String (MName))
+                                        & " := "
                                         & To_String (V.Text) & ";");
                         end if;
                      end;
@@ -6475,7 +6555,35 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "      if Cn = 0 then" & ASCII.LF
                  & "         return;" & ASCII.LF
                  & "      end if;" & ASCII.LF
-                 & "   end O2c_FRead;" & ASCII.LF;
+                 & "   end O2c_FRead;" & ASCII.LF
+                 & "   procedure O2c_FWrite (Nm : String; Off : Long_Integer;"
+                 & " Buf : String) is" & ASCII.LF
+                 & "      use type Interfaces.Unsigned_64;" & ASCII.LF
+                 & "      Cn, St : Interfaces.Unsigned_64;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      Aegir_User.CLI.Init;" & ASCII.LF
+                 & "      if Off < 0 then" & ASCII.LF
+                 & "         return;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      St := Aegir_User.Files.Write"
+                 & " (Nm, Interfaces.Unsigned_64 (Off)," & ASCII.LF
+                 & "               Buf'Address,"
+                 & " Interfaces.Unsigned_64 (Buf'Length), Cn);" & ASCII.LF
+                 & "      if St /= Aegir_User.Files.Status_Ok then"
+                 & ASCII.LF
+                 & "         return;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      if Cn = 0 then" & ASCII.LF
+                 & "         return;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "   end O2c_FWrite;" & ASCII.LF
+                 & "   procedure O2c_FDel (Nm : String) is" & ASCII.LF
+                 & "      use type Interfaces.Unsigned_64;" & ASCII.LF
+                 & "      St : Interfaces.Unsigned_64;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      Aegir_User.CLI.Init;" & ASCII.LF
+                 & "      St := Aegir_User.Files.Delete (Nm);" & ASCII.LF
+                 & "   end O2c_FDel;" & ASCII.LF;
             end if;
             S := S & To_String (Decl_Buf);
             if Length (Body_Buf) > 0 then
@@ -6653,7 +6761,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       S := S & "  end;" & ASCII.LF;
       S := S & "  return f" & ASCII.LF;
       S := S & "end Old;" & ASCII.LF;
-      S := S & "procedure Create*(name: array of char): File;" & ASCII.LF;
+      S := S & "procedure New*(name: array of char): File;" & ASCII.LF;
       S := S & "  var i: integer; f: File;" & ASCII.LF;
       S := S & "begin" & ASCII.LF;
       S := S & "  new(f);" & ASCII.LF;
@@ -6668,7 +6776,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       S := S & "    i := i + 1" & ASCII.LF;
       S := S & "  end;" & ASCII.LF;
       S := S & "  return f" & ASCII.LF;
-      S := S & "end Create;" & ASCII.LF;
+      S := S & "end New;" & ASCII.LF;
       S := S & "procedure Length*(f: File): longint;" & ASCII.LF;
       S := S & "begin" & ASCII.LF;
       S := S & "  return f^.size" & ASCII.LF;
@@ -6708,6 +6816,40 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       S := S & "  ch := r.cur[0];" & ASCII.LF;
       S := S & "  r.pos := r.pos + 1" & ASCII.LF;
       S := S & "end Read;" & ASCII.LF;
+      S := S & "procedure Delete*(name: array of char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  FDel(name)" & ASCII.LF;
+      S := S & "end Delete;" & ASCII.LF;
+      S := S & "procedure Write*(var r: Rider; ch: char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  r.cur[0] := ch;" & ASCII.LF;
+      S := S & "  FWrite(r.f^.name, r.pos, r.cur);" & ASCII.LF;
+      S := S & "  r.pos := r.pos + 1" & ASCII.LF;
+      S := S & "end Write;" & ASCII.LF;
+      S := S & "procedure WriteString*(var r: Rider; s: array of char);" & ASCII.LF;
+      S := S & "  var i: integer;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  for i := 0 to len(s) - 1 do" & ASCII.LF;
+      S := S & "    if s[i] = CHR(0) then" & ASCII.LF;
+      S := S & "      return" & ASCII.LF;
+      S := S & "    end;" & ASCII.LF;
+      S := S & "    r.cur[0] := s[i];" & ASCII.LF;
+      S := S & "    FWrite(r.f^.name, r.pos, r.cur);" & ASCII.LF;
+      S := S & "    r.pos := r.pos + 1" & ASCII.LF;
+      S := S & "  end" & ASCII.LF;
+      S := S & "end WriteString;" & ASCII.LF;
+      S := S & "procedure Wait*(path: array of char);" & ASCII.LF;
+      S := S & "  var i, j: integer;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  i := 0;" & ASCII.LF;
+      S := S & "  while (i < 400) & (FStat(path) < 0) do" & ASCII.LF;
+      S := S & "    j := 0;" & ASCII.LF;
+      S := S & "    while j < 2000000 do" & ASCII.LF;
+      S := S & "      j := j + 1" & ASCII.LF;
+      S := S & "    end;" & ASCII.LF;
+      S := S & "    i := i + 1" & ASCII.LF;
+      S := S & "  end" & ASCII.LF;
+      S := S & "end Wait;" & ASCII.LF;
       S := S & "end Files." & ASCII.LF;
       return To_String (S);
    end Oak_Files_Src;
