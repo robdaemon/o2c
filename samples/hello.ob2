@@ -1,5 +1,5 @@
 module Hello;
-import Out, Geom, Geo, Math, Strings, Texts, Files, In;
+import Out, Geom, Geo, Math, Strings, Texts, Files, In, Reals, Term;
 
 type Vector = array 4 of integer;
 type Pair = record a, b: integer end;
@@ -427,6 +427,19 @@ begin
   Out.Ln;
   r := Math.arctan2(1.0, 1.0);
   if (r > 0.7) & (r < 0.87) then Out.Int(77, 0) else Out.Int(78, 0) end;
+  Out.Ln;
+  Reals.Convert(2.5, fl);
+  Out.String(fl);
+  Out.Ln;
+  r := 0.0;
+  Reals.ConvertTo(r, "3.25");
+  Out.Real(r, 0);
+  Out.Ln;
+  Out.Int(Reals.Expo(250.0), 0);
+  Out.Ln;
+  Term.SetColor(2, 0);
+  Term.Reset;
+  Out.String("term-ok");
   Out.Ln;
   Out.Int(Geom.SumArr(w), 0);
   Out.Ln

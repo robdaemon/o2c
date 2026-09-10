@@ -94,7 +94,9 @@ package body O2c_Compiler is
 
    --  module imports (M19): the builtin Out plus user library modules
    --  provided earlier in a Compile_Multi run.
-   Max_Imports : constant := 8;
+   --  M46: raised from 8 with headroom — the demo now imports the
+   --  full builtin set plus its own libraries.
+   Max_Imports : constant := 32;
    type Import_Rec is record
       Name : Unbounded_String;
    end record;
@@ -2106,6 +2108,29 @@ package body O2c_Compiler is
                      R.Typ := T_Real;
                   end if;
                end;
+               R.Lit := False;
+               return R;
+            end if;
+            if To_String (Mod_Name) = "Reals"
+              and then Eq_No_Case (Cur.Text (1 .. Cur.Len), "RPARSE")
+            then
+               --  M46 FFI: string -> REAL (builtin Reals only)
+               declare
+                  A : Expr_Rec;
+               begin
+                  Next;
+                  Expect (Lex.Tok_LParen, "'(' after RParse");
+                  Next;
+                  A := Parse_Expr;
+                  if A.Typ /= T_Str then
+                     raise O2c_Error with "RParse needs an ARRAY OF CHAR";
+                  end if;
+                  Expect (Lex.Tok_RParen, "')'");
+                  Next;
+                  R.Text := To_Unbounded_String
+                    ("O2c_StrToReal (" & To_String (A.Text) & ")");
+               end;
+               R.Typ := T_Real;
                R.Lit := False;
                return R;
             end if;
@@ -6993,6 +7018,89 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "   end O2c_In_Name;" & ASCII.LF
                  & "";
             end if;
+            if To_String (Mod_Name) = "Reals" then
+               --  M46 FFI: string -> REAL (ConvertTo only; the
+               --  REAL -> string direction is pure Oberon).
+               S := S
+                 & "   function O2c_StrToReal (Buf : String) return Float is" & ASCII.LF
+                 & "      V : Float := 0.0;" & ASCII.LF
+                 & "      Frac : Float := 0.1;" & ASCII.LF
+                 & "      Neg : Boolean := False;" & ASCII.LF
+                 & "      Dot : Boolean := False;" & ASCII.LF
+                 & "      Seen : Boolean := False;" & ASCII.LF
+                 & "      K : Natural := 1;" & ASCII.LF
+                 & "      Exp : Integer := 0;" & ASCII.LF
+                 & "      Exp_Neg : Boolean := False;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      while K <= Buf'Length" & ASCII.LF
+                 & "        and then Buf (Buf'First + K - 1) = ' ' loop" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      if K <= Buf'Length and then Buf (Buf'First + K - 1) = '-' then" & ASCII.LF
+                 & "         Neg := True;" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      elsif K <= Buf'Length and then Buf (Buf'First + K - 1) = '+' then" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      loop" & ASCII.LF
+                 & "         exit when K > Buf'Length;" & ASCII.LF
+                 & "         declare" & ASCII.LF
+                 & "            C : constant Character := Buf (Buf'First + K - 1);" & ASCII.LF
+                 & "         begin" & ASCII.LF
+                 & "            if C in '0' .. '9' then" & ASCII.LF
+                 & "               Seen := True;" & ASCII.LF
+                 & "               if Dot then" & ASCII.LF
+                 & "                  V := V + Float (Character'Pos (C) - Character'Pos ('0'))" & ASCII.LF
+                 & "                    * Frac;" & ASCII.LF
+                 & "                  Frac := Frac / 10.0;" & ASCII.LF
+                 & "               else" & ASCII.LF
+                 & "                  V := V * 10.0" & ASCII.LF
+                 & "                    + Float (Character'Pos (C) - Character'Pos ('0'));" & ASCII.LF
+                 & "               end if;" & ASCII.LF
+                 & "               K := K + 1;" & ASCII.LF
+                 & "            elsif C = '.' and then not Dot then" & ASCII.LF
+                 & "               Dot := True;" & ASCII.LF
+                 & "               K := K + 1;" & ASCII.LF
+                 & "            elsif C = 'e' or else C = 'E' then" & ASCII.LF
+                 & "               K := K + 1;" & ASCII.LF
+                 & "               if K <= Buf'Length" & ASCII.LF
+                 & "                 and then Buf (Buf'First + K - 1) = '-' then" & ASCII.LF
+                 & "                  Exp_Neg := True;" & ASCII.LF
+                 & "                  K := K + 1;" & ASCII.LF
+                 & "               elsif K <= Buf'Length" & ASCII.LF
+                 & "                 and then Buf (Buf'First + K - 1) = '+' then" & ASCII.LF
+                 & "                  K := K + 1;" & ASCII.LF
+                 & "               end if;" & ASCII.LF
+                 & "               while K <= Buf'Length" & ASCII.LF
+                 & "                 and then Buf (Buf'First + K - 1) in '0' .. '9' loop" & ASCII.LF
+                 & "                  Exp := Exp * 10" & ASCII.LF
+                 & "                    + (Character'Pos (Buf (Buf'First + K - 1))" & ASCII.LF
+                 & "                       - Character'Pos ('0'));" & ASCII.LF
+                 & "                  K := K + 1;" & ASCII.LF
+                 & "               end loop;" & ASCII.LF
+                 & "               exit;" & ASCII.LF
+                 & "            else" & ASCII.LF
+                 & "               exit;" & ASCII.LF
+                 & "            end if;" & ASCII.LF
+                 & "         end;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      if not Seen then" & ASCII.LF
+                 & "         return 0.0;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      for I in 1 .. Exp loop" & ASCII.LF
+                 & "         if Exp_Neg then" & ASCII.LF
+                 & "            V := V / 10.0;" & ASCII.LF
+                 & "         else" & ASCII.LF
+                 & "            V := V * 10.0;" & ASCII.LF
+                 & "         end if;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      if Neg then" & ASCII.LF
+                 & "         return -V;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      return V;" & ASCII.LF
+                 & "   end O2c_StrToReal;" & ASCII.LF
+                 & "";
+            end if;
             S := S & To_String (Decl_Buf);
             if Length (Body_Buf) > 0 then
                S := S & "begin" & ASCII.LF;
@@ -7373,6 +7481,233 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
    end Oak_In_Src;
 
 
+   function Oak_Term_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module Term;" & ASCII.LF;
+      S := S & "import Out;" & ASCII.LF;
+      S := S & "const black = 0;" & ASCII.LF;
+      S := S & "const red = 1;" & ASCII.LF;
+      S := S & "const green = 2;" & ASCII.LF;
+      S := S & "const yellow = 3;" & ASCII.LF;
+      S := S & "const blue = 4;" & ASCII.LF;
+      S := S & "const magenta = 5;" & ASCII.LF;
+      S := S & "const cyan = 6;" & ASCII.LF;
+      S := S & "const white = 7;" & ASCII.LF;
+      S := S & "type A2 = array 2 of char;" & ASCII.LF;
+      S := S & "type A3 = array 3 of char;" & ASCII.LF;
+      S := S & "procedure Bracket*;" & ASCII.LF;
+      S := S & "  var t: A3;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  t[0] := CHR(27);" & ASCII.LF;
+      S := S & "  t[1] := CHR(91);" & ASCII.LF;
+      S := S & "  t[2] := CHR(0);" & ASCII.LF;
+      S := S & "  Out.String(t)" & ASCII.LF;
+      S := S & "end Bracket;" & ASCII.LF;
+      S := S & "procedure Ch*(code: integer);" & ASCII.LF;
+      S := S & "  var t: A2;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  t[0] := CHR(code);" & ASCII.LF;
+      S := S & "  t[1] := CHR(0);" & ASCII.LF;
+      S := S & "  Out.String(t)" & ASCII.LF;
+      S := S & "end Ch;" & ASCII.LF;
+      S := S & "procedure Clear*;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Bracket;" & ASCII.LF;
+      S := S & "  Ch(50);" & ASCII.LF;
+      S := S & "  Ch(74)" & ASCII.LF;
+      S := S & "end Clear;" & ASCII.LF;
+      S := S & "procedure ClearLine*;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Bracket;" & ASCII.LF;
+      S := S & "  Ch(50);" & ASCII.LF;
+      S := S & "  Ch(75)" & ASCII.LF;
+      S := S & "end ClearLine;" & ASCII.LF;
+      S := S & "procedure Invert*;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Bracket;" & ASCII.LF;
+      S := S & "  Ch(55);" & ASCII.LF;
+      S := S & "  Ch(109)" & ASCII.LF;
+      S := S & "end Invert;" & ASCII.LF;
+      S := S & "procedure Reset*;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Bracket;" & ASCII.LF;
+      S := S & "  Ch(48);" & ASCII.LF;
+      S := S & "  Ch(109)" & ASCII.LF;
+      S := S & "end Reset;" & ASCII.LF;
+      S := S & "procedure SetColor*(fg: integer; bg: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Bracket;" & ASCII.LF;
+      S := S & "  Ch(51);" & ASCII.LF;
+      S := S & "  Out.Int(fg, 0);" & ASCII.LF;
+      S := S & "  Ch(109);" & ASCII.LF;
+      S := S & "  Bracket;" & ASCII.LF;
+      S := S & "  Ch(52);" & ASCII.LF;
+      S := S & "  Out.Int(bg, 0);" & ASCII.LF;
+      S := S & "  Ch(109)" & ASCII.LF;
+      S := S & "end SetColor;" & ASCII.LF;
+      S := S & "procedure SetCursor*(x: integer; y: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Bracket;" & ASCII.LF;
+      S := S & "  Out.Int(y + 1, 0);" & ASCII.LF;
+      S := S & "  Ch(59);" & ASCII.LF;
+      S := S & "  Out.Int(x + 1, 0);" & ASCII.LF;
+      S := S & "  Ch(72)" & ASCII.LF;
+      S := S & "end SetCursor;" & ASCII.LF;
+      S := S & "procedure CursorUp*(n: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Bracket;" & ASCII.LF;
+      S := S & "  Out.Int(n, 0);" & ASCII.LF;
+      S := S & "  Ch(65)" & ASCII.LF;
+      S := S & "end CursorUp;" & ASCII.LF;
+      S := S & "procedure CursorDown*(n: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Bracket;" & ASCII.LF;
+      S := S & "  Out.Int(n, 0);" & ASCII.LF;
+      S := S & "  Ch(66)" & ASCII.LF;
+      S := S & "end CursorDown;" & ASCII.LF;
+      S := S & "procedure CursorRight*(n: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Bracket;" & ASCII.LF;
+      S := S & "  Out.Int(n, 0);" & ASCII.LF;
+      S := S & "  Ch(67)" & ASCII.LF;
+      S := S & "end CursorRight;" & ASCII.LF;
+      S := S & "procedure CursorLeft*(n: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  Bracket;" & ASCII.LF;
+      S := S & "  Out.Int(n, 0);" & ASCII.LF;
+      S := S & "  Ch(68)" & ASCII.LF;
+      S := S & "end CursorLeft;" & ASCII.LF;
+      S := S & "procedure GetSize*(var w: integer; var h: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  w := 80;" & ASCII.LF;
+      S := S & "  h := 25" & ASCII.LF;
+      S := S & "end GetSize;" & ASCII.LF;
+      S := S & "end Term." & ASCII.LF;
+      return To_String (S);
+   end Oak_Term_Src;
+
+   function Oak_Reals_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module Reals;" & ASCII.LF;
+      S := S & "procedure Convert*(x: real; var str: array of char);" & ASCII.LF;
+      S := S & "  var v: real; s: real; t: real; neg: boolean; e: integer; d: integer;" & ASCII.LF;
+      S := S & "      k: integer; n: integer; i: integer;" & ASCII.LF;
+      S := S & "" & ASCII.LF;
+      S := S & "  procedure Put(ci: integer);" & ASCII.LF;
+      S := S & "  begin" & ASCII.LF;
+      S := S & "    if n < len(str) - 1 then" & ASCII.LF;
+      S := S & "      str[n] := CHR(ci);" & ASCII.LF;
+      S := S & "      n := n + 1" & ASCII.LF;
+      S := S & "    end" & ASCII.LF;
+      S := S & "  end Put;" & ASCII.LF;
+      S := S & "" & ASCII.LF;
+      S := S & "  procedure Digit;" & ASCII.LF;
+      S := S & "  begin" & ASCII.LF;
+      S := S & "    d := 0;" & ASCII.LF;
+      S := S & "    t := 1.0;" & ASCII.LF;
+      S := S & "    while v >= t do" & ASCII.LF;
+      S := S & "      d := d + 1;" & ASCII.LF;
+      S := S & "      t := t + 1.0" & ASCII.LF;
+      S := S & "    end;" & ASCII.LF;
+      S := S & "    Put(48 + d);" & ASCII.LF;
+      S := S & "    s := 0.0;" & ASCII.LF;
+      S := S & "    k := 0;" & ASCII.LF;
+      S := S & "    while k < d do" & ASCII.LF;
+      S := S & "      s := s + 1.0;" & ASCII.LF;
+      S := S & "      k := k + 1" & ASCII.LF;
+      S := S & "    end;" & ASCII.LF;
+      S := S & "    v := (v - s) * 10.0" & ASCII.LF;
+      S := S & "  end Digit;" & ASCII.LF;
+      S := S & "" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  neg := false;" & ASCII.LF;
+      S := S & "  v := x;" & ASCII.LF;
+      S := S & "  if v < 0.0 then" & ASCII.LF;
+      S := S & "    neg := true;" & ASCII.LF;
+      S := S & "    v := 0.0 - v" & ASCII.LF;
+      S := S & "  end;" & ASCII.LF;
+      S := S & "  e := 0;" & ASCII.LF;
+      S := S & "  if v >= 10.0 then" & ASCII.LF;
+      S := S & "    while v >= 10.0 do" & ASCII.LF;
+      S := S & "      v := v / 10.0;" & ASCII.LF;
+      S := S & "      e := e + 1" & ASCII.LF;
+      S := S & "    end" & ASCII.LF;
+      S := S & "  elsif v > 0.0 then" & ASCII.LF;
+      S := S & "    while v < 1.0 do" & ASCII.LF;
+      S := S & "      v := v * 10.0;" & ASCII.LF;
+      S := S & "      e := e - 1" & ASCII.LF;
+      S := S & "    end" & ASCII.LF;
+      S := S & "  end;" & ASCII.LF;
+      S := S & "  n := 0;" & ASCII.LF;
+      S := S & "  if neg then" & ASCII.LF;
+      S := S & "    Put(45)" & ASCII.LF;
+      S := S & "  end;" & ASCII.LF;
+      S := S & "  Digit;" & ASCII.LF;
+      S := S & "  Put(46);" & ASCII.LF;
+      S := S & "  for i := 1 to 5 do" & ASCII.LF;
+      S := S & "    Digit" & ASCII.LF;
+      S := S & "  end;" & ASCII.LF;
+      S := S & "  Put(69);" & ASCII.LF;
+      S := S & "  if e < 0 then" & ASCII.LF;
+      S := S & "    Put(45);" & ASCII.LF;
+      S := S & "    e := 0 - e" & ASCII.LF;
+      S := S & "  else" & ASCII.LF;
+      S := S & "    Put(43)" & ASCII.LF;
+      S := S & "  end;" & ASCII.LF;
+      S := S & "  Put(48 + ((e div 10) mod 10));" & ASCII.LF;
+      S := S & "  Put(48 + (e mod 10));" & ASCII.LF;
+      S := S & "  for i := n to len(str) - 1 do" & ASCII.LF;
+      S := S & "    str[i] := CHR(0)" & ASCII.LF;
+      S := S & "  end" & ASCII.LF;
+      S := S & "end Convert;" & ASCII.LF;
+      S := S & "procedure ConvertTo*(var x: real; str: array of char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  x := RParse(str)" & ASCII.LF;
+      S := S & "end ConvertTo;" & ASCII.LF;
+      S := S & "procedure Ten*(e: integer): real;" & ASCII.LF;
+      S := S & "  var i: integer; v: real;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  v := 1.0;" & ASCII.LF;
+      S := S & "  i := 0;" & ASCII.LF;
+      S := S & "  if e > 0 then" & ASCII.LF;
+      S := S & "    while i < e do" & ASCII.LF;
+      S := S & "      v := v * 10.0;" & ASCII.LF;
+      S := S & "      i := i + 1" & ASCII.LF;
+      S := S & "    end" & ASCII.LF;
+      S := S & "  else" & ASCII.LF;
+      S := S & "    while i < 0 - e do" & ASCII.LF;
+      S := S & "      v := v / 10.0;" & ASCII.LF;
+      S := S & "      i := i + 1" & ASCII.LF;
+      S := S & "    end" & ASCII.LF;
+      S := S & "  end;" & ASCII.LF;
+      S := S & "  return v" & ASCII.LF;
+      S := S & "end Ten;" & ASCII.LF;
+      S := S & "procedure Expo*(x: real): integer;" & ASCII.LF;
+      S := S & "  var n: integer; v: real;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  v := x;" & ASCII.LF;
+      S := S & "  n := 0;" & ASCII.LF;
+      S := S & "  if v < 0.0 then" & ASCII.LF;
+      S := S & "    v := 0.0 - v" & ASCII.LF;
+      S := S & "  end;" & ASCII.LF;
+      S := S & "  if v # 0.0 then" & ASCII.LF;
+      S := S & "    while v >= 10.0 do" & ASCII.LF;
+      S := S & "      v := v / 10.0;" & ASCII.LF;
+      S := S & "      n := n + 1" & ASCII.LF;
+      S := S & "    end;" & ASCII.LF;
+      S := S & "    while v < 1.0 do" & ASCII.LF;
+      S := S & "      v := v * 10.0;" & ASCII.LF;
+      S := S & "      n := n - 1" & ASCII.LF;
+      S := S & "    end" & ASCII.LF;
+      S := S & "  end;" & ASCII.LF;
+      S := S & "  return n" & ASCII.LF;
+      S := S & "end Expo;" & ASCII.LF;
+      S := S & "end Reals." & ASCII.LF;
+      return To_String (S);
+   end Oak_Reals_Src;
+
    function Compile_Multi (Main_Source : String; Libs : Lib_Array;
                            N_Libs : Natural; Count : out Natural)
                            return Unit_Array
@@ -7452,6 +7787,22 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       end if;
 
       Compile_Module (Oak_In_Src, True, M_T, S_T, B_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
+      if Length (B_T) > 0 then
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
+      N_Prov := N_Prov + 1;
+      Provided (N_Prov) := Mod_Name;
+
+      Compile_Module (Oak_Reals_Src, True, M_T, S_T, B_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
+      if Length (B_T) > 0 then
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
+      N_Prov := N_Prov + 1;
+      Provided (N_Prov) := Mod_Name;
+
+      Compile_Module (Oak_Term_Src, True, M_T, S_T, B_T);
       Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
          Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);

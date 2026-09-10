@@ -113,5 +113,10 @@ if ! grep -aq 'in-eof' "$QEMU_LOG"; then
    tail -30 "$QEMU_LOG" >&2
    exit 1
 fi
+if ! grep -aq '2.50000E+00' "$QEMU_LOG" || ! grep -aq 'term-ok' "$QEMU_LOG"; then
+   echo "run_m1: Reals/Term demo output not seen" >&2
+   tail -30 "$QEMU_LOG" >&2
+   exit 1
+fi
 
 echo "run_m1: PASS"

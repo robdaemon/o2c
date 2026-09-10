@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M45 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M46 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M45 status
+## M46 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,30 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M46 — `Reals` and `Term` (extension modules)**: two non-Oakwood
+modules shipped as builtins (documented as extensions — the Oakwood
+basic set has neither).  `Term` is ANSI terminal control over `Out`:
+`Clear`, `ClearLine`, `Invert`, `Reset`, `SetColor(fg, bg)`,
+`SetCursor(x, y)`, `CursorUp/Down/Left/Right(n)`, `GetSize(w, h)` and
+the colour constants.  `Reals` is REAL conversion: `Convert(x, str)`
+(→ `2.50000E+00`), `ConvertTo(x, str)`, `Ten(e)` and `Expo(x)`.
+
+`Convert` is written **entirely in Oberon** — normalise into [1, 10),
+then pull each digit by comparing against a running float threshold
+(`t := t + 1.0`) and subtracting an accumulated `s` — because the
+target proved unreliable with the alternatives: `Float'Image` is not
+trustworthy in the aegir runtime, float→integer conversion rounds
+rather than truncates, and (the real trap) **passing a local `real`
+variable into an injected FFI helper delivered garbage on the
+target** (`0.0000/E+00`, `500.5`, `142.09` across builds), while float
+literals and `VAR real` arguments worked.  Keeping the conversion to
+float ops with literals removed the failure; only `ConvertTo` still
+uses an FFI helper (`O2c_StrToReal` via the reserved `RParse`
+expression).  `Max_Imports` was raised 8 → 32 (the demo now imports
+ten modules).  The demo prints the conversions and the `term-ok`
+marker through the terminal escapes; `run_m1` asserts
+`2.50000E+00` and `term-ok` on target.
 
 **M45 — Oakwood `In` module (console input)**: the fifth builtin
 implements the Oakwood input module — `Done*`, `Open*`, `Char*`,
