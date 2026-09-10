@@ -31,6 +31,11 @@ Aegir runtime.
 ## Repository conventions
 
 - Builds are serial; never `make -jN`.
+- `alr` (reached through aegir's crates when `make build AEGIR_ROOT=...`
+  runs) needs a writable temp dir: this sandbox's `/run/user/1000` is
+  read-only, so set `XDG_RUNTIME_DIR=/tmp/alrrt TMPDIR=/tmp` (plus
+  `XDG_CONFIG_HOME`/`XDG_DATA_HOME`) or `alr build` dies with
+  "Could not create temporary file at /run/user/1000/alr-*.tmp".
 - Keep the tree warning-free; remove scratch artifacts (`*.ali`, `*.o`)
   from the repo root before committing (they are gitignored).
 - Commit after each milestone.
