@@ -40,7 +40,7 @@ VM_GNAT_BIN := $(firstword $(wildcard $(HOME)/.local/share/alire/toolchains/gnat
 VM_GPR_BIN := $(firstword $(wildcard $(HOME)/.local/share/alire/toolchains/gprbuild_*/bin))
 VM_GPRBUILD := $(if $(VM_GPR_BIN),$(VM_GPR_BIN)/gprbuild,gprbuild)
 
-.PHONY: vm-host vm-clean tools-host tools-clean
+.PHONY: vm-host vm-clean vm-aegir tools-host tools-clean
 vm-host:
 	@if [ -z "$(VM_GNAT_BIN)" ]; then \
 	   echo "vm-host: no native GNAT toolchain found under" \
@@ -62,6 +62,16 @@ tools-host:
 	   exit 1; \
 	fi
 	PATH="$(VM_GNAT_BIN):$(VM_GPR_BIN):$(PATH)" $(VM_GPRBUILD) -p -P $(CURDIR)/tools/tools.gpr
+
+#  Aegir build of the VM: runs .obc images inside the guest.  Goes through
+#  the aegir crate's alr environment (that is what selects the riscv64
+#  toolchain), unlike the host builds above.
+vm-aegir:
+	cd $(ALR_DIR) && alr exec -- gprbuild -p -P $(CURDIR)/vm/vm_aegir.gpr \
+	  -aP $(AEGIR_ROOT)/userspace/rts -XAEGIR_ROOT=$(AEGIR_ROOT)
+
+vm-aegir-clean:
+	rm -rf vm/obj-aegir vm/bin-aegir
 
 tools-clean:
 	rm -rf tools/obj tools/bin

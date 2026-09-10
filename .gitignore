@@ -2,6 +2,8 @@ crate/obj/
 crate/bin/
 vm/obj/
 vm/bin/
+vm/obj-aegir/
+vm/bin-aegir/
 tools/obj/
 tools/bin/
 /o2c_compiler.ali

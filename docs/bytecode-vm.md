@@ -178,7 +178,30 @@ backend's regression still passes **and** the new VM path is exercised.
   one byte at each end; and the 64-bit header/table writers needed
   `Unsigned_64` shifts.
 
-  Remaining for M53: more of the language in the slice (REAL, SET, `FOR`,
+  **Progress — the VM builds for Aegir.**  `make vm-aegir` produces
+  `vm/bin-aegir/vm.elf` (riscv64, statically linked, warning-free) with the
+  same driver and interpreter as the host build; only the platform bodies
+  differ:
+
+      vm/compat-host/vm_io.adb    Ada.Sequential_IO   (make vm-host)
+      vm/compat-aegir/vm_io.adb   Aegir_User.Files    (make vm-aegir)
+      vm/compat-*/vm_platform.adb exit status via Ada.Command_Line vs
+                                  CLI.Init/CLI.Exit_With
+
+  Two things the port turned on, both verified rather than assumed:
+  `Ada.Command_Line` and console `Ada.Text_IO` *do* work in the guest
+  (`userspace/echo` documents the chain: Text_IO -> newlib stdio -> gloss
+  fd 1 -> console, composing with redirection), so the driver and the
+  `Out.*` natives needed no changes; but the RTS ships **no**
+  `Sequential_IO`, `Direct_IO` or `Ada.Streams`, so image input goes
+  through `Aegir_User.Files` (`Open` + `Read` into a caller buffer at an
+  offset), the pattern `userspace/libman` uses to stage a file.  Object and
+  exec directories are separate (`obj-aegir`, `bin-aegir`) so the riscv64
+  build never collides with the host one.
+
+  Remaining for M53: staging `vm.elf` into the initrd with a Manifest entry
+  and asserting its output in a boot, so the guest proves it *runs* an
+  image; then more of the language in the slice (REAL, SET, `FOR`,
   `REPEAT`, `CASE`, arrays, pointers, procedures - each with its own
   opcodes already reserved), then an Aegir build of the VM so the in-guest
   pipeline can compile *and run* without a host toolchain, and the

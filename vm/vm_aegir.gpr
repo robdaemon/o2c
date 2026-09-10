@@ -1,0 +1,19 @@
+--  Aegir (riscv64) build of the bytecode VM: the same driver and
+--  interpreter as the host build, with the platform bodies from
+--  compat-aegir (Aegir_User.Files for image input, CLI for the program
+--  lifecycle) and the Aegir runtime.  Separate object/exec directories so
+--  it never collides with the host build in obj/ and bin/.
+--
+--  Build via the repo Makefile: make vm-aegir (AEGIR_ROOT must be set).
+project Vm_Aegir extends "aegir_program.gpr" is
+   for Source_Dirs use (".", "compat-aegir");
+   for Object_Dir use "obj-aegir";
+   for Exec_Dir use "bin-aegir";
+   for Main use ("vm_main.adb");
+   for Create_Missing_Dirs use "True";
+   for Runtime ("Ada") use external ("AEGIR_ROOT") & "/userspace/gnat-rts";
+
+   package Builder is
+      for Executable ("vm_main.adb") use "vm.elf";
+   end Builder;
+end Vm_Aegir;
