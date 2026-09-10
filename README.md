@@ -8,6 +8,8 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 ## Layout
 - `compiler/` — translator sources: `o2c_lexer` (tokens), `o2c_compiler`
   (parser + Ada emitter)
+- `docs/obnc-libext.md` — OBNC library extensions vs our builtins, and
+  the planned `Args`/`Env`/`Convert`/`Err` milestones
 - `crate/`   — build project for the `o2c.elf` Aegir program
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
