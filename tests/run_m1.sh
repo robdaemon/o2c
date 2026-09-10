@@ -142,6 +142,13 @@ done
 #  only - never at the O2C| capture lines.
 grep -av '^O2C|' "$QEMU_LOG" > "$RUNTIME_LOG" || true
 
+#  Temporary (M53): the demo's BD0 sequence is bracketed with m8401..m8407 so
+#  a stall names the op it stalled in; assert the whole sequence for now.
+if ! grep -aq 'm8407' "$RUNTIME_LOG"; then
+   echo "run_m1: the demo's BD0 sequence did not complete (last marker below)" >&2
+   grep -ao 'm84[0-9][0-9]' "$RUNTIME_LOG" | tail -1 >&2
+   exit 1
+fi
 if ! grep -aq 'O2c files demo ok' "$RUNTIME_LOG"; then
    echo "run_m1: Files read demo output not seen in boot 2 (tail below)" >&2
    tail -30 "$RUNTIME_LOG" >&2

@@ -392,12 +392,19 @@ begin
   fl[fi] := CHR(0);
   Out.String(fl);
   Out.Ln;
+  Out.String("m8401"); Out.Ln;   (* at the BD0 sequence *)
   Files.Wait("BD0:");
+  Out.String("m8402"); Out.Ln;
   Files.Delete("BD0:O2cDemo.TXT");
+  Out.String("m8403"); Out.Ln;
   Files.Delete("BD0:O2cRen.TXT");
+  Out.String("m8404"); Out.Ln;
   fd := Files.New("BD0:O2cDemo.TXT");
+  Out.String("m8405"); Out.Ln;
   Files.Open(rr, fd);
+  Out.String("m8406"); Out.Ln;
   Files.WriteString(rr, "O2cW!");
+  Out.String("m8407"); Out.Ln;
   if rr.res = 0 then Out.String("res-ok") else Out.String("res-bad") end;
   Out.Ln;
   Files.Close(rr);
