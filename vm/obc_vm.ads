@@ -34,6 +34,11 @@ package OBC_VM is
    --  HALT, otherwise the first failure.  Diagnostics go to stderr.
    function Run (Path : String) return Status;
 
+   --  Interpret an image already in memory (same verification and
+   --  execution as Run).  o2c uses this to execute the bytecode it just
+   --  emitted, in-process.
+   function Run_Image (Image : String) return Status;
+
    --  Human-readable status text, for the driver's exit diagnostic.
    function Image (S : Status) return String;
 end OBC_VM;

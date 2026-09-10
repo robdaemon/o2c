@@ -9,6 +9,7 @@
 --  CLI.Exit_With in the guest versus a plain exit status on the host - and
 --  that stays in VM_Platform with one body per platform.
 with Ada.Sequential_IO;
+with VM_Platform;
 
 package body VM_IO is
    package Byte_IO is new Ada.Sequential_IO (Byte);
@@ -23,12 +24,32 @@ package body VM_IO is
          null;
    end Close_If_Open;
 
+   --  Retry delay between attempts (see VM_Platform.Max_Input_Attempts).
+   Retry_Delay : constant Duration := 0.1;
+
    procedure Read_File (Path : String; Data : out Byte_Array;
                         Len : out Natural; St : out Status) is
-      File : Byte_IO.File_Type;
+      File    : Byte_IO.File_Type;
+      Limit   : constant Natural := VM_Platform.Max_Input_Attempts;
+      Attempt : Natural := 1;
    begin
       Len := 0;
-      Byte_IO.Open (File, Byte_IO.In_File, Path);
+      --  In the guest the image may still be arriving: the compiler and the
+      --  VM are separate manifest programs that run concurrently.
+      loop
+         begin
+            Byte_IO.Open (File, Byte_IO.In_File, Path);
+            exit;
+         exception
+            when others =>
+               if Attempt >= Limit then
+                  St := No_File;
+                  return;
+               end if;
+               Attempt := Attempt + 1;
+               delay Retry_Delay;
+         end;
+      end loop;
       loop
          declare
             B : Byte;

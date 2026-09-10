@@ -16,12 +16,24 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK="${TMPDIR:-/tmp}/o2c-m1"
 QEMU_LOG="$WORK/boot.log"
+RUNTIME_LOG="$WORK/boot_runtime.log"
 RUN_MIN=${RUN_MIN:-280}
 
 rm -rf "$WORK"; mkdir -p "$WORK"
 
 cleanup() {
+   local rc=$?
    pkill -f 'qemu-system-riscv6[4]' 2>/dev/null || true
+   #  The work directory (and with it both boot logs) is removed on exit, so
+   #  a failing run leaves nothing to diagnose.  Keep the last boot log and
+   #  the filtered runtime log under /tmp instead.
+   if [ -s "$QEMU_LOG" ]; then
+      cp -f "$QEMU_LOG" /tmp/run_m1_boot.log 2>/dev/null || true
+   fi
+   if [ -s "$RUNTIME_LOG" ]; then
+      cp -f "$RUNTIME_LOG" /tmp/run_m1_runtime.log 2>/dev/null || true
+   fi
+   return $rc
 }
 trap cleanup EXIT INT TERM
 
@@ -43,10 +55,16 @@ boot_once() {  # $1 = extra make vars, $2 = marker
 }
 
 echo "run_m1: building o2c.elf"
-#  build the Ada backend, the Aegir VM and the guest fixture image: the
-#  min-mode initrd stages vm.elf as Tests/Vm and the fixture at
-#  Tests/O2cBC/VmGreet.obc (see the aegir Makefile's O2C_VM_* vars).
-make -C "$ROOT" build vm-aegir vm-fixture AEGIR_ROOT="$AEGIR_ROOT" >/dev/null
+#  build the Ada backend and the Aegir VM.  o2c embeds the VM, so the guest
+#  run needs no separate VM program staged any more (see o2c's
+#  crate/o2c.gpr); vm-aegir is built to keep that target honest.  The build
+#  status is checked: a silent failure here used to surface much later as an
+#  inexplicable boot assertion.
+if ! make -C "$ROOT" build vm-aegir AEGIR_ROOT="$AEGIR_ROOT" >/dev/null; then
+   echo "run_m1: build failed" >&2
+   make -C "$ROOT" build vm-aegir AEGIR_ROOT="$AEGIR_ROOT" 2>&1 | tail -15 >&2
+   exit 1
+fi
 
 echo "run_m1: boot 1/2 - o2c compiles the demo modules (retry on torn capture)"
 ATT=0
@@ -96,10 +114,19 @@ echo "run_m1: boot 2/2 - assert hello output incl. shared O2c_Types"
 echo "  exports (406) and the Files module reading the staged"
 echo "  Tests/O2cLib/Sample.txt (M40)"
 boot_once "O2C_HELLO_ELF=$WORK/bin/hello.elf" '406'
+
+#  The demo's last marker does not order o2c's work: the demo (program 41)
+#  and o2c (program 40) are separate manifest programs that run CONCURRENTLY
+#  (the spawner does not wait for one before starting the next), and o2c
+#  prints its bytecode line after its own capture.  So wait for that line
+#  before asserting on the log, or the check races the program it checks.
+for _ in $(seq 1 12); do
+   grep -aq 'o2c bytecode: vm ok' "$QEMU_LOG" && break
+   sleep 5
+done
 #  The boot-1 source capture also contains every string/number literal the
 #  demo uses, so the demo assertions below must look at the runtime console
 #  only - never at the O2C| capture lines.
-RUNTIME_LOG="$WORK/boot_runtime.log"
 grep -av '^O2C|' "$QEMU_LOG" > "$RUNTIME_LOG" || true
 
 if ! grep -aq 'O2c files demo ok' "$RUNTIME_LOG"; then
@@ -169,8 +196,15 @@ fi
 #  executed a .obc image under Aegir.  (The image is emitted by the host
 #  front end for now; wiring the in-guest compiler to write its own .obc is
 #  the next step, at which point the fixture disappears.)
-if ! grep -aq 'vm elf ok 55' "$RUNTIME_LOG"; then
-   echo "run_m1: the staged VM did not run its image in-guest" >&2
+#  Both tokens are written by a *single* console write (a Put_Line), which
+#  matters because o2c and the demo run concurrently: 'vm elf ok ' and '55'
+#  come from separate Out.String/Out.Int calls, so a racing writer can land
+#  between them and split that line.  Asserting the single-write token, plus
+#  o2c's own status line, is the fragment-tolerant form (see AGENTS.md on
+#  merged console lines).
+if ! grep -aq 'vm elf ok' "$RUNTIME_LOG" \
+   || ! grep -aq 'o2c bytecode: vm ok' "$RUNTIME_LOG"; then
+   echo "run_m1: the guest did not compile and run bytecode" >&2
    tail -30 "$RUNTIME_LOG" >&2
    exit 1
 fi

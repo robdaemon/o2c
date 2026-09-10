@@ -5,7 +5,12 @@
 --  NO default: an unset AEGIR_ROOT is a hard build error, so this
 --  never silently falls back to a machine-specific path.
 project O2c extends "aegir_program.gpr" is
-   for Source_Dirs use ("../compiler", ".");
+   --  ../vm is the bytecode VM.  o2c embeds it so it can execute the image
+   --  it just emitted (the guest pipeline runs inside one process, with no
+   --  intermediate file and no cross-program race); the VM's own mains are
+   --  excluded, only the interpreter and its Aegir bodies are compiled.
+   for Source_Dirs use ("../compiler", ".", "../vm", "../vm/compat-aegir");
+   for Excluded_Source_Files use ("vm_main.adb", "bc_emit.adb");
    for Object_Dir use "obj";
    for Exec_Dir use "bin";
    for Main use ("o2c.adb");

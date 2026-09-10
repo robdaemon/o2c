@@ -11,6 +11,9 @@ package body VM_Platform is
    function Resolve_Path (Path : String) return String is
      (Path);
 
+   function Max_Input_Attempts return Natural is
+     (1);
+
    procedure Exit_With (Ok : Boolean) is
    begin
       if Ok then

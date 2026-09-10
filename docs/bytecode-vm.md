@@ -238,9 +238,42 @@ backend's regression still passes **and** the new VM path is exercised.
   (`Verify`/`Execute` alias them with `renames`).  **Rule for guest code:
   nothing large on the stack.**
 
-  Remaining for M53: the in-guest compile side (o2c writing the .obc it
-  produces, which removes the host-built fixture); then more of the language
-  in the slice (REAL, SET, `FOR`,
+  **Progress — the guest compiles *and* runs bytecode, in one process.**
+  o2c embeds the VM (`crate/o2c.gpr` pulls in `../vm` plus its Aegir
+  platform bodies, excluding the VM's other mains), so after compiling
+  `Tests/O2cLib/VmGreet.ob2` in bytecode mode it executes the image through
+  `OBC_VM.Run_Image` - the same decode/verify/execute path as the
+  file-driven `Run`, which now shares a `Run_Buffer` core.  A min-mode boot
+  therefore shows:
+
+      o2c bytecode: image 352 bytes
+      vm elf ok 55
+      o2c bytecode: vm ok
+
+  **Why not via a file:** the first design had o2c write the image and the
+  standalone VM read it back, and it hit three walls in a row - `Tests/`
+  does not exist on the writable volume (that is the initrd's tree),
+  then `No space left on device` for a 352-byte file at `BD0:` root, and
+  underneath both, a race: **manifest programs are spawned concurrently**
+  (`userspace/init/init.adb` spawns and never waits), so the VM could start
+  before the compiler had written anything.  Executing the image in-process
+  removes the file, the volume and the race together - and it makes the
+  compiler self-checking, which is what we want from it anyway.  Keep the
+  volume question for the standalone VM (a real use case: running programs
+  from files), not for the milestone.
+
+  **What the test learned the hard way:** `run_m1` asserted on o2c's output
+  as soon as the *demo* printed its last marker, but the demo (program 41)
+  and o2c (program 40) are concurrent, so the check raced the program it was
+  checking.  It now waits for o2c's own line first, asserts single-write
+  tokens where possible (a marker split by a concurrent writer would
+  otherwise miss), checks the build's exit status instead of ignoring it,
+  and preserves the last boot log under `/tmp/run_m1_boot.log` on exit -
+  a failing run used to delete the only evidence.
+
+  Remaining for M53: the standalone VM reading images from the writable
+  volume (blocked on how full `befs.img` is); then more of the language in
+  the slice (REAL, SET, `FOR`,
   `REPEAT`, `CASE`, arrays, pointers, procedures - each with its own
   opcodes already reserved), then an Aegir build of the VM so the in-guest
   pipeline can compile *and run* without a host toolchain, and the

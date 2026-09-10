@@ -15,6 +15,9 @@ package body VM_Platform is
       return Aegir_User.CLI.Resolve_Path (Path);
    end Resolve_Path;
 
+   function Max_Input_Attempts return Natural is
+     (100);   --  100 x 100 ms in VM_IO: the compiler may still be writing
+
    procedure Exit_With (Ok : Boolean) is
    begin
       if Ok then

@@ -642,12 +642,54 @@ package body OBC_VM is
       end loop;
    end Execute;
 
+   --  Execute an image that is already in memory.  This is the same path
+   --  Run uses, split out so a caller that *has* the bytes - notably o2c
+   --  itself, which can run the image it just emitted - need not write
+   --  them to a file first.
+   function Run_Buffer (Data : Byte_Array) return Status is
+      St    : Status;
+      Img   : Image_Info;
+      Phase : Natural := 0;
+   begin
+      Phase := 1;
+      St := Decode (Data, Data'Length, Img);
+      if St /= Ok then
+         return St;
+      end if;
+      Phase := 2;
+      St := Verify (Img.Code.all, Img);
+      if St /= Ok then
+         return St;
+      end if;
+      Phase := 3;
+      return Execute (Data, Img);
+   exception
+      --  A malformed image must be *rejected*, never crash the VM: the
+      --  spec's verification rules are checked, but a bug in the checks
+      --  themselves must still surface as a status, not a CONSTRAINT_ERROR.
+      when E : others =>
+         Note ("internal error in phase" & Natural'Image (Phase) & ": "
+               & Ada.Exceptions.Exception_Name (E)
+               & " (" & Ada.Exceptions.Exception_Message (E) & ")");
+         return Bad_Code;
+   end Run_Buffer;
+
+   function Run_Image (Image : String) return Status is
+      B : constant Byte_Array_Access := new Byte_Array (0 .. Image'Length - 1);
+   begin
+      if Image'Length = 0 or else Image'Length > Max_File then
+         return Bad_Size;
+      end if;
+      for I in Image'Range loop
+         B (I - Image'First) := VM_IO.Byte (Character'Pos (Image (I)));
+      end loop;
+      return Run_Buffer (B.all);
+   end Run_Image;
+
    function Run (Path : String) return Status is
       Data : constant Byte_Array_Access := new Byte_Array (0 .. Max_File - 1);
       Len  : Natural;
       St   : Status;
-      Img  : Image_Info;
-      Phase : Natural := 0;
    begin
       declare
          Io_St : VM_IO.Status;
@@ -666,29 +708,14 @@ package body OBC_VM is
          Note (Image (St) & ": " & Path);
          return St;
       end if;
-      Phase := 1;
-      St := Decode (Data.all, Len, Img);
-      if St /= Ok then
-         Note (Image (St) & ": " & Path);
-         return St;
-      end if;
-      Phase := 2;
-      St := Verify (Img.Code.all, Img);
-      if St /= Ok then
-         Note (Image (St) & ": " & Path);
-         return St;
-      end if;
-      Phase := 3;
-      return Execute (Data.all, Img);
-   exception
-      --  A malformed image must be *rejected*, never crash the VM: the
-      --  spec's verification rules are checked, but a bug in the checks
-      --  themselves must still surface as a status, not a CONSTRAINT_ERROR.
-      when E : others =>
-         Note ("internal error in phase" & Natural'Image (Phase) & ": "
-               & Ada.Exceptions.Exception_Name (E)
-               & " (" & Ada.Exceptions.Exception_Message (E) & ")");
-         return Bad_Code;
+      declare
+         R : constant Status := Run_Buffer (Data (0 .. Len - 1));
+      begin
+         if R /= Ok then
+            Note (Image (R) & ": " & Path);
+         end if;
+         return R;
+      end;
    end Run;
 
 end OBC_VM;

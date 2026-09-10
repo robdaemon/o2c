@@ -2,9 +2,9 @@
 --
 --  One argument names the image.  With no argument it runs a default
 --  image, because a program spawned from System/Manifest gets no
---  arguments: that is how the in-guest test runs the VM (the fixture the
---  aegir build stages at Tests/O2cBC/VmGreet.obc).  Once the manifest can
---  pass arguments, the default becomes redundant.
+--  arguments: that is how the in-guest test runs the VM, on the image o2c
+--  itself wrote to BD0: in the same boot.  Once the manifest can pass
+--  arguments, the default becomes redundant.
 with Ada.Command_Line;
 with Ada.Text_IO;
 with OBC_VM;
@@ -14,7 +14,7 @@ procedure VM_Main is
    use Ada.Command_Line;
    use type OBC_VM.Status;
 
-   Default_Image : constant String := "RD0:Tests/O2cBC/VmGreet.obc";
+   Default_Image : constant String := "BD0:VmGreet.obc";
    Path          : constant String :=
      (if Argument_Count >= 1 then Argument (1) else Default_Image);
 begin

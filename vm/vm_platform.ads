@@ -19,4 +19,11 @@ package VM_Platform is
    --  host a path is already a host path, so this is the identity.
    function Resolve_Path (Path : String) return String;
 
+   --  How many times to try opening an image before giving up.  The host
+   --  has one shot (an image is a static file there).  In the guest the
+   --  compiler and the VM are spawned concurrently from System/Manifest -
+   --  the spawner does not wait for one program before starting the next -
+   --  so the VM waits for the compiler to finish writing the image.
+   function Max_Input_Attempts return Natural;
+
 end VM_Platform;

@@ -1,6 +1,7 @@
 with Aegir_User.Console;
 with Aegir_User.CLI;
 with Ada.Exceptions;
+with OBC_VM;
 with Ada.Text_IO;
 with Ada.Strings.Unbounded;  use Ada.Strings.Unbounded;
 with O2c_Compiler;
@@ -60,6 +61,7 @@ procedure O2c is
       end if;
    end Emit_Gen;
 
+   Empty_Libs : constant O2c_Compiler.Lib_Array := (others => <>);
    Libs  : O2c_Compiler.Lib_Array;
    Res   : O2c_Compiler.Unit_Array;
    Count : Natural;
@@ -85,6 +87,43 @@ begin
       Aegir_User.Console.Put_Line ("--- unit end ---");
    end loop;
    Aegir_User.Console.Put_Line ("--- ada end ---");
+
+   --  M53: compile a slice-sized program to bytecode and write the image, so
+   --  the VM (Tests/Vm, program 42) can run something *this guest* built.
+   --  After the demo pass on purpose: Compile_Multi's provided-module table
+   --  is package state, and a second call must not be the one that emits the
+   --  builtin units the capture asserts on.
+   begin
+      O2c_Compiler.Bytecode_Requested := True;
+      Res := O2c_Compiler.Compile_Multi
+        (Main_Source => Read_Module ("RD0:Tests/O2cLib/VmGreet.ob2"),
+         Libs => Empty_Libs, N_Libs => 0, Count => Count);
+      O2c_Compiler.Bytecode_Requested := False;
+      declare
+         Img : constant String := O2c_Compiler.Bytecode_Image;
+         St  : OBC_VM.Status;
+      begin
+         if Img'Length = 0 then
+            raise O2c_Compiler.O2c_Error with "no bytecode image produced";
+         end if;
+         Aegir_User.Console.Put_Line
+           ("o2c bytecode: image" & Natural'Image (Img'Length) & " bytes");
+         --  Execute it right here.  The VM is embedded (see o2c.gpr), so the
+         --  guest needs no intermediate file: writing one ran into the
+         --  writable volume's limits and into a race with the compiler's own
+         --  spawn, and neither belongs in the test of "can this guest compile
+         --  and run bytecode".  What the image prints is the VM's own Out.*
+         --  natives, i.e. real bytecode execution.
+         St := OBC_VM.Run_Image (Img);
+         Aegir_User.Console.Put_Line
+           ("o2c bytecode: vm " & OBC_VM.Image (St));
+      end;
+   exception
+      when E : others =>
+         O2c_Compiler.Bytecode_Requested := False;
+         Aegir_User.Console.Put_Line
+           ("o2c bytecode error: " & Ada.Exceptions.Exception_Message (E));
+   end;
 exception
    when E : O2c_Compiler.O2c_Error =>
       Aegir_User.Console.Put_Line
