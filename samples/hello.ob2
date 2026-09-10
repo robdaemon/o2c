@@ -401,11 +401,21 @@ begin
   Out.String("m8404"); Out.Ln;
   fd := Files.New("BD0:O2cDemo.TXT");
   Out.String("m8405"); Out.Ln;
+  (* M53 diagnostic: can the just-created name be found again?  A failure
+     here puts the fault in the create/flush path; success puts it in the
+     write path. *)
+  fd := Files.Old("BD0:O2cDemo.TXT");
+  Out.String("m8408"); Out.Ln;
+  fd := Files.Old("BD0:O2cDemo.TXT");
   Files.Open(rr, fd);
   Out.String("m8406"); Out.Ln;
   Files.WriteString(rr, "O2cW!");
   Out.String("m8407"); Out.Ln;
   if rr.res = 0 then Out.String("res-ok") else Out.String("res-bad") end;
+  Out.Ln;
+  (* M53 diagnostic: 8400 + the raw status the write got, so a failure names
+     itself (Bad_Args=3, Not_Found=1, Out_Of_Range=4) instead of only ok/bad. *)
+  Out.Int(8400 + rr.res, 0);
   Out.Ln;
   Files.Close(rr);
   Files.Rename("BD0:O2cDemo.TXT", "BD0:O2cRen.TXT");
