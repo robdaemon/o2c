@@ -26,9 +26,15 @@ begin
       return;
    end if;
    declare
-      St : constant OBC_VM.Status :=
-        OBC_VM.Run (VM_Platform.Resolve_Path (Path));
+      Full : constant String := VM_Platform.Resolve_Path (Path);
+      St   : OBC_VM.Status;
    begin
+      --  On STDERR: the VM's stdout is the interpreted program's output and
+      --  nothing else, so anything of the VM's own (this line, diagnostics)
+      --  goes to the diagnostics stream.  Still one write, so a concurrent
+      --  writer cannot split it.
+      Ada.Text_IO.Put_Line (Ada.Text_IO.Standard_Error, "vm: running " & Full);
+      St := OBC_VM.Run (Full);
       if St = OBC_VM.Ok then
          VM_Platform.Exit_With (True);
       else

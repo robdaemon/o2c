@@ -1,6 +1,8 @@
 with Aegir_User.Console;
 with Aegir_User.CLI;
 with Ada.Exceptions;
+with Aegir_User.Files;
+with Aegir_User.Syscalls;
 with OBC_VM;
 with Ada.Text_IO;
 with Ada.Strings.Unbounded;  use Ada.Strings.Unbounded;
@@ -61,6 +63,8 @@ procedure O2c is
       end if;
    end Emit_Gen;
 
+   use type Aegir_User.Syscalls.U64;   --  for the file-server status compares
+
    Empty_Libs : constant O2c_Compiler.Lib_Array := (others => <>);
    Libs  : O2c_Compiler.Lib_Array;
    Res   : O2c_Compiler.Unit_Array;
@@ -117,6 +121,63 @@ begin
          St := OBC_VM.Run_Image (Img);
          Aegir_User.Console.Put_Line
            ("o2c bytecode: vm " & OBC_VM.Image (St));
+
+         --  Also write the image to the writable volume, so the standalone
+         --  VM (Tests/Vm, program 42) can run it: a guest compiling a
+         --  program and a separate VM executing it is the real shape of the
+         --  system, and running it in-process only proves the interpreter.
+         --
+         --  Through Aegir_User.Files, not Ada.Sequential_IO: o2c is an
+         --  Aegir program, the fs protocol creates a file on its first
+         --  Write (one call creates *and* fills), and the Oberon Files
+         --  module - which the demo exercises every boot - is this same
+         --  interface.  Going through the libc layer added a second,
+         --  separately-broken create path for no benefit.
+         --
+         --  NOTE: this write fails with status 1 (Not_Found) when BD0: is
+         --  not mounted yet - o2c (program 40) and bfs_server are sibling
+         --  manifest programs and the spawner starts them in order without
+         --  waiting.  The fix belongs in the launcher (init should not spawn
+         --  a program before the caps its own manifest line names exist), not
+         --  in a client-side poll here: no program should have to know which
+         --  resource might be late, or for how long.  Tracked as "Spawn
+         --  ordering on declared caps" under Open candidates in the aegir
+         --  docs/RESUME.md.
+         --
+         --  Publish atomically: write a temp file, then rename it over the
+         --  target.  Writing the target directly does not work - the VM runs
+         --  concurrently and has no way to know the writer is finished, so it
+         --  opens a half-written image ('truncated or inconsistent' with no
+         --  bug in either program).  The rename makes the image appear
+         --  complete or not at all; the VM's own retry covers the not-yet.
+         declare
+            St      : Aegir_User.Syscalls.U64;
+            Written : Aegir_User.Syscalls.U64;
+         begin
+            St := Aegir_User.Files.Write
+              ("BD0:VmGreet.tmp", 0, Img (Img'First)'Address,
+               Aegir_User.Syscalls.U64 (Img'Length), Written);
+            if St = Aegir_User.Files.Status_Ok then
+               --  The volume outlives a boot, so a target from an earlier
+               --  run may still be there; Rename refuses an existing one.
+               St := Aegir_User.Files.Delete ("BD0:VmGreet.obc");
+               St := Aegir_User.Files.Rename ("BD0:VmGreet.tmp",
+                                              "BD0:VmGreet.obc");
+            end if;
+            if St = Aegir_User.Files.Status_Ok then
+               Aegir_User.Console.Put_Line
+                 ("o2c bytecode: published BD0:VmGreet.obc");
+            else
+               Aegir_User.Console.Put_Line
+                 ("o2c bytecode: publish failed, status"
+                  & Aegir_User.Syscalls.U64'Image (St));
+            end if;
+         exception
+            when E : others =>
+               Aegir_User.Console.Put_Line
+                 ("o2c bytecode: image write failed: "
+                  & Ada.Exceptions.Exception_Message (E));
+         end;
       end;
    exception
       when E : others =>

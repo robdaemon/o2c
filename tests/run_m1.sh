@@ -120,8 +120,12 @@ boot_once "O2C_HELLO_ELF=$WORK/bin/hello.elf" '406'
 #  (the spawner does not wait for one before starting the next), and o2c
 #  prints its bytecode line after its own capture.  So wait for that line
 #  before asserting on the log, or the check races the program it checks.
-for _ in $(seq 1 12); do
-   grep -aq 'o2c bytecode: vm ok' "$QEMU_LOG" && break
+#  The last thing o2c prints is the publish line, and it comes *after*
+#  everything else it does (including its embedded run and waiting for the
+#  volume), so wait for that - not for an earlier line, which would kill the
+#  boot while the program was still working.
+for _ in $(seq 1 36); do
+   grep -aq 'o2c bytecode: published BD0:VmGreet.obc' "$QEMU_LOG" && break
    sleep 5
 done
 #  The boot-1 source capture also contains every string/number literal the
@@ -202,6 +206,14 @@ fi
 #  between them and split that line.  Asserting the single-write token, plus
 #  o2c's own status line, is the fragment-tolerant form (see AGENTS.md on
 #  merged console lines).
+#  The guest compiled a program to bytecode and executed it (embedded in
+#  o2c).  The standalone VM running the copy o2c writes to BD0: is NOT
+#  asserted here yet: o2c and bfs_server are sibling manifest programs and
+#  the spawner starts them in order without waiting, so the write races the
+#  mount (status 1, Not_Found).  That is a launcher gap, not a program bug -
+#  init should not spawn a program before the caps its own manifest line
+#  names exist - and the assertion returns with it (see the M53 entry in the
+#  aegir docs/RESUME.md).  A flaky assertion would be worse than none.
 if ! grep -aq 'vm elf ok' "$RUNTIME_LOG" \
    || ! grep -aq 'o2c bytecode: vm ok' "$RUNTIME_LOG"; then
    echo "run_m1: the guest did not compile and run bytecode" >&2

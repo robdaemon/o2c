@@ -271,9 +271,22 @@ backend's regression still passes **and** the new VM path is exercised.
   and preserves the last boot log under `/tmp/run_m1_boot.log` on exit -
   a failing run used to delete the only evidence.
 
-  Remaining for M53: the standalone VM reading images from the writable
-  volume (blocked on how full `befs.img` is); then more of the language in
-  the slice (REAL, SET, `FOR`,
+  **The standalone VM reading images from the writable volume** is written
+  and staged (o2c publishes `BD0:VmGreet.obc` through `Aegir_User.Files`,
+  atomically via a temp file and a rename; `Tests/Vm` is program 42), but
+  `run_m1` does not assert it yet: o2c and bfs_server are sibling manifest
+  programs and the spawner starts them in order without waiting, so the
+  write races the mount of BD0: (status 1, `Not_Found`).  A userspace poll
+  papered over that briefly and was removed - the wait belongs in the
+  launcher, which already has the information (a manifest line's trailing
+  tokens *are* the caps it depends on).  Tracked as "Spawn ordering on
+  declared caps" in the aegir `docs/RESUME.md`; the assertion returns with
+  it.  Chasing this did fix two real defects, both in the guest's libc
+  layer: `_write` reported every failure as `ENOSPC` (which is why this
+  looked like a full disk), and the create path discarded its statuses
+  entirely - both now report honestly.
+
+  Remaining for M53: more of the language in the slice (REAL, SET, `FOR`,
   `REPEAT`, `CASE`, arrays, pointers, procedures - each with its own
   opcodes already reserved), then an Aegir build of the VM so the in-guest
   pipeline can compile *and run* without a host toolchain, and the
