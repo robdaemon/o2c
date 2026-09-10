@@ -217,9 +217,30 @@ backend's regression still passes **and** the new VM path is exercised.
   `Wide_Wide_*`); `gnat_full/` vendors only the narrow `Text_IO` family.
   Nothing references them today.
 
-  Remaining for M53: staging `vm.elf` into the initrd with a Manifest entry
-  and asserting its output in a boot, so the guest proves it *runs* an
-  image; then more of the language in the slice (REAL, SET, `FOR`,
+  **Progress — the VM runs an image in the guest.**  The aegir initrd stages
+  `vm.elf` as `Tests/Vm` (program 42, `console fs`) with a fixture image at
+  `Tests/O2cBC/VmGreet.obc`, produced by the host front end
+  (`make vm-aegir vm-fixture`), and `run_m1` asserts the VM's output line -
+  chosen to be unique so it cannot be confused with the Ada backend's own
+  markers.  Two additions made the guest run possible: `VM_Platform.
+  Resolve_Path` (guest paths are resolved against the current directory,
+  as `cd`/`copy` do with their arguments) and a default image path (a
+  program spawned from `System/Manifest` receives no arguments).
+
+  **The trap this cost, worth remembering:** the first staged boot died with
+  `scause 0xf` (store page fault), `stval 0x7fefff20`, and *no output at
+  all*.  `Run` declared its image slab as a local 1 MiB array, and a guest
+  user stack is **64 pages = 256 KiB** (`kernel-processes.ads`:
+  `User_Stack_Top = 16#8000_0000#`, `User_Stack_Pages = 64`), so the array
+  overflowed the whole stack on the first store into `Run`'s frame - before
+  the program could print anything.  The slab and the payload copies are now
+  heap objects, and `Decode` makes the two 0-based payload copies once
+  (`Verify`/`Execute` alias them with `renames`).  **Rule for guest code:
+  nothing large on the stack.**
+
+  Remaining for M53: the in-guest compile side (o2c writing the .obc it
+  produces, which removes the host-built fixture); then more of the language
+  in the slice (REAL, SET, `FOR`,
   `REPEAT`, `CASE`, arrays, pointers, procedures - each with its own
   opcodes already reserved), then an Aegir build of the VM so the in-guest
   pipeline can compile *and run* without a host toolchain, and the
