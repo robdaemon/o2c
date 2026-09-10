@@ -12,6 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
   the `Args`/`Env`/`Convert`/`Err` milestones
 - `docs/bytecode-vm.md` — plan for the bytecode backend + VM and the
   libgc (Boehm) integration that replaces the arena
+- `docs/obc-image.md` — the `.obc` image container format (v1 spec)
 - `crate/`   — build project for the `o2c.elf` Aegir program
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
