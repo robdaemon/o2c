@@ -319,17 +319,6 @@ package body O2c_Compiler is
       Body_Withs (N_BW) := To_Unbounded_String (Nm);
    end Add_BW;
 
-   function Spec_With_Lines return String is
-      R : Unbounded_String;
-   begin
-      for I in 1 .. N_SW loop
-         R := R & "with " & To_String (Spec_Withs (I)) & ";"
-           & ASCII.LF;
-      end loop;
-      return To_String (R);
-   end Spec_With_Lines;
-
-
    --  M42: an Oberon identifier that collides with an Ada reserved
    --  word keeps its Oberon spelling everywhere in the language; only
    --  the Ada-side spelling gets a suffix (Ada_Id).
@@ -345,6 +334,17 @@ package body O2c_Compiler is
             L (I) := Nm (I);
          end if;
       end loop;
+      --  Also mangle names that collide with Ada's predefined types:
+      --  a subprogram named String, Integer, ... would hide the type
+      --  the generated code depends on.
+      if L = "integer" or else L = "float" or else L = "string"
+        or else L = "boolean" or else L = "character"
+        or else L = "long_integer" or else L = "long_float"
+        or else L = "natural" or else L = "positive"
+        or else L = "true" or else L = "false"
+      then
+         return Nm & "_o2c";
+      end if;
       if L = "abort" or else L = "abstract" or else L = "accept" or else L = "access" or else L = "aliased" or else L = "all" or else L = "and" or else L = "array" or else L = "at" or else L = "begin" or else L = "body" or else L = "case" or else L = "constant" or else L = "declare" or else L = "delay" or else L = "delta" or else L = "digits" or else L = "do" or else L = "else" or else L = "elsif" or else L = "end" or else L = "entry" or else L = "exception" or else L = "exit" or else L = "for" or else L = "function" or else L = "generic" or else L = "goto" or else L = "if" or else L = "in" or else L = "interface" or else L = "is" or else L = "loop" or else L = "mod" or else L = "new" or else L = "not" or else L = "null" or else L = "of" or else L = "or" or else L = "others" or else L = "out" or else L = "overriding" or else L = "package" or else L = "pragma" or else L = "private" or else L = "procedure" or else L = "protected" or else L = "raise" or else L = "range" or else L = "record" or else L = "rem" or else L = "renames" or else L = "requeue" or else L = "return" or else L = "reverse" or else L = "select" or else L = "separate" or else L = "some" or else L = "subtype" or else L = "synchronized" or else L = "tagged" or else L = "task" or else L = "terminate" or else L = "then" or else L = "type" or else L = "until" or else L = "use" or else L = "when" or else L = "while" or else L = "with" or else L = "xor" then
          return Nm & "_o2c";
       end if;
@@ -366,6 +366,17 @@ package body O2c_Compiler is
       end if;
       return Q (Q'First .. D) & Ada_Id (Q (D + 1 .. Q'Last));
    end Ada_Last;
+
+   function Spec_With_Lines return String is
+      R : Unbounded_String;
+   begin
+      for I in 1 .. N_SW loop
+         R := R & "with " & Ada_Id (To_String (Spec_Withs (I))) & ";"
+           & ASCII.LF;
+      end loop;
+      return To_String (R);
+   end Spec_With_Lines;
+
 
    function Is_Provided (Nm : String) return Boolean is
    begin
@@ -582,9 +593,9 @@ package body O2c_Compiler is
       N : constant String := To_String (UTypes (UT).Name);
    begin
       if UTypes (UT).Imported then
-         return N;
+         return Ada_Last (N);
       end if;
-      return QName (To_String (Mod_Name), N);
+      return QName (Ada_Id (To_String (Mod_Name)), Ada_Id (N));
    end Qual_UT;
 
    function XT_Find (Owner : String; Mem : String) return Natural is
@@ -2062,6 +2073,42 @@ package body O2c_Compiler is
                R.Lit := False;
                return R;
             end if;
+            if To_String (Mod_Name) = "In"
+              and then (Eq_No_Case (Cur.Text (1 .. Cur.Len), "INCHAR")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
+                                            "ININT")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
+                                            "INLONG")
+                        or else Eq_No_Case (Cur.Text (1 .. Cur.Len),
+                                            "INREAL"))
+            then
+               --  M45 FFI: input primitives (builtin In module only)
+               declare
+                  Nm : constant String := Cur.Text (1 .. Cur.Len);
+               begin
+                  Next;
+                  if Cur.Kind = Lex.Tok_LParen then
+                     Next;
+                     Expect (Lex.Tok_RParen, "')'");
+                     Next;
+                  end if;
+                  if Eq_No_Case (Nm, "INCHAR") then
+                     R.Text := To_Unbounded_String ("O2c_In_Char");
+                     R.Typ := T_Char;
+                  elsif Eq_No_Case (Nm, "ININT") then
+                     R.Text := To_Unbounded_String ("O2c_In_Int");
+                     R.Typ := T_Int;
+                  elsif Eq_No_Case (Nm, "INLONG") then
+                     R.Text := To_Unbounded_String ("O2c_In_Long");
+                     R.Typ := T_Long;
+                  else
+                     R.Text := To_Unbounded_String ("O2c_In_Real");
+                     R.Typ := T_Real;
+                  end if;
+               end;
+               R.Lit := False;
+               return R;
+            end if;
             if To_String (Mod_Name) = "Files"
               and then Eq_No_Case (Cur.Text (1 .. Cur.Len), "FSTAT")
             then
@@ -2196,7 +2243,7 @@ package body O2c_Compiler is
                            end if;
                            if Xs (XI).Kind = S_Const then
                               R.Text := To_Unbounded_String
-                                (FNm & "." & Ada_Id (MName));
+                                (Ada_Id (FNm) & "." & Ada_Id (MName));
                               R.Typ := Xs (XI).Typ;
                               R.Lit := False;
                               return R;
@@ -2205,7 +2252,7 @@ package body O2c_Compiler is
                              and then Length (Xs (XI).VT_Nm) = 0
                            then
                               R.Text := To_Unbounded_String
-                                (FNm & "." & Ada_Id (MName));
+                                (Ada_Id (FNm) & "." & Ada_Id (MName));
                               R.Typ := Xs (XI).Typ;
                               R.Lit := False;
                               return R;
@@ -2227,7 +2274,7 @@ package body O2c_Compiler is
                                  end if;
                                  declare
                                     D : Desig := Parse_Rec_Ptr_Chain
-                                      (FNm & "." & Ada_Id (MName), U);
+                                      (Ada_Id (FNm) & "." & Ada_Id (MName), U);
                                  begin
                                     if D.K = D_Scalar then
                                        R.Typ := D.Sc;
@@ -2287,7 +2334,7 @@ package body O2c_Compiler is
                                  end if;
                                  Expect (Lex.Tok_RParen, "')'");
                                  Next;
-                                 Call := Call & FNm & "."
+                                 Call := Call & Ada_Id (FNm) & "."
                              & Ada_Id (MName) & " (";
                                  for I in 1 .. N_A loop
                                     if I > 1 then
@@ -2303,7 +2350,7 @@ package body O2c_Compiler is
                                 & "' needs arguments";
                            else
                               R.Text := To_Unbounded_String
-                                (FNm & "." & Ada_Id (MName));
+                                (Ada_Id (FNm) & "." & Ada_Id (MName));
                            end if;
                            return R;
                         end;
@@ -4645,7 +4692,45 @@ package body O2c_Compiler is
          elsif Cur.Kind = Lex.Tok_Ident then
             H_Len := Cur.Len;
             Head (1 .. H_Len) := Cur.Text (1 .. H_Len);
-            if To_String (Mod_Name) = "Files"
+            if To_String (Mod_Name) = "In"
+              and then (Eq_No_Case (Head (1 .. H_Len), "INOPEN")
+                        or else Eq_No_Case (Head (1 .. H_Len), "INSTRING")
+                        or else Eq_No_Case (Head (1 .. H_Len), "INNAME"))
+            then
+               --  M45 FFI: input statements (builtin In module only)
+               if Eq_No_Case (Head (1 .. H_Len), "INOPEN") then
+                  Next;
+                  if Cur.Kind = Lex.Tok_LParen then
+                     Next;
+                     Expect (Lex.Tok_RParen, "')'");
+                     Next;
+                  end if;
+                  Append_Body ("      O2c_In_Reset;");
+               else
+                  declare
+                     Is_Name : constant Boolean :=
+                       Eq_No_Case (Head (1 .. H_Len), "INNAME");
+                  begin
+                     Next;
+                     Expect (Lex.Tok_LParen, "'(' after the input call");
+                     Next;
+                     declare
+                        A : Expr_Rec := Parse_Expr;
+                     begin
+                        if A.Typ /= T_Str then
+                           raise O2c_Error with "an ARRAY OF CHAR buffer "
+                             & "is required";
+                        end if;
+                        Expect (Lex.Tok_RParen, "')'");
+                        Next;
+                        Append_Body ("      "
+                                     & (if Is_Name then "O2c_In_Name"
+                                        else "O2c_In_Word")
+                                     & " (" & To_String (A.Text) & ");");
+                     end;
+                  end;
+               end if;
+            elsif To_String (Mod_Name) = "Files"
               and then Eq_No_Case (Head (1 .. H_Len), "FDEL")
             then
                --  M42 FFI: delete a named file (builtin Files only)
@@ -4859,7 +4944,7 @@ package body O2c_Compiler is
                            end if;
                            Expect (Lex.Tok_RParen, "')'");
                            Next;
-                           Call := Call & MNm & "."
+                           Call := Call & Ada_Id (MNm) & "."
                              & Ada_Id (To_String (MName)) & " (";
                            for I in 1 .. N_A loop
                               if I > 1 then
@@ -4875,7 +4960,7 @@ package body O2c_Compiler is
                            raise O2c_Error with "'" & MNm & "."
                              & To_String (MName) & "' needs arguments";
                         end if;
-                        Append_Body ("      " & MNm & "."
+                        Append_Body ("      " & Ada_Id (MNm) & "."
                                      & Ada_Id (To_String (MName)) & ";");
                      end if;
                   elsif Xs (XI).Kind = S_Var
@@ -4945,7 +5030,7 @@ package body O2c_Compiler is
                                               = To_String (Xs (XI).VT_Nm)
                                           then
                                              Rhs := To_Unbounded_String
-                                               (MN2 & "."
+                                               (Ada_Id (MN2) & "."
                                                 & Ada_Id
                                                     (Cur.Text (1 .. Cur.Len)));
                                           end if;
@@ -4961,7 +5046,7 @@ package body O2c_Compiler is
                                    & "' needs a variable of the same "
                                    & "record type (M22)";
                               end if;
-                              Append_Body ("      " & MNm & "."
+                              Append_Body ("      " & Ada_Id (MNm) & "."
                                            & Ada_Id (To_String (MName))
                                            & " := "
                                            & To_String (Rhs) & ";");
@@ -4969,7 +5054,7 @@ package body O2c_Compiler is
                         else
                            declare
                               D : Desig := Parse_Rec_Ptr_Chain
-                                (MNm & "."
+                                (Ada_Id (MNm) & "."
                                  & Ada_Id (To_String (MName)), U);
                            begin
                               Expect (Lex.Tok_Assign, "':='");
@@ -5029,12 +5114,12 @@ package body O2c_Compiler is
                      begin
                         if Xs (XI).Typ = T_Real then
                            if V.Typ = T_Int then
-                              Append_Body ("      " & MNm & "."
+                              Append_Body ("      " & Ada_Id (MNm) & "."
                                            & Ada_Id (To_String (MName))
                                            & " := Float ("
                                            & To_String (V.Text) & ");");
                            elsif V.Typ = T_Real then
-                              Append_Body ("      " & MNm & "."
+                              Append_Body ("      " & Ada_Id (MNm) & "."
                                            & Ada_Id (To_String (MName))
                                            & " := " & To_String (V.Text)
                                            & ";");
@@ -5051,7 +5136,7 @@ package body O2c_Compiler is
                            raise O2c_Error with "type mismatch assigning "
                              & MNm & "." & To_String (MName);
                         else
-                           Append_Body ("      " & MNm & "."
+                           Append_Body ("      " & Ada_Id (MNm) & "."
                                         & Ada_Id (To_String (MName))
                                         & " := "
                                         & To_String (V.Text) & ";");
@@ -5626,7 +5711,7 @@ package body O2c_Compiler is
                                        begin
                                           if TY = Syms (Idx).UT then
                                              Rhs := To_Unbounded_String
-                                               (MN2 & "."
+                                               (Ada_Id (MN2) & "."
                                                 & Ada_Id
                                                     (Cur.Text (1 .. Cur.Len)));
                                           end if;
@@ -6099,7 +6184,8 @@ package body O2c_Compiler is
                      --  multiple override libraries compose (M31)
                      Add_BW (To_String (Shs (PrevSh).Owner));
                      FB := To_Unbounded_String
-                       (To_String (Shs (PrevSh).Owner) & "." & DN
+                       (Ada_Id (To_String (Shs (PrevSh).Owner)) & "."
+                        & DN
                         & "_Any_Disp_O2c_" & PSh);
                   end if;
                   Append_Spec ("   " & To_String (Hdr) & ";");
@@ -6470,18 +6556,21 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
             end if;
             for I in 1 .. N_Imp loop
                if To_String (Imports (I).Name) /= "Out" then
-                  S := S & "with " & To_String (Imports (I).Name) & ";"
+                  S := S & "with "
+                    & Ada_Id (To_String (Imports (I).Name)) & ";"
                     & ASCII.LF;
                end if;
             end loop;
             S := S & ASCII.LF;
-            S := S & "procedure " & To_String (Mod_Name) & " is" & ASCII.LF;
+            S := S & "procedure " & Ada_Id (To_String (Mod_Name))
+              & " is" & ASCII.LF;
             Emit_Helpers (S);
             S := S & To_String (Decl_Buf);
             S := S & "begin" & ASCII.LF;
             S := S & "   Aegir_User.Console.Set_Endpoint (1);" & ASCII.LF;
             S := S & To_String (Body_Buf);
-            S := S & "end " & To_String (Mod_Name) & ";" & ASCII.LF;
+            S := S & "end " & Ada_Id (To_String (Mod_Name)) & ";"
+              & ASCII.LF;
             Main_Txt := S;
          end;
       else
@@ -6503,10 +6592,12 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                 & " of Boolean;" & ASCII.LF
               else "")
            & To_Unbounded_String
-             ("package " & To_String (Mod_Name) & " is" & ASCII.LF)
+             ("package " & Ada_Id (To_String (Mod_Name)) & " is"
+              & ASCII.LF)
            & Spec_Buf
            & To_Unbounded_String
-             ("end " & To_String (Mod_Name) & ";" & ASCII.LF);
+             ("end " & Ada_Id (To_String (Mod_Name)) & ";"
+              & ASCII.LF);
          declare
             S : Unbounded_String;
          begin
@@ -6521,13 +6612,14 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
             end if;
             for I in 1 .. N_Imp loop
                if To_String (Imports (I).Name) /= "Out" then
-                  S := S & "with " & To_String (Imports (I).Name) & ";"
+                  S := S & "with "
+                    & Ada_Id (To_String (Imports (I).Name)) & ";"
                     & ASCII.LF;
                end if;
             end loop;
             for I in 1 .. N_BW loop
-               S := S & "with " & To_String (Body_Withs (I)) & ";"
-                 & ASCII.LF;
+               S := S & "with " & Ada_Id (To_String (Body_Withs (I)))
+                 & ";" & ASCII.LF;
             end loop;
             if To_String (Mod_Name) = "Files" then
                S := S & "with Aegir_User.Files;" & ASCII.LF
@@ -6537,11 +6629,14 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
             if To_String (Mod_Name) = "Math" then
                S := S & "with Ada.Numerics.Elementary_Functions;" & ASCII.LF;
             end if;
+            if To_String (Mod_Name) = "In" then
+               S := S & "with Aegir_User.CLI;" & ASCII.LF;
+            end if;
             if Length (S) > 0 then
                S := S & ASCII.LF;
             end if;
-            S := S & "package body " & To_String (Mod_Name) & " is"
-              & ASCII.LF;
+            S := S & "package body " & Ada_Id (To_String (Mod_Name))
+              & " is" & ASCII.LF;
             Emit_Helpers (S);
             if To_String (Mod_Name) = "Files" then
                --  M40 FFI: private named-read helpers on the file server
@@ -6658,6 +6753,246 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                  & "      end if;" & ASCII.LF
                  & "   end O2c_FDel;" & ASCII.LF;
             end if;
+            if To_String (Mod_Name) = "In" then
+               --  M45 FFI: console input (builtin In module): the whole
+               --  stdin is pulled once through CLI.Get_Line (args-page
+               --  in_path; no in_path => EOF) and scanned as
+               --  whitespace-separated tokens.
+               S := S
+                 & "   In_Buf : String (1 .. 4096);" & ASCII.LF
+                 & "   In_Len : Natural := 0;" & ASCII.LF
+                 & "   In_Pos : Natural := 1;" & ASCII.LF
+                 & "   In_Rdy : Boolean := False;" & ASCII.LF
+                 & "" & ASCII.LF
+                 & "   procedure O2c_In_Load is" & ASCII.LF
+                 & "      S : String (1 .. 512);" & ASCII.LF
+                 & "      L : Natural;" & ASCII.LF
+                 & "      E : Boolean;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      Aegir_User.CLI.Init;" & ASCII.LF
+                 & "      if In_Rdy then" & ASCII.LF
+                 & "         return;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      In_Rdy := True;" & ASCII.LF
+                 & "      loop" & ASCII.LF
+                 & "         Aegir_User.CLI.Get_Line (S, L, E);" & ASCII.LF
+                 & "         exit when E;" & ASCII.LF
+                 & "         exit when In_Len + L + 1 > 4096;" & ASCII.LF
+                 & "         for I in 1 .. L loop" & ASCII.LF
+                 & "            In_Len := In_Len + 1;" & ASCII.LF
+                 & "            In_Buf (In_Len) := S (I);" & ASCII.LF
+                 & "         end loop;" & ASCII.LF
+                 & "         In_Len := In_Len + 1;" & ASCII.LF
+                 & "         In_Buf (In_Len) := ' ';" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "   end O2c_In_Load;" & ASCII.LF
+                 & "" & ASCII.LF
+                 & "   procedure O2c_In_Reset is" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      In_Rdy := False;" & ASCII.LF
+                 & "      In_Len := 0;" & ASCII.LF
+                 & "      In_Pos := 1;" & ASCII.LF
+                 & "   end O2c_In_Reset;" & ASCII.LF
+                 & "" & ASCII.LF
+                 & "   procedure O2c_In_Skip is" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      O2c_In_Load;" & ASCII.LF
+                 & "      while In_Pos <= In_Len and then In_Buf (In_Pos) = ' ' loop" & ASCII.LF
+                 & "         In_Pos := In_Pos + 1;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "   end O2c_In_Skip;" & ASCII.LF
+                 & "" & ASCII.LF
+                 & "   procedure O2c_In_Token (First : out Natural; Last : out Natural) is" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      O2c_In_Skip;" & ASCII.LF
+                 & "      First := In_Pos;" & ASCII.LF
+                 & "      while In_Pos <= In_Len and then In_Buf (In_Pos) /= ' ' loop" & ASCII.LF
+                 & "         In_Pos := In_Pos + 1;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      Last := In_Pos - 1;" & ASCII.LF
+                 & "   end O2c_In_Token;" & ASCII.LF
+                 & "" & ASCII.LF
+                 & "   function O2c_In_Char return Character is" & ASCII.LF
+                 & "      C : Character;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      O2c_In_Skip;" & ASCII.LF
+                 & "      if In_Pos > In_Len then" & ASCII.LF
+                 & "         Done := False;" & ASCII.LF
+                 & "         return ' ';" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      Done := True;" & ASCII.LF
+                 & "      C := In_Buf (In_Pos);" & ASCII.LF
+                 & "      In_Pos := In_Pos + 1;" & ASCII.LF
+                 & "      return C;" & ASCII.LF
+                 & "   end O2c_In_Char;" & ASCII.LF
+                 & "" & ASCII.LF
+                 & "   function O2c_In_Int return Integer is" & ASCII.LF
+                 & "      F, L : Natural;" & ASCII.LF
+                 & "      V : Integer := 0;" & ASCII.LF
+                 & "      K : Natural;" & ASCII.LF
+                 & "      Neg : Boolean := False;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      O2c_In_Token (F, L);" & ASCII.LF
+                 & "      if F > L then" & ASCII.LF
+                 & "         Done := False;" & ASCII.LF
+                 & "         return 0;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      K := F;" & ASCII.LF
+                 & "      if In_Buf (K) = '-' then" & ASCII.LF
+                 & "         Neg := True;" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      elsif In_Buf (K) = '+' then" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      if K > L then" & ASCII.LF
+                 & "         Done := False;" & ASCII.LF
+                 & "         return 0;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      for I in K .. L loop" & ASCII.LF
+                 & "         exit when In_Buf (I) not in '0' .. '9';" & ASCII.LF
+                 & "         V := V * 10 + (Character'Pos (In_Buf (I))" & ASCII.LF
+                 & "                        - Character'Pos ('0'));" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      if In_Buf (L) not in '0' .. '9' then" & ASCII.LF
+                 & "         Done := False;" & ASCII.LF
+                 & "         return 0;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      Done := True;" & ASCII.LF
+                 & "      if Neg then" & ASCII.LF
+                 & "         return -V;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      return V;" & ASCII.LF
+                 & "   end O2c_In_Int;" & ASCII.LF
+                 & "" & ASCII.LF
+                 & "   function O2c_In_Long return Long_Integer is" & ASCII.LF
+                 & "      F, L : Natural;" & ASCII.LF
+                 & "      V : Long_Integer := 0;" & ASCII.LF
+                 & "      K : Natural;" & ASCII.LF
+                 & "      Neg : Boolean := False;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      O2c_In_Token (F, L);" & ASCII.LF
+                 & "      if F > L then" & ASCII.LF
+                 & "         Done := False;" & ASCII.LF
+                 & "         return 0;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      K := F;" & ASCII.LF
+                 & "      if In_Buf (K) = '-' then" & ASCII.LF
+                 & "         Neg := True;" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      elsif In_Buf (K) = '+' then" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      if K > L then" & ASCII.LF
+                 & "         Done := False;" & ASCII.LF
+                 & "         return 0;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      for I in K .. L loop" & ASCII.LF
+                 & "         exit when In_Buf (I) not in '0' .. '9';" & ASCII.LF
+                 & "         V := V * 10 + Long_Integer (Character'Pos (In_Buf (I))" & ASCII.LF
+                 & "                                     - Character'Pos ('0'));" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      if In_Buf (L) not in '0' .. '9' then" & ASCII.LF
+                 & "         Done := False;" & ASCII.LF
+                 & "         return 0;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      Done := True;" & ASCII.LF
+                 & "      if Neg then" & ASCII.LF
+                 & "         return -V;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      return V;" & ASCII.LF
+                 & "   end O2c_In_Long;" & ASCII.LF
+                 & "" & ASCII.LF
+                 & "   function O2c_In_Real return Float is" & ASCII.LF
+                 & "      F, L : Natural;" & ASCII.LF
+                 & "      V : Float := 0.0;" & ASCII.LF
+                 & "      K : Natural;" & ASCII.LF
+                 & "      Neg : Boolean := False;" & ASCII.LF
+                 & "      Frac : Float := 0.1;" & ASCII.LF
+                 & "      Seen_Dot : Boolean := False;" & ASCII.LF
+                 & "      Seen_Dig : Boolean := False;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      O2c_In_Token (F, L);" & ASCII.LF
+                 & "      if F > L then" & ASCII.LF
+                 & "         Done := False;" & ASCII.LF
+                 & "         return 0.0;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      K := F;" & ASCII.LF
+                 & "      if In_Buf (K) = '-' then" & ASCII.LF
+                 & "         Neg := True;" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      elsif In_Buf (K) = '+' then" & ASCII.LF
+                 & "         K := K + 1;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      if K > L then" & ASCII.LF
+                 & "         Done := False;" & ASCII.LF
+                 & "         return 0.0;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      for I in K .. L loop" & ASCII.LF
+                 & "         if In_Buf (I) in '0' .. '9' then" & ASCII.LF
+                 & "            Seen_Dig := True;" & ASCII.LF
+                 & "            if Seen_Dot then" & ASCII.LF
+                 & "               V := V + Float (Character'Pos (In_Buf (I))" & ASCII.LF
+                 & "                               - Character'Pos ('0')) * Frac;" & ASCII.LF
+                 & "               Frac := Frac / 10.0;" & ASCII.LF
+                 & "            else" & ASCII.LF
+                 & "               V := V * 10.0 + Float (Character'Pos (In_Buf (I))" & ASCII.LF
+                 & "                                      - Character'Pos ('0'));" & ASCII.LF
+                 & "            end if;" & ASCII.LF
+                 & "         elsif In_Buf (I) = '.' and then not Seen_Dot then" & ASCII.LF
+                 & "            Seen_Dot := True;" & ASCII.LF
+                 & "         else" & ASCII.LF
+                 & "            Done := False;" & ASCII.LF
+                 & "            return 0.0;" & ASCII.LF
+                 & "         end if;" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      if not Seen_Dig then" & ASCII.LF
+                 & "         Done := False;" & ASCII.LF
+                 & "         return 0.0;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      Done := True;" & ASCII.LF
+                 & "      if Neg then" & ASCII.LF
+                 & "         return -V;" & ASCII.LF
+                 & "      end if;" & ASCII.LF
+                 & "      return V;" & ASCII.LF
+                 & "   end O2c_In_Real;" & ASCII.LF
+                 & "" & ASCII.LF
+                 & "   procedure O2c_In_Word (Buf : out String) is" & ASCII.LF
+                 & "      F, L : Natural;" & ASCII.LF
+                 & "      N : Natural := 0;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      O2c_In_Token (F, L);" & ASCII.LF
+                 & "      for I in F .. L loop" & ASCII.LF
+                 & "         exit when N >= Buf'Length - 1;" & ASCII.LF
+                 & "         N := N + 1;" & ASCII.LF
+                 & "         Buf (Buf'First + N - 1) := In_Buf (I);" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      for I in N + 1 .. Buf'Length loop" & ASCII.LF
+                 & "         Buf (Buf'First + I - 1) := Character'Val (0);" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      Done := N > 0;" & ASCII.LF
+                 & "   end O2c_In_Word;" & ASCII.LF
+                 & "" & ASCII.LF
+                 & "   procedure O2c_In_Name (Buf : out String) is" & ASCII.LF
+                 & "      F, L : Natural;" & ASCII.LF
+                 & "      N : Natural := 0;" & ASCII.LF
+                 & "   begin" & ASCII.LF
+                 & "      O2c_In_Token (F, L);" & ASCII.LF
+                 & "      for I in F .. L loop" & ASCII.LF
+                 & "         exit when N >= Buf'Length - 1;" & ASCII.LF
+                 & "         exit when not (In_Buf (I) in 'A' .. 'Z'" & ASCII.LF
+                 & "                        or else In_Buf (I) in 'a' .. 'z'" & ASCII.LF
+                 & "                        or else In_Buf (I) in '0' .. '9'" & ASCII.LF
+                 & "                        or else In_Buf (I) = '_');" & ASCII.LF
+                 & "         N := N + 1;" & ASCII.LF
+                 & "         Buf (Buf'First + N - 1) := In_Buf (I);" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      for I in N + 1 .. Buf'Length loop" & ASCII.LF
+                 & "         Buf (Buf'First + I - 1) := Character'Val (0);" & ASCII.LF
+                 & "      end loop;" & ASCII.LF
+                 & "      Done := N > 0;" & ASCII.LF
+                 & "   end O2c_In_Name;" & ASCII.LF
+                 & "";
+            end if;
             S := S & To_String (Decl_Buf);
             if Length (Body_Buf) > 0 then
                S := S & "begin" & ASCII.LF;
@@ -6667,7 +7002,8 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
                end if;
                S := S & To_String (Body_Buf);
             end if;
-            S := S & "end " & To_String (Mod_Name) & ";" & ASCII.LF;
+            S := S & "end " & Ada_Id (To_String (Mod_Name)) & ";"
+              & ASCII.LF;
             if Length (Decl_Buf) = 0 and then Length (Body_Buf) = 0 then
                Body_Txt := Null_Unbounded_String;   --  spec-only library
             else
@@ -6999,6 +7335,44 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       return To_String (S);
    end Oak_Math_Src;
 
+   function Oak_In_Src return String is
+      S : Unbounded_String;
+   begin
+      S := S & "module In;" & ASCII.LF;
+      S := S & "var Done*: boolean;" & ASCII.LF;
+      S := S & "procedure Open*;" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  InOpen" & ASCII.LF;
+      S := S & "end Open;" & ASCII.LF;
+      S := S & "procedure Char*(var ch: char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  ch := InChar()" & ASCII.LF;
+      S := S & "end Char;" & ASCII.LF;
+      S := S & "procedure Int*(var x: integer);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  x := InInt()" & ASCII.LF;
+      S := S & "end Int;" & ASCII.LF;
+      S := S & "procedure LongInt*(var x: longint);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  x := InLong()" & ASCII.LF;
+      S := S & "end LongInt;" & ASCII.LF;
+      S := S & "procedure Real*(var x: real);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  x := InReal()" & ASCII.LF;
+      S := S & "end Real;" & ASCII.LF;
+      S := S & "procedure String*(var str: array of char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  InString(str)" & ASCII.LF;
+      S := S & "end String;" & ASCII.LF;
+      S := S & "procedure Name*(var name: array of char);" & ASCII.LF;
+      S := S & "begin" & ASCII.LF;
+      S := S & "  InName(name)" & ASCII.LF;
+      S := S & "end Name;" & ASCII.LF;
+      S := S & "end In." & ASCII.LF;
+      return To_String (S);
+   end Oak_In_Src;
+
+
    function Compile_Multi (Main_Source : String; Libs : Lib_Array;
                            N_Libs : Natural; Count : out Natural)
                            return Unit_Array
@@ -7041,25 +7415,25 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  M38: compile the builtin Oakwood modules first so that user
       --  modules and the main can import them
       Compile_Module (Oak_Strings_Src, True, M_T, S_T, B_T);
-      Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
-         Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Texts_Src, True, M_T, S_T, B_T);
-      Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
-         Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
       Compile_Module (Oak_Files_Src, True, M_T, S_T, B_T);
-      Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
       if Length (B_T) > 0 then
-         Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
       end if;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
@@ -7069,29 +7443,37 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  name); otherwise Math is auto-provided like the others.
       if not Skip_Math then
          Compile_Module (Oak_Math_Src, True, M_T, S_T, B_T);
-         Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
          if Length (B_T) > 0 then
-            Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+            Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
          end if;
          N_Prov := N_Prov + 1;
          Provided (N_Prov) := Mod_Name;
       end if;
+
+      Compile_Module (Oak_In_Src, True, M_T, S_T, B_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
+      if Length (B_T) > 0 then
+         Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
+      end if;
+      N_Prov := N_Prov + 1;
+      Provided (N_Prov) := Mod_Name;
 
       for I in 1 .. N_Libs loop
          if not Is_Provided (To_String (Libs (I).Name)) then
             --  skip a user module that duplicates a builtin (M38)
             Compile_Module (To_String (Libs (I).Text), True,
                             M_T, S_T, B_T);
-            Add (Lower (To_String (Mod_Name)) & ".ads", S_T);
+            Add (Lower (Ada_Id (To_String (Mod_Name))) & ".ads", S_T);
             if Length (B_T) > 0 then
-               Add (Lower (To_String (Mod_Name)) & ".adb", B_T);
+               Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", B_T);
             end if;
             N_Prov := N_Prov + 1;
             Provided (N_Prov) := Mod_Name;
          end if;
       end loop;
       Compile_Module (Main_Source, False, M_T, S_T, B_T);
-      Add (Lower (To_String (Mod_Name)) & ".adb", M_T);
+      Add (Lower (Ada_Id (To_String (Mod_Name))) & ".adb", M_T);
       Count := C;
       return Res;
    end Compile_Multi;

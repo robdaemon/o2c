@@ -108,5 +108,10 @@ if ! grep -aq 'res-ok' "$QEMU_LOG"; then
    tail -30 "$QEMU_LOG" >&2
    exit 1
 fi
+if ! grep -aq 'in-eof' "$QEMU_LOG"; then
+   echo "run_m1: In module demo output not seen" >&2
+   tail -30 "$QEMU_LOG" >&2
+   exit 1
+fi
 
 echo "run_m1: PASS"

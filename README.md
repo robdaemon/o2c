@@ -1,6 +1,6 @@
 # o2c — an Oberon-2 compiler for Aegir
 
-Targets the [Aegir] operating system. M44 (shipped): an Oberon-2 subset
+Targets the [Aegir] operating system. M45 (shipped): an Oberon-2 subset
 translated to Ada, built through aegir's userspace runtime chain from
 outside the monorepo. o2c itself is written in Ada, built with the
 riscv64 chain, and runs **under Aegir** (dogfood).
@@ -12,7 +12,7 @@ riscv64 chain, and runs **under Aegir** (dogfood).
 - `samples/` — Oberon-2 sample programs (`hello.ob2`)
 - `tests/`   — expected-output tests (M1 pipeline script lands here)
 
-## M44 status
+## M45 status
 
 Supported subset: `module`, `import Out`, `const` and `var`
 (INTEGER/BOOLEAN/CHAR, module-level), nested `procedure`s with value and
@@ -90,6 +90,31 @@ value open-array parameter or a string literal is rejected).  The
 demo fills and sums integer arrays of any length
 (`FillArr(var a: array of integer; …)`, `SumArr(a: array of integer)`)
 and measures char arrays with `CLen(s: array of char)`.
+
+**M45 — Oakwood `In` module (console input)**: the fifth builtin
+implements the Oakwood input module — `Done*`, `Open*`, `Char*`,
+`Int*`, `LongInt*`, `Real*`, `String*` and `Name*` over VAR
+out-parameters.  Input arrives through `Aegir_User.CLI.Get_Line`
+(the args-page `in_path`: a `PIPE:` name or a file; with no `in_path`
+there is no stdin in the ABI yet, so everything reports `Done =
+FALSE`); the package body pulls stdin once and scans it as
+whitespace-separated tokens, with `String` reading a token and `Name`
+an identifier-like one.  Reserved *expressions* `InChar`/`InInt`/
+`InLong`/`InReal` and *statements* `InOpen`/`InString`/`InName` are
+recognized only while compiling the builtin module.
+
+Two language-side consequences were needed and shipped with it:
+module names now mangle like any other Ada identifier (`In` is an Ada
+reserved word, so the unit is `In_o2c.ads`/`In_o2c.adb`, with clauses
+and qualified references follow), and the mangler also covers names
+that would shadow Ada's predefined types (an exported `String`
+procedure becomes `String_o2c`).  Because keywords are
+case-insensitive here, the lexer carves out the exact spelling `In`
+(capital I, lowercase n) as the module name; `IN`/`in` remain the
+membership keyword.  Verified natively with real stdin (`42`, `-7`,
+`2.5`, `hello`, `Z`, `Name_1` parse correctly; empty input yields
+`Done = FALSE`), and the demo exercises the EOF path in the boots
+(`In.Int(m)` → `in-eof`), which `run_m1` asserts.
 
 **M44 — Files module surface completed**: the builtin `Files` gains
 the Oakwood rider/volume operations that were still missing — the

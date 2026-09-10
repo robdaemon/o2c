@@ -1,5 +1,5 @@
 module Hello;
-import Out, Geom, Geo, Math, Strings, Texts, Files;
+import Out, Geom, Geo, Math, Strings, Texts, Files, In;
 
 type Vector = array 4 of integer;
 type Pair = record a, b: integer end;
@@ -411,6 +411,10 @@ begin
   end;
   fl[fi] := CHR(0);
   Out.String(fl);
+  Out.Ln;
+  In.Open;
+  In.Int(m);
+  if In.Done then Out.Int(m, 0) else Out.String("in-eof") end;
   Out.Ln;
   r := Math.ln(Math.e);
   if (r > 0.99) & (r < 1.01) then Out.Int(71, 0) else Out.Int(72, 0) end;

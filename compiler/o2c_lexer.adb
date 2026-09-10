@@ -164,7 +164,16 @@ package body O2c_Lexer is
       elsif Folded = "NIL" then return Tok_Nil;
       elsif Folded = "IS" then return Tok_Is;
       elsif Folded = "WITH" then return Tok_With;
-      elsif Folded = "IN" then return Tok_In;
+      elsif Folded = "IN" then
+         --  M45: the Oakwood basic module is named `In`.  Keywords
+         --  are case-insensitive here (project deviation), but the
+         --  exact spelling `In` (capital I, lowercase n) is reserved
+         --  as that module name; `IN`/`in` remain the membership
+         --  keyword.
+         if Word = "In" then
+            return Tok_Ident;
+         end if;
+         return Tok_In;
       elsif Folded = "DIV" then return Tok_Div;
       elsif Folded = "MOD" then return Tok_Mod;
       elsif Folded = "AND" then return Tok_And;
