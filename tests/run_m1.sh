@@ -17,15 +17,15 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK="${TMPDIR:-/tmp}/o2c-m1"
 QEMU_LOG="$WORK/boot.log"
 RUNTIME_LOG="$WORK/boot_runtime.log"
-#  Boot window in seconds.  Raised from 280 when o2c gained the bytecode
-#  pass: these boots now compile the demo AND compile+execute+publish a
-#  bytecode program (two full compiler runs in the emulated guest), so the
-#  demo's last marker arrives later than it used to.  That is intended work,
-#  not a regression - but the follow-up is to stop making BOTH boots carry
-#  it: the bytecode pass should be gated to a boot that stages the VM
-#  (VmGreet.ob2 + program 42), leaving boot 1 (Ada capture) and boot 2
-#  (demo) as light as they were, and this window back near 280.
-RUN_MIN=${RUN_MIN:-460}
+#  Boot windows in seconds, per boot.  Boot 1 (the Ada capture) stays at the
+#  original 280 and does NOT request the bytecode half: o2c then finds no
+#  bytecode source staged and its pass reduces to one line (the pass sits in
+#  an exception handler), so the capture is quiet and as fast as before.
+#  Boot 2 requests it (O2C_BYTECODE=1, which stages VmGreet.ob2, the VM and
+#  its manifest entry) and therefore carries two full compiler passes - hence
+#  the wider window - and its log is the one the bytecode assertions read.
+RUN_MIN=${RUN_MIN:-280}
+RUN_MIN_BC=${RUN_MIN_BC:-460}
 
 rm -rf "$WORK"; mkdir -p "$WORK"
 
@@ -52,12 +52,13 @@ boot_once() {  # $1 = extra make vars, $2 = marker
         >"$QEMU_LOG" 2>&1 ) &
    local mp=$!
    local waited=0
-   while [ "$waited" -lt "$RUN_MIN" ]; do
+   local window="${3:-$RUN_MIN}"
+   while [ "$waited" -lt "$window" ]; do
       sleep 5; waited=$((waited+5))
       grep -aq -- "$2" "$QEMU_LOG" && return 0
       kill -0 "$mp" 2>/dev/null || break
    done
-   echo "run_m1: marker '$2' not seen in $RUN_MIN s (tail below)" >&2
+   echo "run_m1: marker '$2' not seen in $window s (tail below)" >&2
    tail -5 "$QEMU_LOG" >&2 || true
    return 1
 }
@@ -121,7 +122,7 @@ fi
 echo "run_m1: boot 2/2 - assert hello output incl. shared O2c_Types"
 echo "  exports (406) and the Files module reading the staged"
 echo "  Tests/O2cLib/Sample.txt (M40)"
-boot_once "O2C_HELLO_ELF=$WORK/bin/hello.elf" '406'
+boot_once "O2C_HELLO_ELF=$WORK/bin/hello.elf O2C_BYTECODE=1" '406' "$RUN_MIN_BC"
 
 #  The demo's last marker does not order o2c's work: the demo (program 41)
 #  and o2c (program 40) are separate manifest programs that run CONCURRENTLY
