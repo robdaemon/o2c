@@ -134,15 +134,12 @@ begin
          --  interface.  Going through the libc layer added a second,
          --  separately-broken create path for no benefit.
          --
-         --  NOTE: this write fails with status 1 (Not_Found) when BD0: is
-         --  not mounted yet - o2c (program 40) and bfs_server are sibling
-         --  manifest programs and the spawner starts them in order without
-         --  waiting.  The fix belongs in the launcher (init should not spawn
-         --  a program before the caps its own manifest line names exist), not
-         --  in a client-side poll here: no program should have to know which
-         --  resource might be late, or for how long.  Tracked as "Spawn
-         --  ordering on declared caps" under Open candidates in the aegir
-         --  docs/RESUME.md.
+         --  No wait here on purpose: the aegir Manifest carries
+         --  `await BD0:` between System/Bfs and the programs that need the
+         --  volume, so init holds the manifest until the file server knows
+         --  the volume and this write cannot race the mount.  A client-side
+         --  poll used to stand here; it belonged in the launcher, which
+         --  already has the order (see docs/RESUME.md).
          --
          --  Publish atomically: write a temp file, then rename it over the
          --  target.  Writing the target directly does not work - the VM runs
