@@ -21,8 +21,14 @@ VM** and to adopt **libgc (Boehm-Demers-Weiser)** as the VM's memory manager.
   runs on the VM under Aegir and on a host build of the VM during
   development (host iteration without QEMU, using the same `o2c-stub`-style
   RTS shims the compiler harness already uses).
-- **The Ada backend stays the oracle.** It keeps working and keeps being the
-  regression baseline; the VM must reproduce its stdout byte for byte.
+- **The Ada backend is the oracle — but a temporary one, and its retirement
+  is planned, not incidental.** The VM must reproduce its stdout byte for
+  byte while both exist.  Because the Ada backend needs a host Ada/GCC
+  toolchain it cannot be the endgame (porting GCC into the guest is
+  prohibitive), so validation must outlive it: **golden expected outputs
+  checked into `tests/` plus the host-built VM as the reference tool**
+  (decided).  The dual-backend diff stays as a temporary extra gate until the
+  Ada emitter is deleted.
 
 Non-goals of this plan: replacing the Ada backend, JIT compilation, threads
 inside the VM, and garbage collection for the *Ada* backend (that stays
@@ -58,10 +64,23 @@ so the VM lands against a stable, already-tested interface.
 
 ## Decisions to freeze before coding
 
-1. **Instruction style**: stack bytecode (operand stack, `LOAD_LOCAL k`,
-   `IADD`, `CALL n`) rather than register/three-address.  The front end is an
-   expression-tree walker, which is exactly a stack machine; a register VM
-   would need a scheduler we do not otherwise need.
+1. **Instruction style — DECIDED: stack bytecode as the wire format**
+   (operand stack, `LOAD_L k`, `IADD`, `CALL n`), with a **three-address IR**
+   underneath so a future native/optimizing tier has its substrate.  Rationale
+   (recorded after comparing the alternatives): the front end is an
+   expression-tree walker, which *is* a stack machine, so codegen is nearly
+   free, whereas a register form needs liveness analysis, allocation and
+   spilling before its ~1.5–2.5× instruction-count win is realizable at all.
+   The choice is sticky (opcode style is a major-version commitment), so the
+   escape range is reserved for fused/short forms and an internal register
+   representation.  The JVM is the precedent: stack machine, typed opcodes,
+   operand-stack verification, `StackMapTable` ≈ our `STACKMAP`.
+   Consequence of the VM being the *shipping* executor (the Ada backend is
+   scheduled for removal — the guest cannot host an Ada/GCC toolchain, and
+   `o2c.elf` already runs in the guest): throughput is clawed back with
+   interpreter work (superinstructions, quickening), not a JIT — an in-guest
+   translator would need an assembler, which is the lift this design avoids.
+   The kernel has no W^X policy, so nothing *blocks* a later native tier.
 2. **Typed opcodes**: `IADD`/`RADD`/`LADD` rather than one polymorphic `ADD`.
    Costs opcode space (cheap, see rule 7), buys static operand types (GC) and
    no runtime type dispatch.

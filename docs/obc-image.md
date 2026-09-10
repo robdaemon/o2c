@@ -125,44 +125,220 @@ stack slot and frame slot that can hold a pointer.  v1 allows two modes:
 Either way the VM passes root *ranges* to libgc (`GC_add_roots`), so the
 collector swap in M59 does not depend on which mode an image was built with.
 
-## Reserved opcode ranges
+## Opcodes (v1) — stack form
 
-The opcode table is fixed once the instruction style is chosen; the *space* is
-reserved now, in the same append-only spirit as the syscall numbers:
+Decisions behind this table (`docs/bytecode-vm.md`): the **wire format is a
+stack machine** with *typed* opcodes; the three-address IR lives underneath, so
+an optimizing tier can be added through the escape range without a format
+break.  The table is **append-only**, exactly like syscall/ABI numbers.
 
-| range | purpose |
-|-------|---------|
-| `0x00–0x0F` | VM control: NOP, HALT, breakpoint, stack discipline helpers |
-| `0x10–0x2F` | local/global/constant loads and stores |
-| `0x30–0x5F` | INTEGER arithmetic, bitwise, comparisons |
-| `0x60–0x7F` | CHAR, SET, and string/array operations |
-| `0x80–0x9F` | REAL and LONGREAL |
-| `0xA0–0xBF` | control flow: jumps, `CASE` tables, `FOR` step variants |
-| `0xC0–0xDF` | calls, frames, native (builtin-module) calls, returns |
-| `0xE0–0xEF` | OOP: type guards, dynamic dispatch, type tests |
-| `0xF0–0xFF` | escape prefix (multi-byte forms) and future extensions |
+**Encoding.** One opcode byte, then its operands, little-endian, no padding
+between instructions.  v1 uses wide, verifiable operands: `u8`, `u16`, `u32`,
+`i32`; jump/code targets are **absolute u32 offsets into the code section**
+(resolved and range-checked at load time).  Short jumps and fused forms are
+reserved for the optimizing tier, which is why the escape prefix exists.
 
-Rules: an unknown opcode aborts loading with a diagnostic naming the offset —
-never execute blind.  Opcodes are added in these ranges only; if a range fills
-up, the next free range (or a new escape form) is used.
+**Stack effect** is written `[before] -> [after]`, top of stack last.
 
-## Versioning policy
+**Storage rule (v1).** Every scalar is a **full 8-byte slot** — in locals,
+globals, array elements and record fields alike.  `CHAR` is a word holding
+0..255; `SET` is a 64-bit word.  No packed layouts in v1, which is what lets
+the `_I`/`_R`/`_P` families be complete without width variants; a compact
+layout is a later descriptor-flag optimization.  `REAL` and `LONGREAL` share
+the `R` ops and the same 8-byte storage (both are 64-bit in the Aegir RTS —
+only *formatting* differs), so there are no separate `L` arithmetic ops; if
+`LONGREAL` ever widens, those land in reserved space.
 
-- **minor** — new sections, new opcodes, new descriptor kinds, added header
-  fields in the reserved area.  Older readers must still run the image by
-  ignoring what they do not know, *unless* a section/opcode is marked
-  mandatory.
-- **major** — anything that changes existing layout or semantics (header
-  field moves, opcode renumbering, frame layout).  A reader refuses a major it
-  does not know.
+`_P` always means "pointer-sized and pointer-bearing": those slots are scanned
+as roots and the opcodes that produce them are the ones the GC maps care about.
 
-## Verification plan (for the implementation)
+### `0x00–0x0F` — VM control and stack
 
-- Round-trip: emit → load → disassemble → compare against the emitter's own
-  IR dump (deterministic, so it can be a golden test).
-- Negative tests: bad magic, future major, truncated section, section
-  overlapping the header, code offset out of range, `stack_max` smaller than
-  the computed high-water mark, descriptor reference out of range — the loader
-  must reject all of them with a diagnostic, not crash.
-- Byte-identity: compiling the same sources twice (and from two different
-  working directories) yields identical images.
+| op | mnemonic | operands | stack | notes |
+|----|----------|----------|-------|-------|
+| 0x00 | `NOP` | — | `[] -> []` | |
+| 0x01 | `HALT` | — | `[] -> []` | normal program end |
+| 0x02 | `DUP` | — | `[a] -> [a,a]` | |
+| 0x03 | `DROP` | — | `[a] -> []` | |
+| 0x04 | `SWAP` | — | `[a,b] -> [b,a]` | |
+| 0x05 | `ASSERT_FAIL` | u32 msg ref into `CONST` | `[] -> []` | predeclared `ASSERT` |
+| 0x06 | `TRAP` | u8 kind | `[] -> []` | runtime error, see kinds below |
+| 0x07–0x0F | reserved | | | |
+
+`TRAP` kinds (u8): 0 = index out of range, 1 = `NIL` dereference, 2 = type
+guard failure, 3 = division by zero, 4 = `CASE` with no matching label
+(should not occur — the emitter adds the else path), 5 = value out of range
+(`CHR`/`ORD`/set index), 6 = explicit `HALT` request from a native.
+
+### `0x10–0x2F` — loads, stores, aggregates
+
+| op | mnemonic | operands | stack | notes |
+|----|----------|----------|-------|-------|
+| 0x10 | `LOAD_L` | u16 slot | `[] -> [v]` | |
+| 0x11 | `STORE_L` | u16 slot | `[v] -> []` | |
+| 0x12 | `LOAD_G` | u32 global idx | `[] -> [v]` | |
+| 0x13 | `STORE_G` | u32 global idx | `[v] -> []` | |
+| 0x14 | `LOAD_CONST` | u32 pool idx | `[] -> [v]` | INTEGER/CHAR/BOOLEAN/SET |
+| 0x15 | `LOAD_ADDR_L` | u16 slot | `[] -> [addr]` | `VAR` params, arrays |
+| 0x16 | `LOAD_ADDR_G` | u32 global idx | `[] -> [addr]` | |
+| 0x17 | `LOAD_IND_I` | — | `[addr] -> [v]` | |
+| 0x18 | `LOAD_IND_R` | — | `[addr] -> [v]` | REAL/LONGREAL |
+| 0x19 | `LOAD_IND_P` | — | `[addr] -> [ptr]` | root-bearing |
+| 0x1A | `STORE_IND_I` | — | `[addr,v] -> []` | |
+| 0x1B | `STORE_IND_R` | — | `[addr,v] -> []` | |
+| 0x1C | `STORE_IND_P` | — | `[addr,ptr] -> []` | |
+| 0x1D | `LOAD_IDX_I` | — | `[arr,idx] -> [v]` | bounds-checked, `TRAP` 0 |
+| 0x1E | `LOAD_IDX_R` | — | `[arr,idx] -> [v]` | |
+| 0x1F | `LOAD_IDX_P` | — | `[arr,idx] -> [ptr]` | |
+| 0x20 | `STORE_IDX_I` | — | `[arr,idx,v] -> []` | |
+| 0x21 | `STORE_IDX_R` | — | `[arr,idx,v] -> []` | |
+| 0x22 | `STORE_IDX_P` | — | `[arr,idx,ptr] -> []` | |
+| 0x23 | `LOAD_FLD_I` | u16 byte off | `[rec] -> [v]` | offset pre-validated against the descriptor |
+| 0x24 | `LOAD_FLD_R` | u16 | `[rec] -> [v]` | |
+| 0x25 | `LOAD_FLD_P` | u16 | `[rec] -> [ptr]` | |
+| 0x26 | `STORE_FLD_I` | u16 | `[rec,v] -> []` | |
+| 0x27 | `STORE_FLD_R` | u16 | `[rec,v] -> []` | |
+| 0x28 | `STORE_FLD_P` | u16 | `[rec,ptr] -> []` | |
+| 0x29 | `ARRAY_LEN` | — | `[arr] -> [len]` | open arrays |
+| 0x2A | `ALLOC_NEW` | u32 desc ref | `[] -> [ptr]` | zeroed object; `has_ptrs` picks GC_malloc vs atomic |
+| 0x2B | `ALLOC_NEW_ARR` | u32 desc ref | `[len] -> [ptr]` | open array |
+| 0x2C | `LOAD_CONST_P` | u32 pool idx | `[] -> [ptr]` | `NIL` |
+| 0x2D | `LOAD_CONST_R` | u32 pool idx | `[] -> [v]` | REAL/LONGREAL literal |
+| 0x2E | `COPY_BYTES` | — | `[src,dst,len] -> []` | array/record/string assignment; non-moving collector assumed |
+| 0x2F | reserved | | | |
+
+### `0x30–0x5F` — INTEGER, bit and set arithmetic
+
+| op | mnemonic | stack | notes |
+|----|----------|-------|-------|
+| 0x30 | `IADD` | `[a,b] -> [a+b]` | |
+| 0x31 | `ISUB` | `[a,b] -> [a-b]` | |
+| 0x32 | `IMUL` | `[a,b] -> [a*b]` | |
+| 0x33 | `IDIV` | `[a,b] -> [a DIV b]` | `TRAP` 3 on zero |
+| 0x34 | `IMOD` | `[a,b] -> [a MOD b]` | |
+| 0x35 | `INEG` | `[a] -> [-a]` | |
+| 0x36 | `IABS` | `[a] -> [ABS a]` | |
+| 0x37 | `IEQ`  | `[a,b] -> [bool]` | |
+| 0x38 | `INE`  | `[a,b] -> [bool]` | |
+| 0x39 | `ILT`  | `[a,b] -> [bool]` | |
+| 0x3A | `ILE`  | `[a,b] -> [bool]` | |
+| 0x3B | `IGT`  | `[a,b] -> [bool]` | |
+| 0x3C | `IGE`  | `[a,b] -> [bool]` | |
+| 0x3D | `SET_UNION`     | `[s,t] -> [s+t]` | `+` on SET |
+| 0x3E | `SET_INTERSECT` | `[s,t] -> [s*t]` | `*` on SET |
+| 0x3F | `SET_DIFF`      | `[s,t] -> [s-t]` | `-` on SET |
+| 0x40 | `SET_SYMDIFF`   | `[s,t] -> [s/t]` | `/` on SET |
+| 0x41 | `SET_EQ` | `[s,t] -> [bool]` | |
+| 0x42 | `SET_NE` | `[s,t] -> [bool]` | |
+| 0x43 | `SET_IN` | `[idx,s] -> [bool]` | `i IN s`, `TRAP` 5 if idx outside 0..63 |
+| 0x44 | `SET_SINGLE` | `[idx] -> [set]` | `{i}` |
+| 0x45–0x5F | **reserved for the optimizing tier** | | fused `local op const` integer forms (`INC`/`DEC` loops) |
+
+### `0x60–0x7F` — CHAR, BOOLEAN and string/array comparisons
+
+| op | mnemonic | stack | notes |
+|----|----------|-------|-------|
+| 0x60 | `CEQ` | `[a,b] -> [bool]` | CHAR comparisons |
+| 0x61 | `CNE` | `[a,b] -> [bool]` | |
+| 0x62 | `CLT` | `[a,b] -> [bool]` | |
+| 0x63 | `CLE` | `[a,b] -> [bool]` | |
+| 0x64 | `CGT` | `[a,b] -> [bool]` | |
+| 0x65 | `CGE` | `[a,b] -> [bool]` | |
+| 0x66 | `BEQ` | `[a,b] -> [bool]` | BOOLEAN comparisons |
+| 0x67 | `BNE` | `[a,b] -> [bool]` | |
+| 0x68 | `BTEST` | `[b] -> [bool]` | BOOLEAN as a value (used by `IF`) |
+| 0x69 | `STR_EQ` | `[a,b] -> [bool]` | NUL-terminated char arrays |
+| 0x6A | `STR_NE` | `[a,b] -> [bool]` | |
+| 0x6B | `STR_LT` | `[a,b] -> [bool]` | |
+| 0x6C | `STR_LE` | `[a,b] -> [bool]` | |
+| 0x6D | `STR_GT` | `[a,b] -> [bool]` | |
+| 0x6E | `STR_GE` | `[a,b] -> [bool]` | |
+| 0x6F | `STR_COPY` | `[dst,src] -> []` | `COPY`, truncating + NUL-terminating |
+| 0x70 | `ORD` | `[c] -> [i]` | CHAR -> INTEGER |
+| 0x71 | `CHR` | `[i] -> [c]` | `TRAP` 5 outside 0..255 |
+| 0x72–0x7F | reserved | | |
+
+### `0x80–0x9F` — REAL / LONGREAL
+
+| op | mnemonic | stack | notes |
+|----|----------|-------|-------|
+| 0x80 | `RADD` | `[a,b] -> [a+b]` | REAL and LONGREAL share these |
+| 0x81 | `RSUB` | `[a,b] -> [a-b]` | |
+| 0x82 | `RMUL` | `[a,b] -> [a*b]` | |
+| 0x83 | `RDIV` | `[a,b] -> [a/b]` | IEEE semantics, no trap |
+| 0x84 | `RNEG` | `[a] -> [-a]` | |
+| 0x85 | `RABS` | `[a] -> [ABS a]` | |
+| 0x86 | `REQ` | `[a,b] -> [bool]` | |
+| 0x87 | `RNE` | `[a,b] -> [bool]` | |
+| 0x88 | `RLT` | `[a,b] -> [bool]` | |
+| 0x89 | `RLE` | `[a,b] -> [bool]` | |
+| 0x8A | `RGT` | `[a,b] -> [bool]` | |
+| 0x8B | `RGE` | `[a,b] -> [bool]` | |
+| 0x8C | `I2R` | `[i] -> [r]` | `FLT` |
+| 0x8D | `R2I_ROUND` | `[r] -> [i]` | round to nearest, Oberon `ENTIER`-free conversion |
+| 0x8E | `R2I_TRUNC` | `[r] -> [i]` | truncate toward zero |
+| 0x8F | `LREAL_MARK` | — | escape marker for future widened LONGREAL ops (currently a no-op) |
+| 0x90–0x9F | reserved | | fused REAL forms |
+
+### `0xA0–0xBF` — control flow
+
+| op | mnemonic | operands | stack | notes |
+|----|----------|----------|-------|-------|
+| 0xA0 | `JMP` | u32 target | `[] -> []` | |
+| 0xA1 | `JZ`  | u32 target | `[bool] -> []` | |
+| 0xA2 | `JNZ` | u32 target | `[bool] -> []` | |
+| 0xA3 | `CASE` | u32 case-table ref | `[v] -> []` | jump table; no match falls through |
+| 0xA4 | `FOR_ENTER_I` | u16 var slot, i32 step, u32 else target | `[from,to] -> []` | direction from `from` vs `to`; stores `from`, jumps to `else` if the loop body never runs |
+| 0xA5 | `FOR_NEXT_I` | u16 var slot, i32 step, u16 limit slot, u32 body target | `[] -> []` | `var := var ± step`, loop while in range |
+| 0xA6 | `FOR_ENTER_C` | as `FOR_ENTER_I` | `[from,to] -> []` | CHAR loop variable |
+| 0xA7 | `FOR_NEXT_C` | as `FOR_NEXT_I` | `[] -> []` | |
+| 0xA8–0xBF | reserved | | | short `i8`/`i16` jumps for the optimizing tier |
+
+`FOR_ENTER_*`/`FOR_NEXT_*` allocate **two hidden frame slots** (limit and
+direction) that the emitter accounts for in `frame_slots` — this is what makes
+the Oberon-2 rule ("the step direction is decided by the initial comparison")
+exact, and it keeps the loop limit out of the operand stack so nested loops and
+procedure calls inside the body cannot disturb it.
+
+`CASE` tables live in the `CONST` section as: `n` u32, then `n` entries of
+`{lo u32, hi u32, target u32}` (a label is a range, matching Oberon `lo..hi`).
+The emitter places the else branch immediately after `CASE`.
+
+### `0xC0–0xDF` — calls and frames
+
+| op | mnemonic | operands | stack | notes |
+|----|----------|----------|-------|-------|
+| 0xC0 | `CALL` | u32 code off | `[args...] -> [rets...]` | callee's locals *are* the parameter slots |
+| 0xC1 | `RET` | — | `[v] -> []` | one result |
+| 0xC2 | `RET_VOID` | — | `[] -> []` | |
+| 0xC3 | `CALL_NATIVE` | u16 native idx, u8 arg count | `[args...] -> [rets...]` | builtin modules (Out, Files, …) |
+| 0xC4 | `LOAD_X` | u16 slot | `[] -> [v]` | load from the caller's frame (display/static link access) |
+| 0xC5 | `STORE_X` | u16 slot | `[v] -> []` | |
+| 0xC6–0xDF | reserved | | | tail calls, varargs |
+
+The native ABI is deliberately narrow: the VM marshals the operand stack into
+a value array with descriptor references and calls an Ada procedure that
+returns a status (0 = ok, non-zero = a `TRAP` kind).  Natives may **not** keep
+VM pointers across the call — a native that wants to retain one must register
+it as a root through the VM API (none currently needs to).
+
+### `0xE0–0xEF` — OOP and dynamic types
+
+| op | mnemonic | operands | stack | notes |
+|----|----------|----------|-------|-------|
+| 0xE0 | `GUARD` | u32 desc ref | `[ptr] -> [ptr]` | `WITH`/type guard; `TRAP` 2 on failure; `NIL` passes |
+| 0xE1 | `TYPE_TEST` | u32 desc ref | `[ptr] -> [bool]` | descriptor-chain walk |
+| 0xE2 | `DISPATCH` | u16 method idx | `[self,args...] -> [rets...]` | resolve through `self`'s descriptor method table |
+| 0xE3 | `DESC_OF` | — | `[ptr] -> [desc_addr]` | for native bookkeeping / debugging |
+| 0xE4–0xEF | reserved | | | fused guard+branch, inline caches |
+
+### `0xF0–0xFF` — escape
+
+| op | mnemonic | operands | stack | notes |
+|----|----------|----------|-------|-------|
+| 0xF0 | `EXT` | u8 sub-opcode, then its operands | as defined | unlimited future space; an unknown sub-opcode aborts loading |
+| 0xF1–0xFF | reserved | | | |
+
+Rules: an unknown opcode aborts loading with the code offset in the
+diagnostic — never execute blind.  Opcodes are added inside these ranges only;
+a full range takes the next free one, or an `EXT` form.
