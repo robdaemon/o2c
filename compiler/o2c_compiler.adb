@@ -1349,6 +1349,7 @@ package body O2c_Compiler is
       UT   : Natural := 0;        --  pointer user type when D_Ptr
       Off  : Natural := 0;        --  field byte offset when D_Field
       Ptr_Field : Boolean := False;  --  that field holds a pointer
+      Base_On_Stack : Boolean := False;  --  the chain pushed its own base
    end record;
 
    type VK_Kind is (V_Rec, V_Ptr, V_Arr);
@@ -1456,7 +1457,10 @@ package body O2c_Compiler is
                D.Text := D.Text & "."
                  & Ada_Id (To_String (UTypes (FO).F (F).Name));
                if UTypes (FO).F (F).UT = 0
-                 or else UTypes (FO).F (F).UT = FO
+                 or else (UTypes (FO).F (F).UT = FO
+                          and then Cur.Kind /= Lex.Tok_Dot
+                          and then Cur.Kind /= Lex.Tok_Caret
+                          and then Cur.Kind /= Lex.Tok_LBracket)
                then
                   D.Sc := UTypes (FO).F (F).Typ;
                   D.Ptr_Field := UTypes (FO).F (F).UT = FO;
@@ -1489,7 +1493,9 @@ package body O2c_Compiler is
                      end if;
                      D.Off := (F - 1) * 8;
                      D.K := D_Field;
-                     if not UTypes (Base_UT).Is_Ptr then
+                     if not UTypes (Base_UT).Is_Ptr
+                       and then not D.Base_On_Stack
+                     then
                         O2c_BC.Load_Addr_G
                           (O2c_BC.Global_Array (Base_Name,
                                                 UTypes (FO).N_F));
@@ -1499,6 +1505,16 @@ package body O2c_Compiler is
                   end if;
                   Next;           --  past the field name
                   return D;
+               end if;
+               if UTypes (FO).F (F).UT = FO then
+                  --  An intermediate pointer field: what it holds is the
+                  --  next record, so load it and carry on chaining from
+                  --  there.  Its type is the record itself, so the walk below
+                  --  already reaches the right view.
+                  if O2c_BC.Bytecode_Mode then
+                     O2c_BC.Load_Fld_P ((F - 1) * 8);
+                     D.Base_On_Stack := True;
+                  end if;
                end if;
                UT := UTypes (FO).F (F).UT;
                if UTypes (UT).Is_Ptr then
