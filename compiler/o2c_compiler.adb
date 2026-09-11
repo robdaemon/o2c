@@ -1458,9 +1458,14 @@ package body O2c_Compiler is
                  & Ada_Id (To_String (UTypes (FO).F (F).Name));
                if UTypes (FO).F (F).UT = 0
                  or else (UTypes (FO).F (F).UT = FO
-                          and then Cur.Kind /= Lex.Tok_Dot
-                          and then Cur.Kind /= Lex.Tok_Caret
-                          and then Cur.Kind /= Lex.Tok_LBracket)
+                          --  A field naming the record it sits in, and one
+                          --  that nothing selects from, is a terminal leaf
+                          --  holding a pointer.  Peek because Cur is still
+                          --  the field name here: the selector has not been
+                          --  read yet, so Cur cannot answer this.
+                          and then Lex.Peek_Token.Kind /= Lex.Tok_Dot
+                          and then Lex.Peek_Token.Kind /= Lex.Tok_Caret
+                          and then Lex.Peek_Token.Kind /= Lex.Tok_LBracket)
                then
                   D.Sc := UTypes (FO).F (F).Typ;
                   D.Ptr_Field := UTypes (FO).F (F).UT = FO;
