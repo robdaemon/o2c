@@ -1,6 +1,7 @@
 module Unsup;
 import Out;
-var a: array 4 of integer;
+type Vec = array 4 of integer;
+var a: Vec;
 begin
   a[0] := 1;
   Out.Ln
