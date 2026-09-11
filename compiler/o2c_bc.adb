@@ -495,7 +495,18 @@ package body O2c_BC is
 
    function Encode return String is
       Proc_Rec   : constant := 24;
-      Body_Off   : constant := 4 + Proc_Rec;
+      --  Code offsets are relative to the start of the CODE section payload,
+      --  which INCLUDES the procedure table (docs/obc-image.md): a
+      --  one-procedure image's first instruction is at 4 + 24 = 28, not 0.
+      --  These are functions, not constants, so they are evaluated where
+      --  they are used - after the module body is opened below.  A constant
+      --  object would be evaluated at its declaration, before that, and
+      --  report the wrong table size.
+      function Code_Base return Natural is
+        (4 + N_Procs_Used * Proc_Rec);
+
+      function Body_Offset return Natural is
+        (Code_Base + Procs (Body_Proc).Buf_Off);
       --  CONST pool: words first, then the string area
       Str_Base   : constant Natural := N_Words * 8;
       Str_Offs   : array (1 .. N_Strings) of Natural;
@@ -508,6 +519,19 @@ package body O2c_BC is
 
       Code_Bytes : Unbounded_String := Code;
    begin
+      --  If the front end never opened a procedure then the whole module is
+      --  the body: open it now, before any offset is computed or used, so a
+      --  one-procedure image keeps the offsets it had before procedures
+      --  existed.
+      if N_Procs_Used = 0 then
+         Begin_Body;
+         --  Nothing had been emitted as a procedure, so the code emitted so
+         --  far IS this body's code: it starts at buffer offset 0, not at
+         --  the current end of the buffer (which is where Begin_Proc, used
+         --  for real procedures, would have recorded it).
+         Procs (Body_Proc).Buf_Off := 0;
+      end if;
+
       --  string layout: each string follows the previous one
       for I in 1 .. N_Strings loop
          Str_Offs (I) := Cursor;
@@ -541,7 +565,7 @@ package body O2c_BC is
          if Labels (I) < 0 then
             raise Wrong_Construct with "bytecode backend: unresolved label";
          end if;
-         Targets (I) := Body_Off + Labels (I);
+         Targets (I) := Code_Base + Labels (I);
       end loop;
       declare
          C : String (1 .. Len_Of (Code_Bytes));
@@ -550,8 +574,13 @@ package body O2c_BC is
          for I in 1 .. N_Fixups loop
             declare
                P : constant Natural := Fixups (I).Pos;      --  0-based
-               V : constant Natural := Targets (Fixups (I).Label);
+               V : Natural := 0;
             begin
+               if Fixups (I).Proc /= 0 then
+                  V := Code_Base + Procs (Fixups (I).Proc).Buf_Off;
+               else
+                  V := Targets (Fixups (I).Label);
+               end if;
                for K in 0 .. 3 loop
                   C (P + K + 1) :=
                     Character'Val ((V / 256 ** K) mod 256);
@@ -564,10 +593,16 @@ package body O2c_BC is
       declare
          Payload : Unbounded_String;
       begin
-         --  procedure table: one record for the module body
-         Payload := Payload & Character'Val (1) & (1 .. 3 => Character'Val (0));
+         --  procedure table: n_procs, then one record per procedure.
+         --  Procedures are numbered in emission order and the module body is
+         --  the last one, which is what the header's entry points at.
          declare
             Rec : Unbounded_String;
+            procedure W16 (V : Natural) is
+            begin
+               Rec := Rec & Character'Val (V mod 256);
+               Rec := Rec & Character'Val ((V / 256) mod 256);
+            end W16;
             procedure W32 (V : Natural) is
             begin
                for K in 0 .. 3 loop
@@ -575,14 +610,21 @@ package body O2c_BC is
                end loop;
             end W32;
          begin
-            W32 (Body_Off);            --  code_off
-            W32 (0);                   --  frame_slots
-            Rec := Rec & Character'Val (0) & Character'Val (0);  --  nparams
-            Rec := Rec & Character'Val (0) & Character'Val (0);  --  nresults
-            W32 (Natural (Integer'Max (Max_Depth, 1)));  --  stack_max
-            W32 (0);                   --  stackmap_off
-            W32 (0);                   --  line_ref
+            W32 (N_Procs_Used);
             Payload := Payload & Rec;
+            for P in 1 .. N_Procs_Used loop
+               Rec := Null_Unbounded_String;
+               W32 (Code_Base + Procs (P).Buf_Off);   --  code_off
+               W32 (Procs (P).Frame_Slots);           --  frame_slots
+               W16 (Procs (P).NParams);               --  nparams
+               W16 (Procs (P).NResults);              --  nresults
+               --  stack_max is the module high-water mark: a conservative
+               --  bound, which is all the verifier needs.
+               W32 (Natural (Integer'Max (Max_Depth, 1)));
+               W32 (0);                               --  stackmap_off
+               W32 (0);                               --  line_ref
+               Payload := Payload & Rec;
+            end loop;
          end;
          Payload := Payload & Code_Bytes;
          declare
@@ -625,7 +667,7 @@ package body O2c_BC is
                Header (33 .. 40) := (others => Character'Val (0));
                W64 (41, Total);           --  total_size
                W64 (49, 1);               --  flags: has descriptors (unused)
-               W64 (57, Body_Off);        --  entry
+               W64 (57, Body_Offset);     --  entry
             end;
             declare
                Table : Unbounded_String;
