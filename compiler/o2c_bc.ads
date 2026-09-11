@@ -93,6 +93,13 @@ package O2c_BC is
    --  run once: this is how it tells.
    function Proc_Open return Boolean;
 
+   --  Stack shuffles with their real depth effects.  Un() is for unary
+   --  value operators (NEG, ABS, ORD, CHR), which leave the depth alone;
+   --  DUP pushes and DROP pops, so emitting them through Un() would make
+   --  the computed stack_max and the underflow checks wrong.
+   procedure Dup_Top;
+   procedure Discard;
+
    procedure Load_Local (Slot : Natural);
    procedure Store_Local (Slot : Natural);
    procedure Call_Proc (Proc_Id : Natural);

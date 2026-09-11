@@ -411,6 +411,20 @@ package body O2c_BC is
       return -1;
    end Local_Slot;
 
+   procedure Dup_Top is
+   begin
+      Put_Byte (16#02#);          --  DUP
+      N_Insns := N_Insns + 1;
+      Pushed (1);
+   end Dup_Top;
+
+   procedure Discard is
+   begin
+      Put_Byte (16#03#);          --  DROP
+      N_Insns := N_Insns + 1;
+      Popped (1);
+   end Discard;
+
    procedure Load_Local (Slot : Natural) is
    begin
       Put_Byte (16#10#);          --  LOAD_L
