@@ -342,3 +342,62 @@ it as a root through the VM API (none currently needs to).
 Rules: an unknown opcode aborts loading with the code offset in the
 diagnostic — never execute blind.  Opcodes are added inside these ranges only;
 a full range takes the next free one, or an `EXT` form.
+
+## Operands: widths, byte order, offset bases
+
+Every operand is written at its natural width with **no padding between
+instructions**, little-endian (the header's `endian = 1`):
+
+| width | bytes |
+|-------|-------|
+| u8    | 1 |
+| u16   | 2, low byte first |
+| u32   | 4, low byte first |
+
+### The one base to get right
+
+`entry`, a procedure record's `code_off`, `CALL`'s operand and every jump
+target are offsets **from the start of the `CODE` section payload** — the
+byte holding `n_procs`, which means they **include** the procedure table that
+follows it.  A one-procedure image's first instruction is therefore at offset
+`4 + 24 = 28`, not 0.
+
+Worth stating twice, because everything else in the format is relative to
+nothing at all:
+
+- **frame slots** are numbered from 0 *per procedure*, and a callee's locals
+  **are** its parameter slots: `CALL` takes its arguments on the operand
+  stack and leaves them in the callee's frame, lowest slot first;
+- the **operand stack** is separate from the frames and is what `stack_max`
+  bounds;
+- `CONST` pool references and global indices are 0-based indices into their
+  own sections.
+
+`LOAD_L`/`STORE_L` carry a u16 slot, `LOAD_G`/`STORE_G` a u32 global index,
+and jumps a u32 target that is absolute within the `CODE` payload — not a
+relative displacement.
+
+## Implemented today
+
+The crate compiles the whole language to Ada; the bytecode emitter is a
+parallel, deliberately partial consumer of the same parse.  So this table is
+about the *emitter and the VM*, not about o2c's accepted input:
+
+| area | emitted and executed |
+|------|----------------------|
+| stack, locals, globals | `DUP`, `DROP`, `LOAD_L`, `STORE_L`, `LOAD_G`, `STORE_G`, `LOAD_CONST` |
+| arithmetic, comparison, sets | `ADD` … `GE`, `NEG`, `IABS`, `BTEST`, `ORD`, `CHR` |
+| control flow | `JMP`, `JZ`, `JNZ` (u32 target absolute in the `CODE` payload) |
+| procedures | `CALL`, `RET`, `RET_VOID` — opcodes and emitter machinery exist; the front end does not emit them yet |
+| builtins | `CALL_NATIVE` (`Out.Int`, `Out.String`, `Out.Ln`) |
+| traps | `TRAP`, `ASSERT_FAIL` |
+
+Everything else in the v1 opcode table is *defined* here, reports
+`Not_Implemented` in the VM, and raises a clear front-end error rather than
+emitting a wrong image — a construct outside the emitter's scope fails loudly
+instead of silently producing a bad program.
+
+The front end's scope today is the **module body** doing INTEGER/CHAR/BOOLEAN
+work on module-level scalars.  A procedure record's `stack_max` is currently
+the module's high-water mark: a conservative bound, which is all the verifier
+needs, rather than the exact per-procedure figure.
