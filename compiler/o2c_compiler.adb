@@ -1030,7 +1030,13 @@ package body O2c_Compiler is
    function Field_Offset (Base_UT : Natural; FO : Natural; F : Natural)
                           return Natural is
       N : Natural := 0;
-      U : Natural := Base_UT;
+      --  A pointer base designates its target, so the chain is walked from
+      --  there: p^.v has a variable of pointer type and a field owned by the
+      --  record.  Without this the walk never reaches the owner and every
+      --  field access through a pointer is refused.
+      U : Natural := (if UTypes (Base_UT).Is_Ptr
+                      then UTypes (Base_UT).Ptr_Tgt
+                      else Base_UT);
    begin
       while U /= 0 and then U /= FO loop
          N := N + UTypes (U).N_F;
