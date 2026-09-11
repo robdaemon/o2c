@@ -56,9 +56,39 @@ package body O2c_BC is
    type Fixup is record
       Pos   : Natural;      --  code offset of the u32 operand
       Label : Natural;
+      Proc  : Natural := 0;   --  non-zero: a CALL to this procedure id
    end record;
    Fixups    : array (1 .. Max_Fixups) of Fixup;
    N_Fixups  : Natural := 0;
+
+   --  Sizing note (project rule on fixed tables): procedures and locals are
+   --  bounded per module, and the bounds are a compiler-input argument, not
+   --  a VM limit - exceeding them is reported, never truncated.  Locals are
+   --  counted across all procedures of the module.
+   Max_Procs  : constant := 256;
+   Max_Locals : constant := 1024;
+
+   type Proc_Entry is record
+      Buf_Off     : Natural := 0;   --  where its code starts in the buffer
+      Frame_Slots : Natural := 0;
+      NParams     : Natural := 0;
+      NResults    : Natural := 0;
+   end record;
+
+   Procs        : array (1 .. Max_Procs) of Proc_Entry;
+   N_Procs_Used : Natural := 0;
+   Cur_Proc     : Natural := 0;   --  0 = no procedure open
+   Body_Proc    : Natural := 0;   --  the module body, once opened
+   Next_Frame   : Natural := 0;   --  next free frame slot of Cur_Proc
+
+   type Local_Entry is record
+      Proc : Natural := 0;
+      Slot : Natural := 0;
+      Name : Unbounded_String;
+   end record;
+
+   Locals   : array (1 .. Max_Locals) of Local_Entry;
+   N_Locals : Natural := 0;
 
    Depth     : Integer := 0;
    Max_Depth : Integer := 0;
@@ -117,6 +147,11 @@ package body O2c_BC is
       N_Strings := 0;
       N_Fixups := 0;
       N_Labels_Used := 0;
+      N_Procs_Used := 0;
+      Cur_Proc := 0;
+      Body_Proc := 0;
+      Next_Frame := 0;
+      N_Locals := 0;
       Depth := 0;
       Max_Depth := 0;
       for I in Labels'Range loop
@@ -265,7 +300,13 @@ package body O2c_BC is
         when Jmp         => 16#A0#,
         when Jz          => 16#A1#,
         when Jnz         => 16#A2#,
-        when Call_Native => 16#C3#);
+        when Call_Native => 16#C3#,
+        --  docs/obc-image.md: locals at 0x10/0x11, frames at 0xC0-0xC2.
+        when Load_L      => 16#10#,
+        when Store_L     => 16#11#,
+        when Call        => 16#C0#,
+        when Ret         => 16#C1#,
+        when Ret_Void    => 16#C2#);
 
    procedure Bin (O : Op) is
    begin
@@ -288,6 +329,119 @@ package body O2c_BC is
       N_Insns := N_Insns + 1;
       Popped (NArgs);
    end Native_Call;
+
+   --  ---- procedures and frames -----------------------------------------
+   function Begin_Proc (NParams : Natural; NResults : Natural) return Natural is
+   begin
+      if N_Procs_Used = Max_Procs then
+         raise Wrong_Construct with
+           "bytecode backend: too many procedures";
+      end if;
+      if Cur_Proc /= 0 then
+         raise Wrong_Construct with
+           "bytecode backend: a procedure is already open";
+      end if;
+      N_Procs_Used := N_Procs_Used + 1;
+      Cur_Proc := N_Procs_Used;
+      Next_Frame := 0;
+      Procs (Cur_Proc) := (Buf_Off    => Length (Code),
+                           Frame_Slots => 0,
+                           NParams     => NParams,
+                           NResults    => NResults);
+      return Cur_Proc;
+   end Begin_Proc;
+
+   procedure End_Proc is
+   begin
+      if Cur_Proc = 0 then
+         raise Wrong_Construct with
+           "bytecode backend: no procedure is open";
+      end if;
+      Procs (Cur_Proc).Frame_Slots := Next_Frame;
+      Cur_Proc := 0;
+   end End_Proc;
+
+   procedure Begin_Body is
+   begin
+      Body_Proc := Begin_Proc (0, 0);
+   end Begin_Body;
+
+   function Local (Ada_Name : String) return Natural is
+   begin
+      if Cur_Proc = 0 then
+         raise Wrong_Construct with
+           "bytecode backend: a local needs an open procedure";
+      end if;
+      for I in 1 .. N_Locals loop
+         if Locals (I).Proc = Cur_Proc
+           and then To_String (Locals (I).Name) = Ada_Name
+         then
+            return Locals (I).Slot;
+         end if;
+      end loop;
+      if N_Locals = Max_Locals then
+         raise Wrong_Construct with "bytecode backend: too many locals";
+      end if;
+      N_Locals := N_Locals + 1;
+      Locals (N_Locals) := (Proc => Cur_Proc,
+                            Slot => Next_Frame,
+                            Name => To_Unbounded_String (Ada_Name));
+      Next_Frame := Next_Frame + 1;
+      return Locals (N_Locals).Slot;
+   end Local;
+
+   function Local_Count return Natural is
+     (Next_Frame);
+
+   procedure Load_Local (Slot : Natural) is
+   begin
+      Put_Byte (16#10#);          --  LOAD_L
+      Put_U16 (U16 (Slot));
+      N_Insns := N_Insns + 1;
+      Pushed (1);
+   end Load_Local;
+
+   procedure Store_Local (Slot : Natural) is
+   begin
+      Put_Byte (16#11#);          --  STORE_L
+      Put_U16 (U16 (Slot));
+      N_Insns := N_Insns + 1;
+      Popped (1);
+   end Store_Local;
+
+   procedure Call_Proc (Proc_Id : Natural) is
+   begin
+      if Proc_Id = 0 or else Proc_Id > N_Procs_Used then
+         raise Wrong_Construct with
+           "bytecode backend: call to an unknown procedure";
+      end if;
+      Put_Byte (16#C0#);          --  CALL
+      if N_Fixups = Max_Fixups then
+         raise Wrong_Construct with "bytecode backend: too many fixups";
+      end if;
+      N_Fixups := N_Fixups + 1;
+      Fixups (N_Fixups) := (Pos => Length (Code), Label => 0,
+                            Proc => Proc_Id);
+      Put_U32 (0);                --  patched at Encode
+      N_Insns := N_Insns + 1;
+      Popped (Procs (Proc_Id).NParams);
+      Pushed (Procs (Proc_Id).NResults);
+   end Call_Proc;
+
+   procedure Return_Value is
+   begin
+      Put_Byte (16#C1#);          --  RET
+      N_Insns := N_Insns + 1;
+   end Return_Value;
+
+   procedure Return_Void is
+   begin
+      Put_Byte (16#C2#);          --  RET_VOID
+      N_Insns := N_Insns + 1;
+   end Return_Void;
+
+   function Code_Offset return Natural is
+     (Length (Code));
 
    procedure Halt_Program is
    begin
@@ -320,7 +474,7 @@ package body O2c_BC is
       end if;
       Put_Byte (U64 (Byte_Of (O)));
       N_Fixups := N_Fixups + 1;
-      Fixups (N_Fixups) := (Pos => Len_Of (Code), Label => Label_Id);
+      Fixups (N_Fixups) := (Pos => Len_Of (Code), Label => Label_Id, Proc => 0);
       Put_U32 (0);                --  patched by Encode
       N_Insns := N_Insns + 1;
       if O /= Jmp then

@@ -24,7 +24,11 @@ package O2c_BC is
       Add, Sub, Mul, IDiv, IMod, Neg, IAbs,
       Eq, Ne, Lt, Le, Gt, Ge,
       Btest, Ord, Chr,
-      Jmp, Jz, Jnz, Call_Native);
+      Jmp, Jz, Jnz, Call_Native,
+      --  Procedures and frames (M53 widening).  Appended, not inserted:
+      --  the enum's order is fixed by the same append-only rule that fixes
+      --  the byte numbers, and the byte numbers below are the spec's.
+      Load_L, Store_L, Call, Ret, Ret_Void);
 
    --  ---- mode ------------------------------------------------------------
    --  True while the front end should feed this package.  Only the hook
@@ -60,6 +64,35 @@ package O2c_BC is
    procedure Un (O : Op);
    procedure Native_Call (Idx : Natural; NArgs : Natural);
    procedure Halt_Program;
+
+   --  ---- procedures and frames ------------------------------------------
+   --  A module's declared procedures are separate procedures in the CODE
+   --  section, numbered in emission order; the module body is the final
+   --  one and the image header's `entry` points at it.  Code offsets (a
+   --  procedure's `code_off`, CALL's operand and every jump target) are
+   --  relative to the start of the CODE section payload, which is what the
+   --  VM verifies and resolves against.
+   function Begin_Proc (NParams : Natural; NResults : Natural) return Natural;
+   procedure End_Proc;
+   --  Open the module body.  Called when the statement part begins, after
+   --  every declared procedure has been closed, so the body's code is
+   --  contiguous and last.
+   procedure Begin_Body;
+
+   --  Frame local of the currently open procedure: interned by name and
+   --  numbered from 0, so the frame slots are the parameter slots.
+   function Local (Ada_Name : String) return Natural;
+   function Local_Count return Natural;
+
+   procedure Load_Local (Slot : Natural);
+   procedure Store_Local (Slot : Natural);
+   procedure Call_Proc (Proc_Id : Natural);
+   procedure Return_Value;
+   procedure Return_Void;
+
+   --  Byte offset of the next instruction in the code buffer: a procedure
+   --  captures this when its code starts.
+   function Code_Offset return Natural;
 
    --  ---- labels ---------------------------------------------------------
    --  A label is an opaque number the caller allocates per construct.
