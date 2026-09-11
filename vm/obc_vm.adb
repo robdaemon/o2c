@@ -213,14 +213,11 @@ package body OBC_VM is
    Native_Pops : constant array (0 .. Max_Natives - 1) of Natural :=
      (2, 1, 0, 2, 1);
 
-   --  A justified static ceiling (project rule on fixed tables): the proc
-   --  table is one fixed allocation and the loader has to bound what an image
-   --  can ask for, since N_Procs comes from the image's own header and a
-   --  malformed one could otherwise demand an arbitrary table.
-   --  The better fix is the one Globals got - size the table from N_Procs
-   --  once the header is read, which removes the ceiling instead of arguing
-   --  for it.  Not done here because Procs sits in the image record and would
-   --  need to become an access type.
+   --  A policy limit, not a storage bound: the proc table is allocated to
+   --  the N_Procs the image declares, so this only says how many procedures
+   --  a program may have.  The loader still checks it, because N_Procs comes
+   --  from the image's header and a malformed one must not be able to demand
+   --  an arbitrary allocation.
    Max_Procs   : constant := 256;
 
    type Proc_Info is record
@@ -231,7 +228,10 @@ package body OBC_VM is
       Stack_Max   : Natural := 0;
    end record;
 
-   type Proc_Table is array (1 .. Max_Procs) of Proc_Info;
+   --  The image record allocates its table to the count its header
+   --  declares, so this is the unconstrained form to allocate from.
+   type Proc_Array is array (Natural range <>) of Proc_Info;
+   type Proc_Array_Access is access Proc_Array;
 
    --  ---- decoded image --------------------------------------------------
    type Image_Info is record
@@ -248,7 +248,7 @@ package body OBC_VM is
       Code_Len    : Natural := 0;
       N_Procs     : Natural := 0;
       Body_Proc   : Natural := 0;   --  the one the entry offset names
-      Procs       : Proc_Table;
+      Procs       : Proc_Array_Access := null;
       --  The CODE and CONST payloads as 0-based heap copies, shared by the
       --  verifier and the interpreter (see the note in Decode).
       Code        : Byte_Array_Access := null;
@@ -466,6 +466,7 @@ package body OBC_VM is
          --  line_ref u32.  Code offsets are relative to the start of this
          --  payload, the table included (docs/obc-image.md).
          Img.N_Procs := N_Procs;
+         Img.Procs := new Proc_Array (1 .. N_Procs);
          Img.Stack_Max := 0;
          Img.Body_Proc := 0;
          for P in 1 .. N_Procs loop
