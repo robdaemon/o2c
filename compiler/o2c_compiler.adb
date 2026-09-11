@@ -273,6 +273,17 @@ package body O2c_Compiler is
    Ctrl_Depth   : Natural := 0;    --  open IF/WHILE/REPEAT/FOR/LOOP nesting
    Func_Return_Ok : Boolean := False;
    Used_CStr : Boolean := False;
+
+   --  Resolve a variable name for the bytecode backend: a frame local of the
+   --  procedure being emitted if one is declared, otherwise a module global.
+   --  Lookup, never interning - a read must not mint a frame slot, or it
+   --  would silently mean uninitialised memory instead of the global.
+   --  Called only while Bytecode_Mode is on, since Global raises outside it.
+   function Bc_Var (Ada_Name : String) return Natural is
+      S : constant Integer := O2c_BC.Local_Slot (Ada_Name);
+   begin
+      return (if S >= 0 then Natural (S) else O2c_BC.Global (Ada_Name));
+   end Bc_Var;
    Used_Int_Arr  : Boolean := False;  --  need O2c_Int_Arr base (M12)
    Used_Bool_Arr : Boolean := False;  --  need O2c_Bool_Arr base (M12)
    Used_Set      : Boolean := False;  --  need O2c_Set type + Interfaces
@@ -2958,7 +2969,7 @@ package body O2c_Compiler is
                        & "only INTEGER/CHAR/BOOLEAN variables are supported";
                   end if;
                   O2c_BC.Load
-                    (O2c_BC.Global (Ada_Id (Cur.Text (1 .. Cur.Len))));
+                    (Bc_Var (Ada_Id (Cur.Text (1 .. Cur.Len))));
                end if;
                R.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
                R.Typ := Syms (Id).Typ;
@@ -4451,6 +4462,31 @@ package body O2c_Compiler is
          end if;
       end if;
       Append_Decl (To_String (Hdr) & " is");
+      --  Bytecode: a declared procedure is its own procedure in the CODE
+      --  section.  Its parameters become the lowest frame slots, in order,
+      --  which is the convention CALL relies on: a callee's locals ARE its
+      --  parameter slots, lowest slot first.  The names are interned under
+      --  the same spelling the use sites look up, i.e. Ada_Id-mangled.
+      if O2c_BC.Bytecode_Mode then
+         declare
+            Ignored : constant Natural :=
+              O2c_BC.Begin_Proc (N_Par, (if Is_Function then 1 else 0));
+         begin
+            null;
+         end;
+         for I in 1 .. N_Par loop
+            declare
+               --  The slot value is held by the emitter's own table; all
+               --  this needs is the interning side effect, in parameter
+               --  order.
+               Slot : constant Natural :=
+                 O2c_BC.Local (Ada_Id (To_String (PName (I))));
+               pragma Unreferenced (Slot);
+            begin
+               null;
+            end;
+         end loop;
+      end if;
       --  local declarations (M10): optional CONST/TYPE/VAR sections
       --  between the header and BEGIN.  Their symbols push onto the
       --  table after the parameters (so locals may shadow parameters
@@ -6534,7 +6570,7 @@ package body O2c_Compiler is
                              & "assignments are supported";
                         end if;
                         O2c_BC.Store
-                          (O2c_BC.Global (Ada_Id (Head (1 .. H_Len))));
+                          (Bc_Var (Ada_Id (Head (1 .. H_Len))));
                      end if;
                      if Syms (Idx).Typ = T_LReal then
                         if V.Typ = T_Int
