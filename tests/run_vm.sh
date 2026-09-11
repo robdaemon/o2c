@@ -221,6 +221,21 @@ else
    bad "rec.asm did not run: $(cat "$WORK/rec.err" 2>/dev/null)"
 fi
 
+#  ---- positive: hand-assembled NIL ----------------------------------------
+#  Exercises LOAD_CONST_P independently of the emitter: a global is set to NIL
+#  through a pool word of zero and compared against NIL, printing 1.  The half
+#  of pointers that does not need the heap.
+if python3 "$ASM" "$ROOT/tests/vm/nil.asm" "$WORK/nil.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/nil.obc" >"$WORK/nil.out" 2>"$WORK/nil.err"; then
+   if diff -u "$ROOT/tests/vm/nil.out" "$WORK/nil.out"; then
+      note "positive: nil.asm (pointer constants) matches the golden output"
+   else
+      bad "nil.asm output differs from tests/vm/nil.out"
+   fi
+else
+   bad "nil.asm did not run: $(cat "$WORK/nil.err" 2>/dev/null)"
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_vm: FAIL ($fails)" >&2
    exit 1

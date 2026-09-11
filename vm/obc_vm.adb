@@ -115,6 +115,7 @@ package body OBC_VM is
    Op_Load_Addr_G  : constant := 16#16#;
    Op_Load_Idx_I   : constant := 16#1D#;
    Op_Load_Fld_I   : constant := 16#23#;
+   Op_Load_Const_P : constant := 16#2C#;
    Op_Store_Fld_I  : constant := 16#26#;
    Op_Store_Idx_I  : constant := 16#20#;
    Op_Set_Union   : constant := 16#3D#;
@@ -438,7 +439,7 @@ package body OBC_VM is
                end if;
                Depth := Depth - 1;
                PC := PC + 5;
-            when Op_Load_Const =>
+            when Op_Load_Const | Op_Load_Const_P =>
                if not Fits (PC + 1, 4) then
                   return Bad_Code;
                end if;
@@ -789,7 +790,7 @@ package body OBC_VM is
             when Op_Store_G =>
                Globals (Natural (LE32 (Code, PC + 1))) := Pop;
                PC := PC + 5;
-            when Op_Load_Const =>
+            when Op_Load_Const | Op_Load_Const_P =>
                Push (LE64 (Consts,
                            Natural (LE32 (Code, PC + 1)) * Const_Slot));
                PC := PC + 5;
