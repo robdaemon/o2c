@@ -77,6 +77,9 @@ package O2c_BC is
    --  the CONST payload, which is what Out.String consumes.
    procedure Push_Str (Text : String);
    procedure Load (Idx : Natural);
+   --  Push the address of a global slot.  An array is a run of slots, so
+   --  this plus an index is how an element is reached.
+   procedure Load_Addr_G (Slot : Natural);
    procedure Store (Idx : Natural);
    procedure Bin (O : Op);
    procedure Un (O : Op);

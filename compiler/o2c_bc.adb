@@ -307,6 +307,14 @@ package body O2c_BC is
       Pushed;
    end Load;
 
+   procedure Load_Addr_G (Slot : Natural) is
+   begin
+      Put_Byte (16#16#);          --  LOAD_ADDR_G
+      Put_U32 (U32 (Slot));
+      N_Insns := N_Insns + 1;
+      Pushed;                     --  the address is a value
+   end Load_Addr_G;
+
    procedure Store (Idx : Natural) is
    begin
       Put_Byte (16#13#);          --  STORE_G
