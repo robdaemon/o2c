@@ -254,6 +254,12 @@ package body OBC_VM is
    Native_Pops : constant array (0 .. Max_Natives - 1) of Natural :=
      (2, 1, 0, 2, 1);
 
+   --  Arguments handed to a native, leftmost first.  The table above gives
+   --  the arity per id and the verifier enforces it, so this is only the
+   --  widest a call may be - foreign functions reach five and six.
+   Max_Native_Args : constant := 8;
+   type Arg_Block is array (0 .. Max_Native_Args - 1) of U64;
+
    --  A policy limit, not a storage bound: the proc table is allocated to
    --  the N_Procs the image declares, so this only says how many procedures
    --  a program may have.  The loader still checks it, because N_Procs comes
@@ -904,8 +910,9 @@ package body OBC_VM is
    end Verify;
 
    --  ---- natives --------------------------------------------------------
-   function Call_Native (Idx : Natural; Arg1, Arg2 : U64;
-                         Consts : Byte_Array) return Status is
+   function Call_Native (Idx : Natural; Args : Arg_Block;
+                         NArgs : Natural; Consts : Byte_Array) return Status is
+      pragma Unreferenced (NArgs);   --  arity is per-id, checked by Verify
       use Ada.Text_IO;
 
       procedure Put_Int (V : I64; Width : Natural) is
@@ -937,18 +944,18 @@ package body OBC_VM is
    begin
       case Idx is
          when 0 =>
-            Put_Int (To_I64 (Arg1),
-                     Natural'Max (0, Natural (To_I64 (Arg2))));
+            Put_Int (To_I64 (Args (0)),
+                     Natural'Max (0, Natural (To_I64 (Args (1)))));
             return Ok;
          when 1 =>
-            Put_Str (Natural (Arg1));
+            Put_Str (Natural (Args (0)));
             return Ok;
          when 3 =>
             --  Out.Real: the integer part, a dot, then three zero-padded
             --  digits - mirroring O2c_Put_Real in the Ada backend so the
             --  two print the same thing.
             declare
-               V   : constant Long_Float := To_R64 (Arg1);
+               V   : constant Long_Float := To_R64 (Args (0));
                IP  : constant I64 := (if V < 0.0
                                       then I64 (V - 0.5) + 1
                                       else I64 (V - 0.5));
@@ -971,7 +978,7 @@ package body OBC_VM is
             --  a value outside 0 .. 255 is a runtime error rather than a
             --  silently masked byte.
             declare
-               V : constant I64 := To_I64 (Arg1);
+               V : constant I64 := To_I64 (Args (0));
             begin
                if V < 0 or else V > 255 then
                   return Trap_Range;
@@ -1471,17 +1478,21 @@ package body OBC_VM is
                   Idx   : constant Natural :=
                     Natural (Code (PC + 1)) + Natural (Code (PC + 2)) * 256;
                   NArgs : constant Natural := Natural (Code (PC + 3));
-                  A2    : U64 := 0;
-                  A1    : U64 := 0;
-                  St    : Status;
+                  Args : Arg_Block := (others => 0);
+                  St   : Status;
                begin
-                  if NArgs = 2 then
-                     A2 := Pop;
+                  if NArgs > Max_Native_Args then
+                     return Bad_Native;
                   end if;
-                  if NArgs >= 1 then
-                     A1 := Pop;
-                  end if;
-                  St := Call_Native (Idx, A1, A2, Consts);
+                  --  Popped in reverse so the leftmost argument lands at
+                  --  Args (0), which is the order a parameter list reads.
+                  for K in reverse 0 .. NArgs - 1 loop
+                     if SP = 0 then
+                        return Bad_Stack;
+                     end if;
+                     Args (K) := Pop;
+                  end loop;
+                  St := Call_Native (Idx, Args, NArgs, Consts);
                   if St /= Ok then
                      Note_At ("native call failed", PC);
                      return St;
