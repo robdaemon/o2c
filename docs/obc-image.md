@@ -389,7 +389,7 @@ about the *emitter and the VM*, not about o2c's accepted input:
 | area | emitted and executed |
 |------|----------------------|
 | stack, locals, globals | `DUP`, `DROP`, `LOAD_L`, `STORE_L`, `LOAD_G`, `STORE_G`, `LOAD_CONST` |
-| arithmetic, comparison, sets | `ADD` … `GE`, `NEG`, `IABS`, `BTEST`, `ORD`, `CHR` |
+| arithmetic, comparison, sets | `ADD` … `GE`, `NEG`, `IABS`, `BTEST`, `ORD`, `CHR`; `SET_UNION`/`INTERSECT`/`DIFF`/`SYMDIFF`, `SET_EQ`/`NE`, `SET_IN`, `SET_SINGLE` (set literals; an element outside 0..63 traps) |
 | control flow | `JMP`, `JZ`, `JNZ` (u32 target absolute in the `CODE` payload); `DUP`/`DROP` for stack shuffles |
 | statements | `REPEAT`/`UNTIL` (a backward `JZ`, the mirror of `WHILE`), `CASE` (a comparison chain over a selector that stays on the stack, dropped once at the end), `FOR` (`FOR_ENTER_I`/`FOR_NEXT_I`; the loop variable is a frame slot and the limit and direction are the two hidden slots after it) |
 | procedures | `CALL`, `RET`, `RET_VOID` — a declared procedure is emitted as its own procedure with its parameters as its lowest frame slots in order, and the module body is the last one; a procedure's variables are frame slots too, taken after its parameters |

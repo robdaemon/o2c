@@ -1,6 +1,7 @@
 with Ada.Strings.Unbounded;
 with O2c_Lexer;
 with O2c_BC;
+with Interfaces;
 
 package body O2c_Compiler is
 
@@ -1933,6 +1934,40 @@ package body O2c_Compiler is
                Bit   : Unbounded_String;
                First : Boolean := True;
 
+               --  Bytecode: each element's value is already on the operand
+               --  stack (its expression was parsed), so SET_SINGLE turns it
+               --  into a set and SET_UNION accumulates.  A range pushes no
+               --  value, so it contributes a mask instead.  The flag is
+               --  separate from Add's, which drives the Ada text.
+               Bc_First : Boolean := True;
+
+               procedure Bc_After_Element is
+               begin
+                  O2c_BC.Un (O2c_BC.Set_Single);
+                  if not Bc_First then
+                     O2c_BC.Bin (O2c_BC.Set_Union);
+                  end if;
+                  Bc_First := False;
+               end Bc_After_Element;
+
+               procedure Bc_After_Range (Lo : Integer; Hi : Integer) is
+                  use type Interfaces.Unsigned_64;
+               begin
+                  --  the two endpoint values are on the stack and the mask
+                  --  is the set; drop them
+                  O2c_BC.Discard;
+                  O2c_BC.Discard;
+                  O2c_BC.Push_Word
+                    (Interfaces.Shift_Left (Interfaces.Unsigned_64 (1), Lo)
+                     * (Interfaces.Shift_Left
+                          (Interfaces.Unsigned_64 (1), Hi - Lo + 1)
+                        - Interfaces.Unsigned_64 (1)));
+                  if not Bc_First then
+                     O2c_BC.Bin (O2c_BC.Set_Union);
+                  end if;
+                  Bc_First := False;
+               end Bc_After_Range;
+
                procedure Add (Ix : String) is
                begin
                   if First then
@@ -1952,6 +1987,9 @@ package body O2c_Compiler is
                   begin
                      if E.Typ = T_Char then
                         Add ("Character'Pos (" & To_String (E.Text) & ")");
+                        if O2c_BC.Bytecode_Mode then
+                           Bc_After_Element;
+                        end if;
                      elsif E.Typ = T_Int then
                         if Cur.Kind = Lex.Tok_Dot then
                            --  range element a .. b (M34); '..' lexes as
@@ -1993,10 +2031,16 @@ package body O2c_Compiler is
                                  for K in Lo .. Hi loop
                                     Add (Integer'Image (K));
                                  end loop;
+                                 if O2c_BC.Bytecode_Mode then
+                                    Bc_After_Range (Lo, Hi);
+                                 end if;
                               end;
                            end;
                         else
                            Add (To_String (E.Text));
+                           if O2c_BC.Bytecode_Mode then
+                              Bc_After_Element;
+                           end if;
                         end if;
                      else
                         raise O2c_Error with "set elements must be INTEGER "
@@ -2984,6 +3028,7 @@ package body O2c_Compiler is
                   elsif Syms (Id).Typ /= T_Int
                     and then Syms (Id).Typ /= T_Char
                     and then Syms (Id).Typ /= T_Bool
+                  and then Syms (Id).Typ /= T_Set
                   then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
                        & "only INTEGER/CHAR/BOOLEAN variables are supported";
@@ -3349,6 +3394,9 @@ package body O2c_Compiler is
             then
                raise O2c_Error with "IN needs an INTEGER/CHAR element and "
                  & "a SET operand (line " & Natural'Image (Cur.Line) & ")";
+            end if;
+            if O2c_BC.Bytecode_Mode then
+               O2c_BC.Bin (O2c_BC.Set_In);
             end if;
             Used_Set := True;
             R.Text := To_Unbounded_String
@@ -6741,6 +6789,7 @@ package body O2c_Compiler is
                         if Syms (Idx).Typ /= T_Int
                           and then Syms (Idx).Typ /= T_Char
                           and then Syms (Idx).Typ /= T_Bool
+                          and then Syms (Idx).Typ /= T_Set
                         then
                            raise O2c_BC.Wrong_Construct with "bytecode "
                              & "backend: only INTEGER/CHAR/BOOLEAN "
