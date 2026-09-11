@@ -191,6 +191,21 @@ else
    bad "real.asm did not run: $(cat "$WORK/real.err" 2>/dev/null)"
 fi
 
+#  ---- positive: hand-assembled indexed access -----------------------------
+#  Exercises LOAD_ADDR_G/LOAD_IDX_I/STORE_IDX_I independently of the emitter:
+#  four globals stand in for an array, 42 goes into a[2] through its address
+#  and is read back, printing 42.
+if python3 "$ASM" "$ROOT/tests/vm/array.asm" "$WORK/array.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/array.obc" >"$WORK/array.out" 2>"$WORK/array.err"; then
+   if diff -u "$ROOT/tests/vm/array.out" "$WORK/array.out"; then
+      note "positive: array.asm (indexed access) matches the golden output"
+   else
+      bad "array.asm output differs from tests/vm/array.out"
+   fi
+else
+   bad "array.asm did not run: $(cat "$WORK/array.err" 2>/dev/null)"
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_vm: FAIL ($fails)" >&2
    exit 1

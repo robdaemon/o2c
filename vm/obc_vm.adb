@@ -10,6 +10,8 @@ with Ada.Text_IO;
 with Interfaces;
 with Ada.Unchecked_Conversion;
 with VM_IO;
+with System.Storage_Elements;
+use type System.Storage_Elements.Integer_Address;
 
 package body OBC_VM is
 
@@ -110,6 +112,9 @@ package body OBC_VM is
    Op_I2R        : constant := 16#8C#;
    Op_R2I_Round  : constant := 16#8D#;
    Op_R2I_Trunc  : constant := 16#8E#;
+   Op_Load_Addr_G  : constant := 16#16#;
+   Op_Load_Idx_I   : constant := 16#1D#;
+   Op_Store_Idx_I  : constant := 16#20#;
    Op_Set_Union   : constant := 16#3D#;
    Op_Set_Intersect : constant := 16#3E#;
    Op_Set_Diff    : constant := 16#3F#;
@@ -539,6 +544,24 @@ package body OBC_VM is
                end if;
                Depth := 0;
                PC := PC + 1;
+            when Op_Load_Addr_G =>
+               if not Fits (PC + 1, 4) then
+                  return Bad_Code;
+               end if;
+               Depth := Depth + 1;
+               PC := PC + 5;
+            when Op_Load_Idx_I =>
+               if Depth < 2 then
+                  return Bad_Stack;
+               end if;
+               Depth := Depth - 1;
+               PC := PC + 1;
+            when Op_Store_Idx_I =>
+               if Depth < 3 then
+                  return Bad_Stack;
+               end if;
+               Depth := Depth - 2;
+               PC := PC + 1;
             --  REAL and LONGREAL share the 8-byte slot, so these move words
             --  and the depth is all the verifier tracks.
             when Op_Load_Const_R =>
@@ -956,6 +979,46 @@ package body OBC_VM is
                Locals_Used := Frame_Base (Cur_Frame);
                Cur_Frame := Cur_Frame - 1;
                PC := Return_PC (Cur_Frame);
+
+            when Op_Load_Addr_G =>
+               --  The address of a global slot.  An array is a run of them,
+               --  and this is how an indexed access reaches the run; the
+               --  emitter bounds-checks a fixed array, since an address
+               --  carries no length.
+               if PC + 4 >= Code'Length then
+                  return Bad_Code;
+               end if;
+               Push (U64 (System.Storage_Elements.To_Integer
+                            (Globals (Natural (LE32 (Code, PC + 1)))
+                               'Address)));
+               PC := PC + 5;
+            when Op_Load_Idx_I =>
+               declare
+                  Idx : constant U64 := Pop;
+                  Bas : constant U64 := Pop;
+                  V   : U64 with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (Bas)
+                       + System.Storage_Elements.Integer_Address (Idx)
+                         * System.Storage_Elements.Integer_Address (8));
+               begin
+                  Push (V);
+               end;
+               PC := PC + 1;
+            when Op_Store_Idx_I =>
+               declare
+                  Val : constant U64 := Pop;
+                  Idx : constant U64 := Pop;
+                  Bas : constant U64 := Pop;
+                  V   : U64 with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (Bas)
+                       + System.Storage_Elements.Integer_Address (Idx)
+                         * System.Storage_Elements.Integer_Address (8));
+               begin
+                  V := Val;
+               end;
+               PC := PC + 1;
 
             when Op_Load_Const_R =>
                if PC + 4 >= Code'Length then
