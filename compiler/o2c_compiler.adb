@@ -107,6 +107,8 @@ package body O2c_Compiler is
       By_Ref   : Boolean := False; --  formal VAR parameter
       Exp    : Boolean := False;   --  export mark 'name*' (M19)
       Bc_Proc : Natural := 0;      --  bytecode procedure id (Begin_Proc)
+      Foreign : Unbounded_String;  --  EXTERN: the C symbol this binds to
+      Foreign_Native : Natural := 0;  --  the native id it resolves to
       P      : Param_Array := (others => <>);
    end record;
 
@@ -3254,12 +3256,23 @@ package body O2c_Compiler is
                         --  pushed x and silently took it as the result -
                         --  Twice(21) was 21.  A function call as a statement
                         --  went through the other path, which had it.
-                        if Syms (Id).Bc_Proc = 0 then
-                           raise O2c_Error with "bytecode backend: call to '"
-                             & Cur.Text (1 .. Cur.Len)
-                             & "' with no procedure id";
+                        if Syms (Id).Foreign_Native /= 0 then
+                           --  A foreign procedure has no Oberon code: its
+                           --  body is the C function, reached by
+                           --  CALL_NATIVE.  The arity comes from the
+                           --  declaration and the verifier checks it against
+                           --  the VM's table, so a stub that disagrees fails
+                           --  at load rather than unbalancing the stack.
+                           O2c_BC.Native_Call (Syms (Id).Foreign_Native,
+                                               Syms (Id).Params);
+                        else
+                           if Syms (Id).Bc_Proc = 0 then
+                              raise O2c_Error with "bytecode backend: call "
+                                & "to '" & Cur.Text (1 .. Cur.Len)
+                                & "' with no procedure id";
+                           end if;
+                           O2c_BC.Call_Proc (Syms (Id).Bc_Proc);
                         end if;
-                        O2c_BC.Call_Proc (Syms (Id).Bc_Proc);
                      end if;
                      Call := Call & To_String (R.Text) & " (";
                      for I in 1 .. N_A loop
@@ -5157,7 +5170,9 @@ package body O2c_Compiler is
       N_Sym := N_Sym + 1;
       Syms (N_Sym) := (Kind => S_Proc, Name => To_Unbounded_String (Name),
                        Params => N_Par, Typ => Ret_Typ, UT => Ret_UT,
-                       Ret => Is_Function, Exp => Exported, others => <>);
+                       Ret => Is_Function, Exp => Exported,
+                       Foreign => Foreign_Sym,
+                       Foreign_Native => Foreign_Id_Val, others => <>);
       for I in 1 .. N_Par loop
          Syms (N_Sym).P (I) :=
            (Name => PName (I), Typ => PTyp (I), By_Ref => PRef (I),
@@ -7757,7 +7772,14 @@ package body O2c_Compiler is
                           & ", params" & Natural'Image (Syms (Idx).Params)
                           & ") with no procedure id";
                      end if;
-                     O2c_BC.Call_Proc (Syms (Idx).Bc_Proc);
+                     if Syms (Idx).Foreign_Native /= 0 then
+                        --  A foreign procedure: CALL_NATIVE rather than a
+                        --  call to a body it does not have.
+                        O2c_BC.Native_Call (Syms (Idx).Foreign_Native,
+                                            Syms (Idx).Params);
+                     else
+                        O2c_BC.Call_Proc (Syms (Idx).Bc_Proc);
+                     end if;
                   end if;
                   Call := Call & Head (1 .. H_Len) & " (";
                   for I in 1 .. N_A loop
