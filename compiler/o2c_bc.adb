@@ -393,6 +393,9 @@ package body O2c_BC is
    function Local_Count return Natural is
      (Next_Frame);
 
+   function Proc_Open return Boolean is
+     (Cur_Proc /= 0);
+
    function Local_Slot (Ada_Name : String) return Integer is
    begin
       if Cur_Proc = 0 then

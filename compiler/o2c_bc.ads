@@ -88,6 +88,10 @@ package O2c_BC is
    --  to a module global instead of silently minting a fresh frame slot for
    --  a name that was never declared as a local.
    function Local_Slot (Ada_Name : String) return Integer;
+   --  True while a procedure is open.  The front end may reach a procedure
+   --  declaration more than once for one declaration, and Begin_Proc must
+   --  run once: this is how it tells.
+   function Proc_Open return Boolean;
 
    procedure Load_Local (Slot : Natural);
    procedure Store_Local (Slot : Natural);
