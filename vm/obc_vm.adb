@@ -477,14 +477,17 @@ package body OBC_VM is
                PC := PC + 1;
             when Op_Trap =>
                if not Fits (PC + 1, 1) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                if Natural (Code (PC + 1)) > 5 then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                PC := PC + 2;
             when Op_Assert_Fail =>
                if not Fits (PC + 1, 4) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                if Natural (LE32 (Code, PC + 1)) >= Img.Consts_Len /
@@ -497,6 +500,7 @@ package body OBC_VM is
                if not Fits (PC + 1, 4)
                  or else Natural (LE32 (Code, PC + 1)) >= Img.N_Globals
                then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                Depth := Depth + 1;
@@ -505,12 +509,14 @@ package body OBC_VM is
                if not Fits (PC + 1, 4)
                  or else Natural (LE32 (Code, PC + 1)) >= Img.N_Globals
                then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                Depth := Depth - 1;
                PC := PC + 5;
             when Op_Load_Const | Op_Load_Const_P =>
                if not Fits (PC + 1, 4) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                if (Natural (LE32 (Code, PC + 1)) + 1) * Const_Slot
@@ -539,6 +545,7 @@ package body OBC_VM is
                PC := PC + 1;
             when Op_Jmp =>
                if not Fits (PC + 1, 4) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                if Natural (LE32 (Code, PC + 1)) >= Code'Length
@@ -549,6 +556,7 @@ package body OBC_VM is
                PC := PC + 5;
             when Op_Jz | Op_Jnz =>
                if not Fits (PC + 1, 4) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                if Natural (LE32 (Code, PC + 1)) >= Code'Length
@@ -560,6 +568,7 @@ package body OBC_VM is
                PC := PC + 5;
             when Op_Call_Native =>
                if not Fits (PC + 1, 3) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                declare
@@ -578,6 +587,7 @@ package body OBC_VM is
                --  knows the current frame; the linear walk here only needs
                --  the stack effect.
                if not Fits (PC + 2, 1) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                if Code (PC) = Op_Load_L then
@@ -588,6 +598,7 @@ package body OBC_VM is
                PC := PC + 3;
             when Op_Call =>
                if not Fits (PC + 1, 4) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                declare
@@ -619,6 +630,7 @@ package body OBC_VM is
                PC := PC + 1;
             when Op_Load_Addr_G =>
                if not Fits (PC + 1, 4) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                Depth := Depth + 1;
@@ -637,9 +649,11 @@ package body OBC_VM is
                PC := PC + 1;
             when Op_Type_Test | Op_Guard =>
                if not Fits (PC + 1, 4) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                if Natural (LE32 (Code, PC + 1)) + 4 > Img.Types_Len then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                PC := PC + 5;
@@ -647,6 +661,7 @@ package body OBC_VM is
                --  u16 method idx, u8 arg count, u8 result count.  The counts
                --  are static, so the depth change is too.
                if not Fits (PC + 1, 4) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                declare
@@ -663,17 +678,20 @@ package body OBC_VM is
                PC := PC + 1;
             when Op_Alloc_New =>
                if not Fits (PC + 1, 4) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                --  The reference is a byte offset into TYPES, where kind,
                --  flags and the object size are the first four bytes.
                if Natural (LE32 (Code, PC + 1)) + 4 > Img.Types_Len then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                Depth := Depth + 1;
                PC := PC + 5;
             when Op_Load_Fld_I | Op_Load_Fld_R | Op_Load_Fld_P =>
                if not Fits (PC + 1, 2) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                if Depth < 1 then
@@ -682,6 +700,7 @@ package body OBC_VM is
                PC := PC + 3;
             when Op_Store_Fld_I | Op_Store_Fld_R | Op_Store_Fld_P =>
                if not Fits (PC + 1, 2) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                if Depth < 2 then
@@ -693,6 +712,7 @@ package body OBC_VM is
             --  and the depth is all the verifier tracks.
             when Op_Load_Const_R =>
                if not Fits (PC + 1, 4) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                Depth := Depth + 1;
@@ -728,6 +748,7 @@ package body OBC_VM is
                --  from and to are consumed; frame-slot bounds are the
                --  interpreter's business.
                if not Fits (PC + 3, 10) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                if Natural (LE32 (Code, PC + 9)) > Code'Length then
@@ -738,6 +759,7 @@ package body OBC_VM is
             when Op_For_Next =>
                --  u16 var slot, i32 step, u16 limit slot, u32 body target.
                if not Fits (PC + 3, 10) then
+                  Note_At ("malformed code", PC);
                   return Bad_Code;
                end if;
                if Natural (LE32 (Code, PC + 9)) > Code'Length then

@@ -3321,6 +3321,29 @@ package body O2c_Compiler is
                                     Next;
                                     Call := Call
                                       & Dsp_Name (DN, BB) & " (" & Rcv;
+                                    if O2c_BC.Bytecode_Mode then
+                                       --  A receiver is self: a pointer's
+                                       --  value is the object's address, and
+                                       --  a VAR record's address is too.  The
+                                       --  arguments follow, pushed by
+                                       --  Parse_Actual, and then the dispatch.
+                                       if UTypes (U).Is_Ptr then
+                                          Bc_Load (Nm);
+                                       else
+                                          --  A VAR record receiver would be
+                                          --  a global, and only ALLOC_NEW
+                                          --  objects carry a type tag, so
+                                          --  there is nothing to dispatch
+                                          --  on.  A pointer receiver is the
+                                          --  form that works, and the one
+                                          --  the samples use.
+                                          raise O2c_BC.Wrong_Construct with
+                                            "bytecode backend: a method on "
+                                            & "a VAR record receiver is not "
+                                            & "supported; use a POINTER "
+                                            & "receiver";
+                                       end if;
+                                    end if;
                                     loop
                                        exit when
                                          Cur.Kind = Lex.Tok_RParen;
@@ -3351,6 +3374,26 @@ package body O2c_Compiler is
                                     end if;
                                     Expect (Lex.Tok_RParen, "')'");
                                     Next;
+                                    if O2c_BC.Bytecode_Mode then
+                                       --  The index of the method in the
+                                       --  receiver type's table: the same
+                                       --  name, inherited or overridden, so
+                                       --  the same slot whichever type the
+                                       --  object turns out to be.
+                                       declare
+                                          MIdx : Natural := 0;
+                                       begin
+                                          Fill_Table (Urec);
+                                          for I in 1 .. Mtabs (Urec).N loop
+                                             if To_String (Mtabs (Urec).M (I).Name)
+                                               = DN
+                                             then
+                                                MIdx := I - 1;
+                                             end if;
+                                          end loop;
+                                          O2c_BC.Dispatch (MIdx, Exp, 1);
+                                       end;
+                                    end if;
                                     Call := Call & ")";
                                     R.Text := Call;
                                     if Syms (SIdx).UT /= 0 then
