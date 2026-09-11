@@ -108,7 +108,10 @@ package O2c_BC is
    --  TYPE_TEST and a descriptor's `base` all use, so that zero can mean
    --  none while the outermost descriptor still sits at offset zero.  Layout is
    --  declaration order, one scalar slot per field, so the size is N_F * 8.
-   function Desc_Rec (Size : Natural) return Natural;
+   function Desc_Rec (Size : Natural; Base : Natural) return Natural;
+   --  TYPE_TEST: leaves whether the pointer on top has that dynamic type,
+   --  or an extension of it.
+   procedure Type_Test (Ref : Natural);
    --  Allocate a zeroed object of the descriptor's size and push its address.
    procedure Alloc_New (Desc_Ref : Natural);
    procedure Store_Fld (Off : Natural);

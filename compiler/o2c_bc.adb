@@ -402,21 +402,35 @@ package body O2c_BC is
         when R2I_Round  => 16#8D#,
         when R2I_Trunc  => 16#8E#);
 
-   function Desc_Rec (Size : Natural) return Natural is
+   function Desc_Rec (Size : Natural; Base : Natural) return Natural is
       Off : constant Natural := Length (Types_Buf);
    begin
-      --  kind 3 (RECORD), flags 0 (no pointer fields), size, name_ref 0,
-      --  an empty field list (a zero name_ref terminates it), base 0,
-      --  methods 0.
+      --  kind 3 (RECORD), flags 0, size, name_ref 0, an empty field list (a
+      --  zero name_ref terminates it), then the base reference and methods.
       Types_Buf := Types_Buf & Character'Val (3) & Character'Val (0);
       Types_Buf := Types_Buf & Character'Val (Size mod 256)
         & Character'Val ((Size / 256) mod 256);
-      for K in 1 .. 12 loop
+      for K in 1 .. 8 loop
          Types_Buf := Types_Buf & Character'Val (0);
+      end loop;
+      --  base: the reference the walk follows, so a test for an ancestor
+      --  succeeds.  At +12, which is where the interpreter reads it.
+      for K in 0 .. 3 loop
+         Types_Buf := Types_Buf
+           & Character'Val ((Base / 256 ** K) mod 256);
       end loop;
       --  References are biased so zero stays available to mean "none".
       return Off + 1;
    end Desc_Rec;
+
+   procedure Type_Test (Ref : Natural) is
+   begin
+      Put_Byte (16#E1#);          --  TYPE_TEST
+      Put_U32 (U32 (Ref));
+      N_Insns := N_Insns + 1;
+      Popped;
+      Pushed;
+   end Type_Test;
 
    procedure Alloc_New (Desc_Ref : Natural) is
    begin

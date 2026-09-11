@@ -103,6 +103,12 @@ its own address + 0.  `DESC_OF` reads it, and `TYPE_TEST`/`GUARD` walk the
 Objects allocated before this existed have no tag, so an image that allocates
 must be built by an emitter that writes one.
 
+A descriptor's first sixteen bytes are what everything reads: kind, flags,
+size, name_ref, the field-list terminator and `base`.  The emitter writes
+exactly those and the test assembler writes four more (a `methods` word),
+which nothing consults yet - two writers disagreeing on a length is worth
+reconciling when the method table lands.
+
 **`flags` bit0 (`has_ptrs`) is load-bearing:** it tells the VM whether objects
 of this type may contain pointers.  It drives (a) which allocation call an
 object gets once libgc is in (`GC_malloc` vs `GC_malloc_atomic` — an object

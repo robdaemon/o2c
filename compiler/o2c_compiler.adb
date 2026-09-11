@@ -1031,7 +1031,13 @@ package body O2c_Compiler is
       begin
          while U /= 0 loop
             for F in 1 .. UTypes (U).N_F loop
-               if UTypes (U).F (F).UT /= 0 then
+               if UTypes (U).F (F).UT = U then
+                  --  Oberon's implicit pointer: a field naming the record it
+                  --  sits in is one word, not the record again.  Recursing
+                  --  here is what the depth bound below exists to catch, and
+                  --  it caught exactly this - a list failed to lay out.
+                  N := N + 1;
+               elsif UTypes (U).F (F).UT /= 0 then
                   if UTypes (UTypes (U).F (F).UT).Arr_Len > 0 then
                      N := N + Natural (UTypes (UTypes (U).F (F).UT).Arr_Len);
                   elsif not UTypes (UTypes (U).F (F).UT).Is_Ptr then
@@ -1054,6 +1060,25 @@ package body O2c_Compiler is
    --  is what lets an inherited field sit at the offset it has in its
    --  parent - and makes the plain case, FO = Base_UT, come out as the
    --  declaration-order formula it always was.
+   --  One descriptor per record type, made on first use.  A type tested
+   --  twice must have the same reference, or an object allocated as one and
+   --  tested as the other would not match.  Its base is the parent's
+   --  reference, which is what makes a test for an ancestor succeed.
+   Desc_Cache : array (1 .. Max_UTypes) of Natural := (others => 0);
+
+   function Desc_For (UT : Natural) return Natural is
+   begin
+      if Desc_Cache (UT) /= 0 then
+         return Desc_Cache (UT);
+      end if;
+      Desc_Cache (UT) := O2c_BC.Desc_Rec
+        (Total_Slots (UT) * 8,
+         (if UTypes (UT).Is_Ext and then UTypes (UT).Parent /= 0
+          then Desc_For (UTypes (UT).Parent)
+          else 0));
+      return Desc_Cache (UT);
+   end Desc_For;
+
    function Field_Offset (Base_UT : Natural; FO : Natural; F : Natural)
                           return Natural is
       N : Natural := 0;
@@ -3128,6 +3153,13 @@ package body O2c_Compiler is
                              & "' is not in the record hierarchy of this "
                              & "POINTER type (line "
                              & Natural'Image (Cur.Line) & ")";
+                        end if;
+                        if O2c_BC.Bytecode_Mode then
+                           --  p IS T asks the object's dynamic type, or an
+                           --  extension of it.  A pointer is the object's
+                           --  address, so the value itself is the operand.
+                           Bc_Load (Nm);
+                           O2c_BC.Type_Test (Desc_For (TT));
                         end if;
                         R.Text := To_Unbounded_String
                           ("(" & Nm & ".all in "
@@ -6336,8 +6368,7 @@ package body O2c_Compiler is
                              & "yet supported";
                         end if;
                         O2c_BC.Alloc_New
-                          (O2c_BC.Desc_Rec
-                             (UTypes (UTypes (D.UT).Ptr_Tgt).N_F * 8));
+                          (Desc_For (UTypes (D.UT).Ptr_Tgt));
                         Bc_Store (NNm);
                      else
                         Append_Body ("      " & To_String (D.Text)
