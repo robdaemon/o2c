@@ -51,10 +51,10 @@ package body OBC_VM is
    --  failure instead of a report about depth.
    Max_Stack   : constant := 4096;
 
-   --  Sizing note (project rule on fixed tables): call depth and frame slots
-   --  for one run.  Both bounds fail loudly (Bad_Stack) instead of
-   --  truncating, and both are generous relative to what the emitter
-   --  produces; a procedure's own frame size comes from its record.
+   --  Initial allocation only, not ceilings: the frame arrays and the locals
+   --  pool both grow by doubling in Push_Frame when a call needs more, so a
+   --  program cannot hit these.  They are sized to cover ordinary programs
+   --  without a reallocation; depth beyond them costs a copy, not a refusal.
    Max_Frames     : constant := 64;
    Max_VM_Locals  : constant := 1024;
    --  A policy limit on a module's global count, not a storage bound:
@@ -213,10 +213,14 @@ package body OBC_VM is
    Native_Pops : constant array (0 .. Max_Natives - 1) of Natural :=
      (2, 1, 0, 2, 1);
 
-   --  Sizing note (project rule on fixed tables): how many procedures the
-   --  loader will accept from an image.  Exceeding it is a rejected image,
-   --  never a partial load, and the bound is generous relative to what the
-   --  emitter produces.
+   --  A justified static ceiling (project rule on fixed tables): the proc
+   --  table is one fixed allocation and the loader has to bound what an image
+   --  can ask for, since N_Procs comes from the image's own header and a
+   --  malformed one could otherwise demand an arbitrary table.
+   --  The better fix is the one Globals got - size the table from N_Procs
+   --  once the header is read, which removes the ceiling instead of arguing
+   --  for it.  Not done here because Procs sits in the image record and would
+   --  need to become an access type.
    Max_Procs   : constant := 256;
 
    type Proc_Info is record
