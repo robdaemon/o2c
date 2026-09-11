@@ -43,15 +43,30 @@ port is kept as an appendix rather than as the milestone.
   (decided).  The dual-backend diff stays as a temporary extra gate until the
   Ada emitter is deleted.
 
-Non-goals of this plan: replacing the Ada backend, JIT compilation, threads
-inside the VM, and garbage collection for the *Ada* backend (that stays
-arena-only, documented as today).
+Non-goals of this plan: replacing the Ada backend, JIT compilation, and
+garbage collection for the *Ada* backend (that stays arena-only, documented as
+today).  **Threads are no longer a non-goal** - they are the next thing after
+the collector, and the notes below keep them in view.
 
-Threads being a non-goal is load-bearing for the collector rather than
-incidental: **one VM runs in one Aegir process and is single-threaded**, and
-concurrency in this system is separate processes.  So collection happens only
-inside `ALLOC_NEW`, with no asynchronous stop-the-world, no write barrier and
-no thread-safe allocator.  The arena is process-local.
+Collection happens only inside `ALLOC_NEW` because the collector is
+**stop-the-world**: every thread has to reach a safepoint before the world can
+be stopped, and allocation is where that naturally happens.  Being
+single-threaded today does not make that true, it only makes the requirement
+invisible, so the reason is a property of the collector rather than of there
+being one thread.
+
+What threads will change, and what they will not:
+
+- **Roots become one region per thread** plus the shared globals.  The root set
+  is already three live prefixes read inside `Execute`; it becomes a registry of
+  such regions, which is why it should be written as a list of ranges rather
+  than three hardcoded loops.
+- **Allocation becomes one entry point**, so a thread-local buffer or a lock
+  lands in a single place.  It already has exactly one call site.
+- **Nothing else moves.**  Tags, `has_ptrs`, descriptor layout, the run format
+  and the mark and sweep themselves all derive from the read-only image, so
+  concurrency does not touch them.  Stop-the-world needs no write barrier, which
+  is the reason for choosing it.
 
 The collection point follows from that: allocation happens in exactly one
 place, so the collector runs there, when the bump would pass the end of the
