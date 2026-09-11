@@ -81,6 +81,8 @@ package body OBC_VM is
    Op_Load_G      : constant := 16#12#;
    Op_Store_G     : constant := 16#13#;
    Op_Load_Const  : constant := 16#14#;
+   Op_Load_L      : constant := 16#10#;
+   Op_Store_L     : constant := 16#11#;
    Op_Add         : constant := 16#30#;
    Op_Sub         : constant := 16#31#;
    Op_Mul         : constant := 16#32#;
@@ -453,6 +455,19 @@ package body OBC_VM is
                   Depth := Depth - Integer (NArgs);
                end;
                PC := PC + 4;
+            when Op_Load_L | Op_Store_L =>
+               --  Frame slot bounds are checked by the interpreter, which
+               --  knows the current frame; the linear walk here only needs
+               --  the stack effect.
+               if not Fits (PC + 2, 1) then
+                  return Bad_Code;
+               end if;
+               if Code (PC) = Op_Load_L then
+                  Depth := Depth + 1;
+               else
+                  Depth := Depth - 1;
+               end if;
+               PC := PC + 3;
             when others =>
                Note_At ("verification stopped: opcode not implemented in this "
                    & "slice", PC);
