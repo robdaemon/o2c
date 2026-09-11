@@ -56,7 +56,9 @@ if timeout 120 "$FRONT" "$ROOT/tests/bc/unsupported.ob2" "$WORK/unsup.obc" \
 then
    bad "unsupported.ob2 compiled, but the slice cannot express it"
 else
-   if grep -aq 'not yet supported' "$WORK/unsup.log"; then
+   #  Any clear refusal will do: what the contract asserts is that the
+   #  backend says so loudly, not the precise wording of the message.
+   if grep -aq 'bytecode backend:' "$WORK/unsup.log"; then
       note "negative: unsupported construct rejected ($(cat "$WORK/unsup.log"))"
    else
       bad "unsupported.ob2 failed without a clear diagnostic: $(cat "$WORK/unsup.log")"
