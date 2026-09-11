@@ -1896,16 +1896,16 @@ package body O2c_Compiler is
                              "bytecode backend: real literal out of range: "
                              & To_String (R.Text);
                      end;
-                     return R;
+                  else
+                     begin
+                        O2c_BC.Push_Int (Integer'Value (Raw));
+                     exception
+                        when Constraint_Error =>
+                           raise O2c_BC.Wrong_Construct with
+                             "bytecode backend: integer literal out of range: "
+                             & Raw;
+                     end;
                   end if;
-                  begin
-                     O2c_BC.Push_Int (Integer'Value (Raw));
-                  exception
-                     when Constraint_Error =>
-                        raise O2c_BC.Wrong_Construct with
-                          "bytecode backend: integer literal out of range: "
-                          & Raw;
-                  end;
                end if;
             end;
             R.Lit := True;
@@ -3578,25 +3578,37 @@ package body O2c_Compiler is
                if O2c_BC.Bytecode_Mode then
                   --  the slice compares INTEGER and CHAR (CHAR shares
                   --  INTEGER's slot layout, so the I* opcodes apply)
-                  if not ((R.Typ = T_Int and then X.Typ = T_Int)
-                          or else (R.Typ = T_Char and then X.Typ = T_Char))
-                  then
-                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                       & "only INTEGER/CHAR comparisons are supported";
-                  end if;
-                  if Op = " = " then
-                     O2c_BC.Bin (O2c_BC.Eq);
-                  elsif Op = " /= " then
-                     O2c_BC.Bin (O2c_BC.Ne);
-                  elsif Op = " < " then
-                     O2c_BC.Bin (O2c_BC.Lt);
-                  elsif Op = " <= " then
-                     O2c_BC.Bin (O2c_BC.Le);
-                  elsif Op = " > " then
-                     O2c_BC.Bin (O2c_BC.Gt);
-                  else
-                     O2c_BC.Bin (O2c_BC.Ge);
-                  end if;
+                  --  REAL and LONGREAL compare with the R* opcodes; a
+                  --  mixed INTEGER/REAL comparison needs an I2R first and
+                  --  is refused rather than emitted wrong.
+                  declare
+                     Rl : constant Boolean :=
+                       (R.Typ = T_Real or else R.Typ = T_LReal);
+                  begin
+                     if not ((R.Typ = T_Int and then X.Typ = T_Int)
+                             or else (R.Typ = T_Char
+                                      and then X.Typ = T_Char)
+                             or else (Rl
+                                      and then (X.Typ = T_Real
+                                                or else X.Typ = T_LReal)))
+                     then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "only INTEGER/CHAR/REAL comparisons are supported";
+                     end if;
+                     if Op = " = " then
+                        O2c_BC.Bin ((if Rl then O2c_BC.Req else O2c_BC.Eq));
+                     elsif Op = " /= " then
+                        O2c_BC.Bin ((if Rl then O2c_BC.Rne else O2c_BC.Ne));
+                     elsif Op = " < " then
+                        O2c_BC.Bin ((if Rl then O2c_BC.Rlt else O2c_BC.Lt));
+                     elsif Op = " <= " then
+                        O2c_BC.Bin ((if Rl then O2c_BC.Rle else O2c_BC.Le));
+                     elsif Op = " > " then
+                        O2c_BC.Bin ((if Rl then O2c_BC.Rgt else O2c_BC.Gt));
+                     else
+                        O2c_BC.Bin ((if Rl then O2c_BC.Rge else O2c_BC.Ge));
+                     end if;
+                  end;
                end if;
                R.Text := "(" & R.Text & Op & X.Text & ")";
                R.Typ := T_Bool;

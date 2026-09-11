@@ -393,6 +393,7 @@ about the *emitter and the VM*, not about o2c's accepted input:
 | control flow | `JMP`, `JZ`, `JNZ` (u32 target absolute in the `CODE` payload); `DUP`/`DROP` for stack shuffles |
 | statements | `REPEAT`/`UNTIL` (a backward `JZ`, the mirror of `WHILE`), `CASE` (a comparison chain over a selector that stays on the stack, dropped once at the end), `FOR` (`FOR_ENTER_I`/`FOR_NEXT_I`; the loop variable is a frame slot and the limit and direction are the two hidden slots after it) |
 | procedures | `CALL`, `RET`, `RET_VOID` — a declared procedure is emitted as its own procedure with its parameters as its lowest frame slots in order, and the module body is the last one; a procedure's variables are frame slots too, taken after its parameters |
+| REAL | `RADD` … `RGE`, `RNEG`/`RABS`, `I2R`, `R2I_ROUND`/`R2I_TRUNC` and `LOAD_CONST_R`; a real literal, and comparisons between two reals (a mixed INTEGER/REAL comparison needs an `I2R` and is refused rather than emitted wrong) |
 | builtins | `CALL_NATIVE` (`Out.Int`, `Out.String`, `Out.Ln`) |
 | traps | `TRAP`, `ASSERT_FAIL` |
 
