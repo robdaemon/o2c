@@ -29,6 +29,9 @@ OPS = {
     #  FOR opcodes carry several operands including a label, so they are
     #  encoded specially below rather than through the width table.
     "FOR_ENTER_I": (0xA4, 0), "FOR_NEXT_I": (0xA5, 0),
+    "SET_UNION": (0x3D, 0), "SET_INTERSECT": (0x3E, 0), "SET_DIFF": (0x3F, 0),
+    "SET_SYMDIFF": (0x40, 0), "SET_EQ": (0x41, 0), "SET_NE": (0x42, 0),
+    "SET_IN": (0x43, 0), "SET_SINGLE": (0x44, 0),
 }
 PROC_REC = 24
 CONST_SLOT = 8

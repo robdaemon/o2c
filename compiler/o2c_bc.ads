@@ -14,6 +14,8 @@
 --  "this construct produced no code".
 --
 --  The image layout matches docs/obc-image.md and tools/obc_asm.py.
+with Interfaces;
+
 package O2c_BC is
 
    --  The opcodes this backend emits so far (names as in the spec table;
@@ -29,7 +31,9 @@ package O2c_BC is
       --  the enum's order is fixed by the same append-only rule that fixes
       --  the byte numbers, and the byte numbers below are the spec's.
       Load_L, Store_L, Call, Ret, Ret_Void,
-      For_Enter_I, For_Next_I);
+      For_Enter_I, For_Next_I,
+      Set_Union, Set_Intersect, Set_Diff, Set_Symdiff,
+      Set_Eq, Set_Ne, Set_In, Set_Single);
 
    --  ---- mode ------------------------------------------------------------
    --  True while the front end should feed this package.  Only the hook
@@ -54,6 +58,9 @@ package O2c_BC is
    --  Each call appends one instruction and updates the stack model, so
    --  the emitted `stack_max` is a computed high-water mark, not a guess.
    procedure Push_Int (Value : Integer);
+   --  A 64-bit constant.  SET masks are 64 bits and an element index may be
+   --  above 31, so Push_Int is not enough.
+   procedure Push_Word (Value : Interfaces.Unsigned_64);
    procedure Push_Char (Value : Integer);
    procedure Push_Bool (Value : Boolean);
    --  A string constant: its pool word holds the string's offset inside

@@ -90,6 +90,14 @@ package body OBC_VM is
    Op_Load_Const  : constant := 16#14#;
    Op_Load_L      : constant := 16#10#;
    Op_Store_L     : constant := 16#11#;
+   Op_Set_Union   : constant := 16#3D#;
+   Op_Set_Intersect : constant := 16#3E#;
+   Op_Set_Diff    : constant := 16#3F#;
+   Op_Set_Symdiff : constant := 16#40#;
+   Op_Set_Eq      : constant := 16#41#;
+   Op_Set_Ne      : constant := 16#42#;
+   Op_Set_In      : constant := 16#43#;
+   Op_Set_Single  : constant := 16#44#;
    Op_For_Enter   : constant := 16#A4#;
    Op_For_Next    : constant := 16#A5#;
    Op_Call        : constant := 16#C0#;
@@ -511,6 +519,20 @@ package body OBC_VM is
                end if;
                Depth := 0;
                PC := PC + 1;
+            --  The verifier models the operand stack as Depth, not SP: it
+            --  does not keep values, only their count.
+            when Op_Set_Union | Op_Set_Intersect | Op_Set_Diff
+               | Op_Set_Symdiff | Op_Set_Eq | Op_Set_Ne | Op_Set_In =>
+               if Depth < 2 then
+                  return Bad_Stack;
+               end if;
+               Depth := Depth - 1;
+               PC := PC + 1;
+            when Op_Set_Single =>
+               if Depth < 1 then
+                  return Bad_Stack;
+               end if;
+               PC := PC + 1;
             when Op_For_Enter =>
                --  u16 var slot, i32 step, u32 else target.  from and to are
                --  consumed; frame-slot bounds are the interpreter's business.
@@ -872,6 +894,63 @@ package body OBC_VM is
                Cur_Frame := Cur_Frame - 1;
                PC := Return_PC (Cur_Frame);
 
+            when Op_Set_Union | Op_Set_Intersect | Op_Set_Diff
+               | Op_Set_Symdiff =>
+               if SP < 2 then
+                  return Bad_Stack;
+               end if;
+               declare
+                  B : constant U64 := Pop;
+                  A : constant U64 := Pop;
+               begin
+                  Push (case Op is
+                           when Op_Set_Union     => A or B,
+                           when Op_Set_Intersect => A and B,
+                           when Op_Set_Diff      => A and not B,
+                           when others           => A xor B);
+               end;
+               PC := PC + 1;
+            when Op_Set_Eq | Op_Set_Ne =>
+               if SP < 2 then
+                  return Bad_Stack;
+               end if;
+               declare
+                  B : constant U64 := Pop;
+                  A : constant U64 := Pop;
+               begin
+                  Push ((if (A = B) = (Op = Op_Set_Eq) then U64 (1) else 0));
+               end;
+               PC := PC + 1;
+            when Op_Set_In =>
+               if SP < 2 then
+                  return Bad_Stack;
+               end if;
+               declare
+                  S   : constant U64 := Pop;
+                  Idx : constant U64 := Pop;
+               begin
+                  if Idx > 63 then
+                     Note_At ("set element outside 0..63", PC);
+                     return Trap_Range;
+                  end if;
+                  Push ((if (S / 2 ** Natural (Idx)) mod 2 = 1 then U64 (1)
+                         else 0));
+               end;
+               PC := PC + 1;
+            when Op_Set_Single =>
+               if SP < 1 then
+                  return Bad_Stack;
+               end if;
+               declare
+                  Idx : constant U64 := Pop;
+               begin
+                  if Idx > 63 then
+                     Note_At ("set element outside 0..63", PC);
+                     return Trap_Range;
+                  end if;
+                  Push (2 ** Natural (Idx));
+               end;
+               PC := PC + 1;
             when Op_For_Enter =>
                --  u16 var slot, i32 step, u32 else target.  from and to are
                --  on the operand stack, to on top; the variable's slot is

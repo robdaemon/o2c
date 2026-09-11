@@ -161,6 +161,20 @@ else
    bad "for.asm did not run: $(cat "$WORK/for.err" 2>/dev/null)"
 fi
 
+#  ---- positive: hand-assembled SET operations -----------------------------
+#  Exercises 0x3D-0x44 independently of the emitter: union, equality and
+#  membership, printing 0, 1, 1, 0.
+if python3 "$ASM" "$ROOT/tests/vm/set.asm" "$WORK/set.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/set.obc" >"$WORK/set.out" 2>"$WORK/set.err"; then
+   if diff -u "$ROOT/tests/vm/set.out" "$WORK/set.out"; then
+      note "positive: set.asm (SET operations) matches the golden output"
+   else
+      bad "set.asm output differs from tests/vm/set.out"
+   fi
+else
+   bad "set.asm did not run: $(cat "$WORK/set.err" 2>/dev/null)"
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_vm: FAIL ($fails)" >&2
    exit 1

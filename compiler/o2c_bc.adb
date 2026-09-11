@@ -210,6 +210,15 @@ package body O2c_BC is
       N_Words := N_Words + 1;
    end Add_Word;
 
+   procedure Push_Word (Value : Interfaces.Unsigned_64) is
+   begin
+      Add_Word (U64 (Value));
+      Put_Byte (16#14#);          --  LOAD_CONST
+      Put_U32 (U32 (N_Words - 1));
+      N_Insns := N_Insns + 1;
+      Pushed;
+   end Push_Word;
+
    procedure Push_Int (Value : Integer) is
    begin
       Add_Word (Word_Of (Value));
@@ -309,7 +318,16 @@ package body O2c_BC is
         when Ret_Void    => 16#C2#,
         --  docs/obc-image.md: FOR_ENTER_* / FOR_NEXT_* at 0xA4/0xA5.
         when For_Enter_I => 16#A4#,
-        when For_Next_I  => 16#A5#);
+        when For_Next_I  => 16#A5#,
+        --  docs/obc-image.md: SET operators at 0x3D-0x44.
+        when Set_Union     => 16#3D#,
+        when Set_Intersect => 16#3E#,
+        when Set_Diff      => 16#3F#,
+        when Set_Symdiff   => 16#40#,
+        when Set_Eq        => 16#41#,
+        when Set_Ne        => 16#42#,
+        when Set_In        => 16#43#,
+        when Set_Single    => 16#44#);
 
    procedure Bin (O : Op) is
    begin
