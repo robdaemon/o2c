@@ -206,6 +206,21 @@ else
    bad "array.asm did not run: $(cat "$WORK/array.err" 2>/dev/null)"
 fi
 
+#  ---- positive: hand-assembled record field access -------------------------
+#  Exercises LOAD_FLD_I/STORE_FLD_I independently of the emitter: two globals
+#  stand in for a two-field record, 42 goes into the field at offset 8 and is
+#  read back, printing 42.
+if python3 "$ASM" "$ROOT/tests/vm/rec.asm" "$WORK/rec.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/rec.obc" >"$WORK/rec.out" 2>"$WORK/rec.err"; then
+   if diff -u "$ROOT/tests/vm/rec.out" "$WORK/rec.out"; then
+      note "positive: rec.asm (record field access) matches the golden output"
+   else
+      bad "rec.asm output differs from tests/vm/rec.out"
+   fi
+else
+   bad "rec.asm did not run: $(cat "$WORK/rec.err" 2>/dev/null)"
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_vm: FAIL ($fails)" >&2
    exit 1

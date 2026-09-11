@@ -114,6 +114,8 @@ package body OBC_VM is
    Op_R2I_Trunc  : constant := 16#8E#;
    Op_Load_Addr_G  : constant := 16#16#;
    Op_Load_Idx_I   : constant := 16#1D#;
+   Op_Load_Fld_I   : constant := 16#23#;
+   Op_Store_Fld_I  : constant := 16#26#;
    Op_Store_Idx_I  : constant := 16#20#;
    Op_Set_Union   : constant := 16#3D#;
    Op_Set_Intersect : constant := 16#3E#;
@@ -562,6 +564,23 @@ package body OBC_VM is
                end if;
                Depth := Depth - 2;
                PC := PC + 1;
+            when Op_Load_Fld_I =>
+               if not Fits (PC + 1, 2) then
+                  return Bad_Code;
+               end if;
+               if Depth < 1 then
+                  return Bad_Stack;
+               end if;
+               PC := PC + 3;
+            when Op_Store_Fld_I =>
+               if not Fits (PC + 1, 2) then
+                  return Bad_Code;
+               end if;
+               if Depth < 2 then
+                  return Bad_Stack;
+               end if;
+               Depth := Depth - 2;
+               PC := PC + 3;
             --  REAL and LONGREAL share the 8-byte slot, so these move words
             --  and the depth is all the verifier tracks.
             when Op_Load_Const_R =>
@@ -1020,6 +1039,35 @@ package body OBC_VM is
                end;
                PC := PC + 1;
 
+            when Op_Load_Fld_I =>
+               --  A record is a run of scalar slots, so a field is the word at the
+               --  record's address plus its offset.  The offset comes from the
+               --  descriptor at compile time, so there is no runtime bound to check
+               --  the way an array index has.
+               declare
+                  Off : constant Natural := LE16 (Code, PC + 1);
+                  Rec : constant U64 := Pop;
+                  V   : U64 with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (Rec)
+                       + System.Storage_Elements.Integer_Address (Off));
+               begin
+                  Push (V);
+               end;
+               PC := PC + 3;
+            when Op_Store_Fld_I =>
+               declare
+                  Val : constant U64 := Pop;
+                  Off : constant Natural := LE16 (Code, PC + 1);
+                  Rec : constant U64 := Pop;
+                  V   : U64 with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (Rec)
+                       + System.Storage_Elements.Integer_Address (Off));
+               begin
+                  V := Val;
+               end;
+               PC := PC + 3;
             when Op_Load_Const_R =>
                if PC + 4 >= Code'Length then
                   return Bad_Code;

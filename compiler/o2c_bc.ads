@@ -31,7 +31,7 @@ package O2c_BC is
       --  the enum's order is fixed by the same append-only rule that fixes
       --  the byte numbers, and the byte numbers below are the spec's.
       Load_L, Store_L, Call, Ret, Ret_Void,
-      Load_Addr_G, Load_Idx_I, Store_Idx_I,
+      Load_Addr_G, Load_Idx_I, Store_Idx_I, Load_Fld_I, Store_Fld_I,
       For_Enter_I, For_Next_I,
       Set_Union, Set_Intersect, Set_Diff, Set_Symdiff,
       Set_Eq, Set_Ne, Set_In, Set_Single,
@@ -86,6 +86,11 @@ package O2c_BC is
    --  TRAP with its kind byte (spec: 0 = index out of range).  The VM reads
    --  the kind, so a bare Un (Trap) would desynchronise it.
    procedure Trap (Kind : Natural);
+   --  Record field access by pre-validated byte offset within the record
+   --  (spec 0x23/0x26): no runtime bound to check, the emitter knows the
+   --  layout.
+   procedure Load_Fld (Off : Natural);
+   procedure Store_Fld (Off : Natural);
    procedure Un (O : Op);
    procedure Native_Call (Idx : Natural; NArgs : Natural);
    procedure Halt_Program;
