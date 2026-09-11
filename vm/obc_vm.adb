@@ -57,7 +57,10 @@ package body OBC_VM is
    --  produces; a procedure's own frame size comes from its record.
    Max_Frames     : constant := 64;
    Max_VM_Locals  : constant := 1024;
-   Max_Globals : constant := 4096;
+   --  A policy limit on a module's global count, not a storage bound:
+   --  Globals is allocated to the image's own N_Globals, so this only says
+   --  how many a program may declare.
+   Max_Globals : constant := 65536;
    Max_Natives : constant := 5;
 
    Const_Slot : constant := 8;      --  pool words are 8 bytes
@@ -925,7 +928,11 @@ package body OBC_VM is
       --  precisely.  Each word is still validated as an arena object before
       --  being followed, so a scalar that happens to look like an address can
       --  only retain an object, never free a live one.
-      Globals : constant U64_Array_Access := new U64_Array (0 .. Max_Globals - 1);
+      --  Sized by the image, not by a ceiling: the loader has already
+      --  rejected anything past Max_Globals, so this is exactly what the
+      --  program declared and no more.
+      Globals : constant U64_Array_Access :=
+        new U64_Array (0 .. Natural'Max (Img.N_Globals, 1) - 1);
       SP      : Natural := 0;
       PC      : Natural := Img.Body_Off;
 
