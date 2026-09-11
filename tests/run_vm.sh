@@ -236,6 +236,21 @@ else
    bad "nil.asm did not run: $(cat "$WORK/nil.err" 2>/dev/null)"
 fi
 
+#  ---- positive: hand-assembled ALLOC_NEW ----------------------------------
+#  Exercises the TYPES descriptor and the arena independently of the emitter:
+#  an object is allocated zeroed at the size the descriptor gives, 42 is
+#  stored into its offset-8 field through the pointer and read back.
+if python3 "$ASM" "$ROOT/tests/vm/new.asm" "$WORK/new.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/new.obc" >"$WORK/new.out" 2>"$WORK/new.err"; then
+   if diff -u "$ROOT/tests/vm/new.out" "$WORK/new.out"; then
+      note "positive: new.asm (allocation) matches the golden output"
+   else
+      bad "new.asm output differs from tests/vm/new.out"
+   fi
+else
+   bad "new.asm did not run: $(cat "$WORK/new.err" 2>/dev/null)"
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_vm: FAIL ($fails)" >&2
    exit 1

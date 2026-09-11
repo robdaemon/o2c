@@ -116,6 +116,21 @@ package body OBC_VM is
    Op_Load_Idx_I   : constant := 16#1D#;
    Op_Load_Fld_I   : constant := 16#23#;
    Op_Load_Const_P : constant := 16#2C#;
+   Op_Alloc_New    : constant := 16#2A#;
+
+   --  ---- heap ------------------------------------------------------------
+   --  A bump allocator over a static arena, and no collector: the spec
+   --  assumes a non-moving collector, and nothing here frees.  Enough for
+   --  NEW and for proving that an allocated object's fields behave like any
+   --  other record's.  A guest build would have to move this off the stack
+   --  (the guest stack is 256 KiB), hence a package-level arena rather than
+   --  a local one, reset at load time so repeated runs start clean.
+   --  The arena is not reset between Run calls: the VM is loaded and run
+   --  once per process today.  A guest build also has to move it off the
+   --  stack (the guest stack is 256 KiB) rather than shrink it.
+   Heap_Words : constant := 8192;      --  64 KiB of object bodies
+   Heap       : array (0 .. Heap_Words - 1) of aliased U64;
+   Heap_Next  : Natural := 0;
    Op_Store_Fld_I  : constant := 16#26#;
    Op_Store_Idx_I  : constant := 16#20#;
    Op_Set_Union   : constant := 16#3D#;
@@ -185,6 +200,8 @@ package body OBC_VM is
       Globals_Off : Natural := 0;   --  offsets into the file
       Consts_Off  : Natural := 0;
       Consts_Len  : Natural := 0;
+      Types_Off   : Natural := 0;   --  TYPES payload, when the image has one
+      Types_Len   : Natural := 0;
       Code_Off    : Natural := 0;
       Code_Len    : Natural := 0;
       N_Procs     : Natural := 0;
@@ -194,6 +211,7 @@ package body OBC_VM is
       --  verifier and the interpreter (see the note in Decode).
       Code        : Byte_Array_Access := null;
       Consts_Copy : Byte_Array_Access := null;
+      Types       : Byte_Array_Access := null;   --  0-based TYPES copy
    end record;
 
    --  ---- diagnostics ----------------------------------------------------
@@ -288,6 +306,11 @@ package body OBC_VM is
                   Img.Code_Off := Off;
                   Img.Code_Len := Size;
                   Saw_Code := True;
+               when 3 =>
+                  --  TYPES is optional: an image whose programs allocate
+                  --  nothing need not carry descriptors.
+                  Img.Types_Off := Off;
+                  Img.Types_Len := Size;
                when 4 =>
                   Img.Consts_Off := Off;
                   Img.Consts_Len := Size;
@@ -323,6 +346,11 @@ package body OBC_VM is
       Img.Consts_Copy := new Byte_Array (0 .. Img.Consts_Len - 1);
       Img.Consts_Copy.all :=
         Data (Img.Consts_Off .. Img.Consts_Off + Img.Consts_Len - 1);
+      if Img.Types_Len > 0 then
+         Img.Types := new Byte_Array (0 .. Img.Types_Len - 1);
+         Img.Types.all :=
+           Data (Img.Types_Off .. Img.Types_Off + Img.Types_Len - 1);
+      end if;
 
       declare
          Code : Byte_Array renames Img.Code.all;
@@ -565,6 +593,17 @@ package body OBC_VM is
                end if;
                Depth := Depth - 2;
                PC := PC + 1;
+            when Op_Alloc_New =>
+               if not Fits (PC + 1, 4) then
+                  return Bad_Code;
+               end if;
+               --  The reference is a byte offset into TYPES, where kind,
+               --  flags and the object size are the first four bytes.
+               if Natural (LE32 (Code, PC + 1)) + 4 > Img.Types_Len then
+                  return Bad_Code;
+               end if;
+               Depth := Depth + 1;
+               PC := PC + 5;
             when Op_Load_Fld_I =>
                if not Fits (PC + 1, 2) then
                   return Bad_Code;
@@ -1040,6 +1079,30 @@ package body OBC_VM is
                end;
                PC := PC + 1;
 
+            when Op_Alloc_New =>
+               --  A zeroed body from the arena, sized by the TYPES descriptor the
+               --  operand names.  The push is the address the field and indexed
+               --  accesses already know how to use, so an allocated record behaves
+               --  exactly like one on the globals run.
+               declare
+                  Ref   : constant Natural := Natural (LE32 (Code, PC + 1));
+                  Size  : constant Natural := LE16 (Img.Types.all, Ref + 2);
+                  Words : constant Natural := (Size + 7) / 8;
+               begin
+                  if Heap_Next + Words > Heap_Words then
+                     --  A distinct status would say more, but Bad_Code plus
+                     --  the note is what the current status set can report.
+                     Note ("heap exhausted");
+                     return Bad_Code;
+                  end if;
+                  for K in 0 .. Words - 1 loop
+                     Heap (Heap_Next + K) := 0;
+                  end loop;
+                  Push (U64 (System.Storage_Elements.To_Integer
+                               (Heap (Heap_Next)'Address)));
+                  Heap_Next := Heap_Next + Words;
+               end;
+               PC := PC + 5;
             when Op_Load_Fld_I =>
                --  A record is a run of scalar slots, so a field is the word at the
                --  record's address plus its offset.  The offset comes from the
