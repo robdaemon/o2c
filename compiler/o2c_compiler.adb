@@ -1348,6 +1348,7 @@ package body O2c_Compiler is
       Sc   : EType := T_Int;      --  scalar type when D_Scalar
       UT   : Natural := 0;        --  pointer user type when D_Ptr
       Off  : Natural := 0;        --  field byte offset when D_Field
+      Ptr_Field : Boolean := False;  --  that field holds a pointer
    end record;
 
    type VK_Kind is (V_Rec, V_Ptr, V_Arr);
@@ -1454,8 +1455,17 @@ package body O2c_Compiler is
                end if;
                D.Text := D.Text & "."
                  & Ada_Id (To_String (UTypes (FO).F (F).Name));
-               if UTypes (FO).F (F).UT = 0 then
+               if UTypes (FO).F (F).UT = 0
+                 or else UTypes (FO).F (F).UT = FO
+               then
                   D.Sc := UTypes (FO).F (F).Typ;
+                  D.Ptr_Field := UTypes (FO).F (F).UT = FO;
+                  if D.Ptr_Field then
+                     --  A field that names its own record is a pointer, so
+                     --  it types as one: assignment stores a pointer and
+                     --  equality compares two addresses.
+                     D.Sc := T_Ptr;
+                  end if;
                   if O2c_BC.Bytecode_Mode then
                      --  A record is a run of scalar slots and the descriptor
                      --  fixes each field's offset, so a field needs no bound
@@ -1464,16 +1474,18 @@ package body O2c_Compiler is
                      --  whole record variable for now: a chain of records
                      --  would need the offsets composed, and an extension's
                      --  layout is shared with its parent.
-                     if D.Sc /= T_Int
+                     if D.Ptr_Field then
+                        null;      --  a pointer field is an 8-byte word
+                     elsif D.Sc /= T_Int
                        or else not (UT = Base_UT
                                     or else (UTypes (Base_UT).Is_Ptr
                                              and then UT =
                                                UTypes (Base_UT).Ptr_Tgt))
                      then
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                          & "only INTEGER fields reached directly from a "
-                          & "record variable or a pointer to one are "
-                          & "supported";
+                            & "only INTEGER and self-referencing pointer "
+                            & "fields reached directly from a record "
+                            & "variable or a pointer to one are supported";
                      end if;
                      D.Off := (F - 1) * 8;
                      D.K := D_Field;
@@ -2686,7 +2698,9 @@ package body O2c_Compiler is
                                     elsif D.K = D_Field then
                                        --  [record]: the field at a known offset.
                                        R.Typ := D.Sc;
-                                       O2c_BC.Load_Fld (D.Off);
+                                       if D.Ptr_Field then O2c_BC.Load_Fld_P (D.Off);
+                                        else O2c_BC.Load_Fld (D.Off);
+                                        end if;
                                     elsif D.K = D_Scalar then
                                        R.Typ := D.Sc;
                                     elsif D.K = D_Ptr then
@@ -2865,20 +2879,6 @@ package body O2c_Compiler is
                         Next;
                      end;
                      return R;
-                  end if;
-                  if O2c_BC.Bytecode_Mode
-                    and then UTypes (U).Is_Ptr
-                    and then Cur.Kind /= Lex.Tok_Dot
-                    and then Cur.Kind /= Lex.Tok_Caret
-                    and then Cur.Kind /= Lex.Tok_LBracket
-                  then
-                     --  A bare pointer used as a value: no selector follows,
-                     --  so no designator path will push its base.  Every
-                     --  user-typed variable enters this branch before the
-                     --  scalar one, which is why a pointer operand was
-                     --  silently absent from the stack - p = q compared two
-                     --  words that were never pushed.
-                     Bc_Load (Nm);
                   end if;
                   if Cur.Kind = Lex.Tok_Dot then
                      --  method function call r.M(...) / p.M(...) (M15):
@@ -3101,7 +3101,9 @@ package body O2c_Compiler is
                      elsif D.K = D_Field then
                         --  [record]: the field at a known offset.
                         R.Typ := D.Sc;
-                        O2c_BC.Load_Fld (D.Off);
+                        if D.Ptr_Field then O2c_BC.Load_Fld_P (D.Off);
+                         else O2c_BC.Load_Fld (D.Off);
+                         end if;
                      elsif D.K = D_Scalar then
                         R.Typ := D.Sc;
                      elsif D.K = D_Ptr then
@@ -3989,9 +3991,13 @@ package body O2c_Compiler is
                     and then not UTypes (UT).Is_Ext
                     and then UTypes (UT).Arr_Len = 0
                     and then UTypes (UT).N_F > 0
+                    --  A field may be a scalar INTEGER, or one that names
+                    --  the record itself - Oberon's implicit pointer, whose
+                    --  default is null and which is how a list is built.
                     and then (for all J in 1 .. UTypes (UT).N_F =>
-                                UTypes (UT).F (J).UT = 0
-                                and then UTypes (UT).F (J).Typ = T_Int);
+                                (UTypes (UT).F (J).UT = 0
+                                 and then UTypes (UT).F (J).Typ = T_Int)
+                                or else UTypes (UT).F (J).UT = UT);
                begin
                   if not (Ok_Arr or else Ok_Rec or else Ok_Ptr) then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
@@ -6202,7 +6208,9 @@ package body O2c_Compiler is
                                  declare
                                     V : Expr_Rec := Parse_Expr;
                                  begin
-                                    O2c_BC.Store_Fld (D.Off);
+                                    if D.Ptr_Field then O2c_BC.Store_Fld_P (D.Off);
+                                     else O2c_BC.Store_Fld (D.Off);
+                                     end if;
                                  end;
                               elsif D.K = D_Scalar then
                                  if D.Sc = T_Char
@@ -6492,7 +6500,9 @@ package body O2c_Compiler is
                            declare
                               V : Expr_Rec := Parse_Expr;
                            begin
-                              O2c_BC.Store_Fld (D.Off);
+                              if D.Ptr_Field then O2c_BC.Store_Fld_P (D.Off);
+                               else O2c_BC.Store_Fld (D.Off);
+                               end if;
                            end;
                         elsif D.K = D_Scalar then
                            if D.Sc = T_Char and then Cur.Kind = Lex.Tok_String
