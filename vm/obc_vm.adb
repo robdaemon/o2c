@@ -1087,9 +1087,23 @@ package body OBC_VM is
             return;
          end if;
          Slot := Natural ((W - Heap_Lo) / 8);
-         if Slot >= Heap_Next or else Marked_At (Slot) then
+         --  Slot 0 is the arena's first tag word, never a body: ALLOC_NEW
+         --  hands out the slot past the tag.
+         if Slot = 0 or else Slot >= Heap_Next or else Marked_At (Slot) then
             return;                     --  free space, or already reached
          end if;
+         --  A word is only a pointer if the slot before it really is a type
+         --  tag naming a descriptor.  Scalars resemble arena addresses often
+         --  enough that without this the walk follows one into the middle of
+         --  an object and reads a field as though it were a tag - which is
+         --  what a live program hit: slot 8188 held 2730, not a tag.
+         declare
+            Maybe : constant Natural := Natural (Heap (Slot - 1));
+         begin
+            if Maybe = 0 or else Maybe - 1 + 4 > Img.Types_Len then
+               return;
+            end if;
+         end;
          Mark_Set (Slot);
          if Mark_Count = Mark_Stack'Length then
             --  Out of worklist.  Give up on this collection and free nothing
