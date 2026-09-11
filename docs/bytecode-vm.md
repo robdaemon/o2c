@@ -381,6 +381,30 @@ backend's regression still passes **and** the new VM path is exercised.
   completes and prints the same answer, `has_ptrs` is exercised both ways, and
   exhaustion with everything live still fails loudly rather than corrupting.
 
+- **M61 — foreign functions (FFI).** *In progress, and ahead of the list
+  above: it was started because a Gemini browser needs libressl, and the VM
+  already carries most of what it needs.*
+  - **Landed:** `CALL_NATIVE` takes an argument block, so arity is not capped
+    at two; a native may return a value (`Native_Result`, with `Native_Pushes`
+    so the verifier tracks the depth); `EXTERN` is a keyword, chosen over
+    overloading `IS` because a foreign binding is linkage, not type identity;
+    the VM resolves a C symbol to a native id (`Native_Id`), so a wrong name is
+    a build error rather than a call to the wrong function; and
+    `tests/vm/ffilabs.asm` runs `labs(-7)` end to end through Ada's
+    `pragma Import (C, ...)`.
+  - **Remaining:** parse `PROCEDURE f (...) EXTERN "sym";` in a stub module and
+    resolve it at the call site; anchor pointer arguments as roots so a
+    re-entrant collection cannot free a buffer a native holds; and the first
+    producer of `Wants_More` plus the park, which waits on threads.
+  - **Decided:** foreign structs stay opaque for now — libressl is used through
+    handles (`SSL_CTX*`, `SSL*`) that the caller never dereferences, and o2c
+    records are one 8-byte slot per field with no padding, so they are *not* C
+    layout.  Passing a record as a struct would be wrong and silently so; that
+    question is deferred rather than solved.
+  - **Known:** reading entropy from `/dev/urandom` during a handshake is the one
+    call that genuinely cannot be non-blocking, so it needs a pre-fetch or a
+    dedicated thread. Promptly noted so it does not surface mid-handshake.
+
 - **M59 (the alternative not taken) — libgc.** Fetch a sha256-pinned `bdwgc` tarball at build time and
   apply `third_party/patches/bdwgc-aegir-*.patch` (nothing vendored in git,
   per project rule).  The port needs:
