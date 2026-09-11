@@ -126,8 +126,10 @@ def assemble(text):
             raise SystemExit(f"obc_asm: unknown mnemonic {op}")
         opcode, nbytes = OPS[op]
         if op in ("FOR_ENTER_I", "FOR_NEXT_I"):
-            #  FOR_ENTER_I slot step label   /  FOR_NEXT_I slot step limit label
-            want = 3 if op == "FOR_ENTER_I" else 4
+            #  FOR_ENTER_I slot step limit label  /  FOR_NEXT_I likewise:
+            #  both name the hidden limit slot, and the direction is the slot
+            #  after it.
+            want = 4
             if len(parts[1:]) != want:
                 raise SystemExit(f"obc_asm: {op} wants {want} operands")
             a = parts[1:]
@@ -135,8 +137,7 @@ def assemble(text):
             code += struct.pack("<H", int(a[0], 0))
             code += struct.pack("<i", int(a[1], 0))
             label = a[-1]
-            if op == "FOR_NEXT_I":
-                code += struct.pack("<H", int(a[2], 0))
+            code += struct.pack("<H", int(a[2], 0))
             pending.append((len(code), label))
             code += b"\x00" * 4
             continue

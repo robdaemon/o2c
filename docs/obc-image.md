@@ -288,16 +288,17 @@ guard failure, 3 = division by zero, 4 = `CASE` with no matching label
 | 0xA1 | `JZ`  | u32 target | `[bool] -> []` | |
 | 0xA2 | `JNZ` | u32 target | `[bool] -> []` | |
 | 0xA3 | `CASE` | u32 case-table ref | `[v] -> []` | jump table; no match falls through |
-| 0xA4 | `FOR_ENTER_I` | u16 var slot, i32 step, u32 else target | `[from,to] -> []` | direction from `from` vs `to`; stores `from`, jumps to `else` if the loop body never runs |
+| 0xA4 | `FOR_ENTER_I` | u16 var slot, i32 step, u16 limit slot, u32 else target | `[from,to] -> []` | direction from `from` vs `to`; stores `from`, jumps to `else` if the loop body never runs |
 | 0xA5 | `FOR_NEXT_I` | u16 var slot, i32 step, u16 limit slot, u32 body target | `[] -> []` | `var := var ± step`, loop while in range |
 | 0xA6 | `FOR_ENTER_C` | as `FOR_ENTER_I` | `[from,to] -> []` | CHAR loop variable |
 | 0xA7 | `FOR_NEXT_C` | as `FOR_NEXT_I` | `[] -> []` | |
 | 0xA8–0xBF | reserved | | | short `i8`/`i16` jumps for the optimizing tier |
 
 `FOR_ENTER_*`/`FOR_NEXT_*` allocate **two hidden frame slots** (limit and
-direction), **at the loop variable's slot + 1 (limit) and + 2 (direction)**:
-the variable slot is the only one the opcode names, so the placement has to be
-a convention, and this is it - a FOR inside a procedure therefore grows
+direction).  The **limit slot is named** by both opcodes and the **direction
+is the slot after it**, so the two are a pair the emitter interns together and
+neither is positional: an earlier convention put them at the loop variable's
+`+ 1`/`+ 2`, which held only while nothing else was interned between the two - a FOR inside a procedure therefore grows
 `frame_slots` by three that the emitter accounts for in `frame_slots` — this is what makes
 the Oberon-2 rule ("the step direction is decided by the initial comparison")
 exact, and it keeps the loop limit out of the operand stack so nested loops and

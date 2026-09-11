@@ -5610,6 +5610,7 @@ package body O2c_Compiler is
       --  because they start with '#'.
       Had_By : Boolean := False;
       Bc_Slot  : Natural := 0;
+      Bc_Limit : Natural := 0;
       Bc_Top   : Natural := 0;
       Bc_Else  : Natural := 0;
    begin
@@ -5667,14 +5668,18 @@ package body O2c_Compiler is
       if O2c_BC.Bytecode_Mode then
          Bc_Slot := O2c_BC.Local (Ada_Id (V_Name (1 .. V_Len)));
          declare
-            Unused  : constant Natural :=
+            --  The two hidden slots are interned together and in this order,
+            --  so the direction is always the limit's next slot.  The limit
+            --  is *named* by the FOR opcodes rather than assumed to sit just
+            --  after the loop variable: with a procedure's declared locals
+            --  interned first, that slot belongs to someone else.
+            Lim : constant Natural :=
               O2c_BC.Local ("#for-limit-" & Natural'Image (Bc_For_N));
-            Unused2 : constant Natural :=
+            Dir : constant Natural :=
               O2c_BC.Local ("#for-dir-" & Natural'Image (Bc_For_N));
-            pragma Unreferenced (Unused);
-            pragma Unreferenced (Unused2);
+            pragma Unreferenced (Dir);
          begin
-            null;
+            Bc_Limit := Lim;
          end;
          Bc_For_N := Bc_For_N + 1;
          Bc_Top := New_Bc_Label;
@@ -5687,7 +5692,7 @@ package body O2c_Compiler is
          end if;
          --  from and to are on the stack, to on top
          O2c_BC.For_Enter (Bc_Slot, Integer'Value (To_String (By_Text)),
-                           Bc_Else);
+                           Bc_Limit, Bc_Else);
          O2c_BC.Mark (Bc_Top);
       end if;
       Append_Body ("      " & V_Name (1 .. V_Len) & " := "
@@ -5712,7 +5717,7 @@ package body O2c_Compiler is
       Append_Body ("      end loop;");
       if O2c_BC.Bytecode_Mode then
          O2c_BC.For_Next (Bc_Slot, Integer'Value (To_String (By_Text)),
-                          Bc_Slot + 1, Bc_Top);
+                          Bc_Limit, Bc_Top);
          O2c_BC.Mark (Bc_Else);
          --  The loop variable lived in a frame slot; a module variable has
          --  to carry the final value back to its global.

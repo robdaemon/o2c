@@ -10,7 +10,7 @@ ENTRY main
 PROC main 3 0 0
   LOAD_CONST one
   LOAD_CONST five
-  FOR_ENTER_I 0 1 L_else
+  FOR_ENTER_I 0 1 1 L_else   # slot 0, step 1, limit slot 1, else target
 L_top:
   LOAD_L 0
   LOAD_CONST zero

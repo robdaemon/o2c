@@ -660,16 +660,17 @@ package body OBC_VM is
                end if;
                PC := PC + 1;
             when Op_For_Enter =>
-               --  u16 var slot, i32 step, u32 else target.  from and to are
-               --  consumed; frame-slot bounds are the interpreter's business.
-               if not Fits (PC + 3, 8) then
+               --  u16 var slot, i32 step, u16 limit slot, u32 else target.
+               --  from and to are consumed; frame-slot bounds are the
+               --  interpreter's business.
+               if not Fits (PC + 3, 10) then
                   return Bad_Code;
                end if;
-               if Natural (LE32 (Code, PC + 7)) > Code'Length then
+               if Natural (LE32 (Code, PC + 9)) > Code'Length then
                   return Bad_Target;
                end if;
                Depth := Depth - 2;
-               PC := PC + 11;
+               PC := PC + 13;
             when Op_For_Next =>
                --  u16 var slot, i32 step, u16 limit slot, u32 body target.
                if not Fits (PC + 3, 10) then
@@ -1284,16 +1285,18 @@ package body OBC_VM is
                end;
                PC := PC + 1;
             when Op_For_Enter =>
-               --  u16 var slot, i32 step, u32 else target.  from and to are
-               --  on the operand stack, to on top; the variable's slot is
-               --  followed by the hidden limit and direction slots.
-               if PC + 10 >= Code'Length then
+               --  u16 var slot, i32 step, u16 limit slot, u32 else target.
+               --  from and to are on the operand stack, to on top; the
+               --  named limit slot holds `to` and the direction follows it.
+               if PC + 12 >= Code'Length then
                   return Bad_Code;
                end if;
                declare
                   Slot   : constant Natural :=
                     Natural (Code (PC + 1)) + Natural (Code (PC + 2)) * 256;
-                  Target : constant Natural := Natural (LE32 (Code, PC + 7));
+                  Limit  : constant Natural :=
+                    Natural (Code (PC + 7)) + Natural (Code (PC + 8)) * 256;
+                  Target : constant Natural := Natural (LE32 (Code, PC + 9));
                   Raw    : constant U64 := U64 (LE32 (Code, PC + 3));
                   Step   : constant I64 := (if Raw < 16#8000_0000#
                                             then To_I64 (Raw)
@@ -1305,7 +1308,7 @@ package body OBC_VM is
                   if Target > Code'Length then
                      return Bad_Target;
                   end if;
-                  if Slot + 2 >= Frame_Slots (Cur_Frame) then
+                  if Limit + 1 >= Frame_Slots (Cur_Frame) then
                      Note_At ("FOR slots out of range", PC);
                      return Bad_Stack;
                   end if;
@@ -1313,8 +1316,8 @@ package body OBC_VM is
                   To := Pop;
                   From := Pop;
                   Locals (Base + Slot) := From;
-                  Locals (Base + Slot + 1) := To;
-                  Locals (Base + Slot + 2) :=
+                  Locals (Base + Limit) := To;
+                  Locals (Base + Limit + 1) :=
                     (if From <= To then U64 (1) else U64 (0));
                   --  Oberon-2: the step's direction decides whether the body
                   --  runs at all, from the initial comparison.
@@ -1350,21 +1353,19 @@ package body OBC_VM is
                   if Target > Code'Length then
                      return Bad_Target;
                   end if;
-                  if Slot + 2 >= Frame_Slots (Cur_Frame)
-                    or else Limit >= Frame_Slots (Cur_Frame)
-                  then
+                  if Limit + 1 >= Frame_Slots (Cur_Frame) then
                      Note_At ("FOR slots out of range", PC);
                      return Bad_Stack;
                   end if;
                   V := To_I64 (Locals (Base + Slot));
                   Lim := To_I64 (Locals (Base + Limit));
-                  if Locals (Base + Slot + 2) = 1 then
+                  if Locals (Base + Limit + 1) = 1 then
                      V := V + abs (Step);
                   else
                      V := V - abs (Step);
                   end if;
                   Locals (Base + Slot) := To_U64 (V);
-                  More := (if Locals (Base + Slot + 2) = 1 then V <= Lim
+                  More := (if Locals (Base + Limit + 1) = 1 then V <= Lim
                            else V >= Lim);
                   if More then
                      PC := Target;

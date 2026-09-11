@@ -667,12 +667,13 @@ package body O2c_BC is
       Put_U32 (0);
    end For_Fixup;
 
-   procedure For_Enter (Slot : Natural; Step : Integer;
+   procedure For_Enter (Slot : Natural; Step : Integer; Limit_Slot : Natural;
                         Else_Label : Natural) is
    begin
       Put_Byte (16#A4#);
       Put_U16 (U16 (Slot));
       Put_U32 (U32 (Step) and 16#FFFF_FFFF#);
+      Put_U16 (U16 (Limit_Slot));
       For_Fixup (Else_Label);
       N_Insns := N_Insns + 1;
       Popped (2);                 --  from and to are consumed

@@ -159,7 +159,8 @@ package O2c_BC is
    --  limit then direction - the convention the VM reads, and why a FOR
    --  inside a procedure grows frame_slots by three.  from and to are on
    --  the operand stack when FOR_ENTER runs, to on top.
-   procedure For_Enter (Slot : Natural; Step : Integer; Else_Label : Natural);
+   procedure For_Enter (Slot : Natural; Step : Integer; Limit_Slot : Natural;
+                        Else_Label : Natural);
    procedure For_Next (Slot : Natural; Step : Integer; Limit_Slot : Natural;
                        Body_Label : Natural);
 
