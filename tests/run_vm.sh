@@ -251,6 +251,21 @@ else
    bad "new.asm did not run: $(cat "$WORK/new.err" 2>/dev/null)"
 fi
 
+#  ---- positive: hand-assembled linked list ---------------------------------
+#  Exercises LOAD_FLD_P/STORE_FLD_P independently of the emitter: two records
+#  are allocated, 42 goes into the first, the second links to it through its
+#  pointer field, and 42 is read back by following the link.
+if python3 "$ASM" "$ROOT/tests/vm/list.asm" "$WORK/list.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/list.obc" >"$WORK/list.out" 2>"$WORK/list.err"; then
+   if diff -u "$ROOT/tests/vm/list.out" "$WORK/list.out"; then
+      note "positive: list.asm (pointer fields) matches the golden output"
+   else
+      bad "list.asm output differs from tests/vm/list.out"
+   fi
+else
+   bad "list.asm did not run: $(cat "$WORK/list.err" 2>/dev/null)"
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_vm: FAIL ($fails)" >&2
    exit 1

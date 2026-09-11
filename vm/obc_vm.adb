@@ -117,6 +117,8 @@ package body OBC_VM is
    Op_Load_Fld_I   : constant := 16#23#;
    Op_Load_Const_P : constant := 16#2C#;
    Op_Alloc_New    : constant := 16#2A#;
+   Op_Load_Fld_P   : constant := 16#25#;
+   Op_Store_Fld_P  : constant := 16#28#;
 
    --  ---- heap ------------------------------------------------------------
    --  A bump allocator over a static arena, and no collector: the spec
@@ -604,7 +606,7 @@ package body OBC_VM is
                end if;
                Depth := Depth + 1;
                PC := PC + 5;
-            when Op_Load_Fld_I =>
+            when Op_Load_Fld_I | Op_Load_Fld_P =>
                if not Fits (PC + 1, 2) then
                   return Bad_Code;
                end if;
@@ -612,7 +614,7 @@ package body OBC_VM is
                   return Bad_Stack;
                end if;
                PC := PC + 3;
-            when Op_Store_Fld_I =>
+            when Op_Store_Fld_I | Op_Store_Fld_P =>
                if not Fits (PC + 1, 2) then
                   return Bad_Code;
                end if;
@@ -1103,7 +1105,7 @@ package body OBC_VM is
                   Heap_Next := Heap_Next + Words;
                end;
                PC := PC + 5;
-            when Op_Load_Fld_I =>
+            when Op_Load_Fld_I | Op_Load_Fld_P =>
                --  A record is a run of scalar slots, so a field is the word at the
                --  record's address plus its offset.  The offset comes from the
                --  descriptor at compile time, so there is no runtime bound to check
@@ -1119,7 +1121,7 @@ package body OBC_VM is
                   Push (V);
                end;
                PC := PC + 3;
-            when Op_Store_Fld_I =>
+            when Op_Store_Fld_I | Op_Store_Fld_P =>
                declare
                   Val : constant U64 := Pop;
                   Off : constant Natural := LE16 (Code, PC + 1);
