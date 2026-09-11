@@ -1,10 +1,16 @@
 # The o2c bytecode VM — plan
 
-Status: **proposal** (nothing implemented yet).  Written after the M50–M52
-extension modules landed, when the heap/GC question came up: the Ada backend
-allocates from the RTS arena and never frees, because Oberon's collector has
-no equivalent in Ada.  The answer chosen is to add a **bytecode backend plus a
-VM** and to adopt **libgc (Boehm-Demers-Weiser)** as the VM's memory manager.
+Status: **in progress.**  Written after the M50–M52 extension modules landed,
+when the heap/GC question came up: the Ada backend allocates from the RTS arena
+and never frees, because Oberon's collector has no equivalent in Ada.  The
+answer chosen is to add a **bytecode backend plus a VM**, and for the VM's
+memory manager a **precise mark-sweep collector the VM owns** — not libgc.
+
+That reverses the earlier choice of libgc, and the reason is the argument
+below: the VM makes roots *precise*, and a precise collector needs no port, no
+dependency, and behaves identically on the host and in the guest.  Boehm
+remains the documented alternative if effort ever matters more than that; its
+port is kept as an appendix rather than as the milestone.
 
 ## Why a VM, and why it makes GC tractable
 
@@ -14,6 +20,13 @@ VM** and to adopt **libgc (Boehm-Demers-Weiser)** as the VM's memory manager.
   every instruction (the emitter knows the expression types it has already
   computed), so the VM stack and the module globals are *precise* root sets:
   GC maps are derived from the bytecode, not guessed from a stack image.
+- **Which is why the collector is the VM's own.** The point of moving to a VM
+  was to make collection precise; adopting a *conservative* collector would
+  discard that and inherit a port, a separate heap and retained garbage.  The
+  VM already carries what precision needs: every object has a **type tag**
+  naming its descriptor, descriptors carry **`has_ptrs`** and **`size`**, and
+  the roots are a typed operand stack plus two flat arrays.  A mark-sweep over
+  the arena therefore needs nothing the VM does not have.
 - **One allocation path.** All Oberon heap objects come from the VM's own
   allocator, so switching that allocator to `GC_malloc`/`GC_malloc_atomic`
   covers the whole language in one place (the arena stays for VM metadata).
@@ -33,6 +46,18 @@ VM** and to adopt **libgc (Boehm-Demers-Weiser)** as the VM's memory manager.
 Non-goals of this plan: replacing the Ada backend, JIT compilation, threads
 inside the VM, and garbage collection for the *Ada* backend (that stays
 arena-only, documented as today).
+
+Threads being a non-goal is load-bearing for the collector rather than
+incidental: **one VM runs in one Aegir process and is single-threaded**, and
+concurrency in this system is separate processes.  So collection happens only
+inside `ALLOC_NEW`, with no asynchronous stop-the-world, no write barrier and
+no thread-safe allocator.  The arena is process-local.
+
+The collection point follows from that: allocation happens in exactly one
+place, so the collector runs there, when the bump would pass the end of the
+arena.  The order is **free list, then collect and retry, then report
+exhaustion** — the retry is what keeps a collection that frees nothing useful
+from turning exhaustion into corruption.
 
 ## Architecture
 
@@ -305,7 +330,34 @@ backend's regression still passes **and** the new VM path is exercised.
 - **M58 — oracle parity.** Run the compiler's own sample set and the M39–M56
   harness programs under the VM; any divergence is a VM bug until proven
   otherwise.
-- **M59 — libgc.** Fetch a sha256-pinned `bdwgc` tarball at build time and
+- **M59 — a precise mark-sweep in the VM.**  Replaces the earlier libgc plan;
+  see its port kept below as the alternative not taken.  The collector needs
+  four things and the VM already holds all of them:
+  - **A recoverable size per object.**  The sweep must walk the arena knowing
+    where each object ends.  The tag names the descriptor, and the descriptor
+    carries `size`, so the tag is the size source and no separate header is
+    needed — which is also why `ALLOC_NEW` reserves one word *before* the body
+    and returns the address past it.
+  - **`has_ptrs`, actually computed.**  The emitter writes `flags` as zero
+    today.  The mark phase scans an object's body only when `has_ptrs` says it
+    may hold pointers; a zero would silo every object from its roots.
+  - **Roots enumerated exactly**: the operand stack up to `SP`, frame slots up
+    to `Locals_Used`, and `Globals` up to `Img.N_Globals` — all visible from
+    `Execute`, so the collector is a nested subprogram and needs no register
+    window or stack-image guessing.  Only the *live prefix* of each is a root:
+    slots above `SP` are dead, and a stale value there must not keep an object
+    alive.  Each word is then validated as an arena object before being
+    followed, so a scalar that looks like an address can retain an object but
+    never free a live one.
+  - **A free list**, so a steady-state loop stops growing: `ALLOC_NEW`
+    allocates from it first and bumps only when it is empty.  Sweeping returns
+    unmarked runs, treating the allocation as starting at the tag.
+  Non-moving throughout, which the image format already assumes (`COPY_BYTES`).
+  Acceptance: the allocation loop that today dies with `heap exhausted`
+  completes and prints the same answer, `has_ptrs` is exercised both ways, and
+  exhaustion with everything live still fails loudly rather than corrupting.
+
+- **M59 (the alternative not taken) — libgc.** Fetch a sha256-pinned `bdwgc` tarball at build time and
   apply `third_party/patches/bdwgc-aegir-*.patch` (nothing vendored in git,
   per project rule).  The port needs:
   - a `gcconfig.h` clause: `MACH_TYPE`/`OS_TYPE`, `CPP_WORDSZ = CPP_PTRSZ = 64`,

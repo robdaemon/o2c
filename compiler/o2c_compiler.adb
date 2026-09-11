@@ -1118,6 +1118,33 @@ package body O2c_Compiler is
       end loop;
    end Fill_Table;
 
+   --  Whether any field of a record, or of a record it nests, can hold a
+   --  pointer.  The VM's mark phase scans an object's body only when this is
+   --  true, so an answer wrong in the false direction would silo an object
+   --  from its roots.  Arrays are of slot scalars here, never pointers.
+   function Has_Ptrs (U : Natural; Depth : Natural := 0) return Boolean is
+   begin
+      if U = 0 or else Depth > 8 then
+         return False;
+      end if;
+      for J in 1 .. UTypes (U).N_F loop
+         declare
+            FT : constant Natural := UTypes (U).F (J).UT;
+         begin
+            if FT = U then
+               return True;                --  Oberon's implicit pointer
+            elsif FT /= 0
+              and then (UTypes (FT).Is_Ptr
+                        or else (UTypes (FT).Arr_Len = 0
+                                 and then Has_Ptrs (FT, Depth + 1)))
+            then
+               return True;
+            end if;
+         end;
+      end loop;
+      return False;
+   end Has_Ptrs;
+
    function Desc_For (UT : Natural) return Natural is
    begin
       if Desc_Cache (UT) /= 0 then
@@ -1141,7 +1168,8 @@ package body O2c_Compiler is
          (if UTypes (UT).Is_Ext and then UTypes (UT).Parent /= 0
           then Desc_For (UTypes (UT).Parent)
           else 0),
-         (if O2c_BC.Bytecode_Mode then Mtabs (UT).Ref else 0));
+         (if O2c_BC.Bytecode_Mode then Mtabs (UT).Ref else 0),
+         Has_Ptrs (UT));
       return Desc_Cache (UT);
    end Desc_For;
 
@@ -1756,8 +1784,10 @@ package body O2c_Compiler is
                   if D.Ptr_Field then
                      --  A field that names its own record is a pointer, so
                      --  it types as one: assignment stores a pointer and
-                     --  equality compares two addresses.
+                     --  equality compares two addresses.  Its user type is
+                     --  the record's, since no pointer type names it.
                      D.Sc := T_Ptr;
+                     D.UT := UTypes (FO).F (F).UT;
                   end if;
                   if O2c_BC.Bytecode_Mode then
                      --  A record is a run of scalar slots and the descriptor
@@ -2270,9 +2300,19 @@ package body O2c_Compiler is
          null;
       elsif R.Typ = T_Ptr then
          if R.Ptr_UT /= LHS_UT then
+            --  A record field standing for its own implicit pointer carries
+            --  the record's user type rather than a pointer's, so it matches
+            --  when that record is what the target pointer points at.
+            if R.Ptr_UT /= 0 and then not UTypes (R.Ptr_UT).Is_Ptr then
+               if not UTypes (LHS_UT).Is_Ptr
+                 or else UTypes (LHS_UT).Ptr_Tgt /= R.Ptr_UT
+               then
+                  raise O2c_Error with "pointer type mismatch assigning " & LHS;
+               end if;
             --  widening: assign a pointer to an extension into a
             --  pointer to its ancestor (M13)
-            if not UTypes (LHS_UT).Is_Ptr or else not UTypes (R.Ptr_UT).Is_Ptr
+            elsif not UTypes (LHS_UT).Is_Ptr
+              or else not UTypes (R.Ptr_UT).Is_Ptr
               or else not Rec_Descends (UTypes (R.Ptr_UT).Ptr_Tgt,
                                         UTypes (LHS_UT).Ptr_Tgt)
             then
@@ -3536,7 +3576,9 @@ package body O2c_Compiler is
                      elsif D.K = D_Field then
                         --  [record]: the field at a known offset.
                         R.Typ := D.Sc;
-                        if D.Ptr_Field then O2c_BC.Load_Fld_P (D.Off);
+                        if D.Ptr_Field then
+                           R.Ptr_UT := D.UT;
+                           O2c_BC.Load_Fld_P (D.Off);
                          elsif D.Sc = T_Real or else D.Sc = T_LReal then
                             O2c_BC.Load_Fld_R (D.Off);
                          else O2c_BC.Load_Fld (D.Off);
@@ -6528,6 +6570,12 @@ package body O2c_Compiler is
                              & "backend: NEW of a pointer designator is not "
                              & "yet supported";
                         end if;
+                        --  Parsing the argument pushed the pointer's old
+                        --  value, which NEW never reads: the allocator's
+                        --  result is what gets stored.  Left on the stack it
+                        --  is one leaked slot per execution, which a loop
+                        --  turns into a steady climb to the stack ceiling.
+                        O2c_BC.Drop;
                         O2c_BC.Alloc_New
                           (Desc_For (UTypes (D.UT).Ptr_Tgt));
                         Bc_Store (NNm);

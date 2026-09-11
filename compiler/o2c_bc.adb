@@ -402,13 +402,14 @@ package body O2c_BC is
         when R2I_Round  => 16#8D#,
         when R2I_Trunc  => 16#8E#);
 
-   function Desc_Rec (Size : Natural; Base : Natural; Methods : Natural)
-                     return Natural is
+   function Desc_Rec (Size : Natural; Base : Natural; Methods : Natural;
+                      Has_Ptrs : Boolean) return Natural is
       Off : constant Natural := Length (Types_Buf);
    begin
       --  kind 3 (RECORD), flags 0, size, name_ref 0, an empty field list (a
       --  zero name_ref terminates it), then the base reference and methods.
-      Types_Buf := Types_Buf & Character'Val (3) & Character'Val (0);
+      Types_Buf := Types_Buf & Character'Val (3)
+        & Character'Val (if Has_Ptrs then 1 else 0);
       Types_Buf := Types_Buf & Character'Val (Size mod 256)
         & Character'Val ((Size / 256) mod 256);
       --  name_ref and the field-list terminator: eight bytes, so that base
@@ -545,6 +546,13 @@ package body O2c_BC is
       Put_Byte (U64 (Off / 256));
       N_Insns := N_Insns + 1;
    end Store_Fld;
+
+   procedure Drop is
+   begin
+      Put_Byte (16#03#);          --  DROP
+      N_Insns := N_Insns + 1;
+      Popped (1);
+   end Drop;
 
    procedure Trap (Kind : Natural) is
    begin

@@ -100,6 +100,7 @@ package O2c_BC is
    procedure Load_Fld_R (Off : Natural);
    procedure Store_Fld_R (Off : Natural);
    procedure Store_Fld_P (Off : Natural);
+   procedure Drop;
    --  NIL: a pointer constant.  The pool word is zero, so the opcode differs
    --  from LOAD_CONST only in what a reader can conclude about it.
    procedure Push_Nil;
@@ -108,8 +109,8 @@ package O2c_BC is
    --  TYPE_TEST and a descriptor's `base` all use, so that zero can mean
    --  none while the outermost descriptor still sits at offset zero.  Layout is
    --  declaration order, one scalar slot per field, so the size is N_F * 8.
-   function Desc_Rec (Size : Natural; Base : Natural; Methods : Natural)
-                  return Natural;
+   function Desc_Rec (Size : Natural; Base : Natural; Methods : Natural;
+                      Has_Ptrs : Boolean) return Natural;
    --  TYPE_TEST: leaves whether the pointer on top has that dynamic type,
    --  or an extension of it.
    procedure Type_Test (Ref : Natural);

@@ -138,6 +138,18 @@ package body OBC_VM is
    --  stack (the guest stack is 256 KiB) rather than shrink it.
    Heap_Words : constant := 8192;      --  64 KiB of object bodies
    Heap       : array (0 .. Heap_Words - 1) of aliased U64;
+   --  One bit per arena slot, marking what a collection reached.  Packed
+   --  rather than one Boolean per slot: the arena is large next to the guest
+   --  stack, and the walk only ever asks about a slot it just reached.
+   Mark_Words : constant := (Heap_Words + 63) / 64;
+   Marked     : array (0 .. Mark_Words - 1) of U64 := (others => 0);
+
+   --  A freed run is marked by this sentinel in its first arena slot with its
+   --  length in slots in the second, which is both how the sweep finds free
+   --  space and how the allocator scans for it.  No live object's first slot
+   --  can be confused with it: that slot is always its type tag, a small
+   --  number.  A run is never shorter than two slots, which any object is.
+   Free_Sentinel : constant U64 := 16#F0_0B_1E_5E_ED#;
    Heap_Next  : Natural := 0;
    Op_Store_Fld_I  : constant := 16#26#;
    Op_Store_Idx_I  : constant := 16#20#;
@@ -255,6 +267,28 @@ package body OBC_VM is
       end loop;
       return False;
    end Descends_From;
+
+   --  An allocated object's extent in arena slots: its body rounded up to
+   --  whole slots, plus its tag word.  The arena is U64-denominated, so a
+   --  size is a slot count and alignment is structural rather than something
+   --  an allocator has to arrange.  Every allocation and every walk uses this
+   --  one rule, which is what keeps the arena walkable.
+   function Alloc_Slots (Size : Natural) return Natural is
+     ((Size + 7) / 8 + 1);
+
+   --  How many arena slots an object occupies, its tag word included.  The
+   --  sweep walks the arena with this and needs no separate length word: the
+   --  tag names the descriptor and the descriptor carries the size.  An
+   --  object whose tag is out of range is treated as one slot, so a walk can
+   --  still advance past it rather than stopping.
+   function Object_Slots (Img : Image_Info; Tag : Natural) return Natural is
+      Off : constant Natural := Tag - 1;   --  references are biased
+   begin
+      if Tag = 0 or else Off + 4 > Img.Types_Len then
+         return 1;
+      end if;
+      return Alloc_Slots (LE16 (Img.Types.all, Off + 2));
+   end Object_Slots;
 
    --  ---- diagnostics ----------------------------------------------------
    procedure Note (Msg : String) is
@@ -868,6 +902,14 @@ package body OBC_VM is
       Code   : Byte_Array renames Img.Code.all;
       Consts : Byte_Array renames Img.Consts_Copy.all;
       Stack   : array (0 .. Max_Stack - 1) of U64 := (others => 0);
+      --  The collector's root set is the *live prefix* of each of these three
+      --  arrays, never the whole array: Stack (0 .. SP - 1), Locals
+      --  (0 .. Locals_Used - 1) and Globals (0 .. Img.N_Globals - 1).  Slots
+      --  above SP are dead, and a stale value there must not keep an object
+      --  alive - being able to say so is the whole reason this VM collects
+      --  precisely.  Each word is still validated as an arena object before
+      --  being followed, so a scalar that happens to look like an address can
+      --  only retain an object, never free a live one.
       Globals : array (0 .. Max_Globals - 1) of U64 := (others => 0);
       SP      : Natural := 0;
       PC      : Natural := Img.Body_Off;
@@ -899,6 +941,144 @@ package body OBC_VM is
       Locals_Used : Natural := 0;
 
       Op : Byte;
+      --  The mark phase, nested inside Execute because that is what makes the
+      --  roots precise: the live prefixes of the operand stack, the frame
+      --  slots and the globals are readable here and nowhere else.  It must
+      --  sit in the declarative part, since a collection runs from inside
+      --  ALLOC_NEW and these are the only places those roots exist.
+      Heap_Lo : constant U64 := U64 (System.Storage_Elements.To_Integer
+                                       (Heap (0)'Address));
+      Heap_Hi : constant U64 := U64 (System.Storage_Elements.To_Integer
+                                       (Heap (Heap_Words - 1)'Address));
+
+      --  A worklist rather than recursion: a deep structure would otherwise
+      --  recurse one frame per object into a 256 KiB guest stack.
+      Mark_Done  : Boolean := True;   --  cleared if marking had to give up
+      Mark_Stack : array (0 .. 255) of Natural := (others => 0);
+      Mark_Count : Natural := 0;
+
+      function Marked_At (Slot : Natural) return Boolean is
+        ((Marked (Slot / 64) and U64 (2 ** (Slot mod 64))) /= 0);
+
+      procedure Mark_Set (Slot : Natural) is
+      begin
+         Marked (Slot / 64) :=
+           Marked (Slot / 64) or U64 (2 ** (Slot mod 64));
+      end Mark_Set;
+
+      --  Take a word from the stack, a frame or an object body, and if it
+      --  really names a live arena object, mark it and queue it.  A word that
+      --  merely resembles an address costs a mark, never a mistaken free.
+      procedure Mark_Word (W : U64) is
+         Slot : Natural;
+      begin
+         if W < Heap_Lo or else W >= Heap_Hi
+           or else (W - Heap_Lo) mod 8 /= 0
+         then
+            return;
+         end if;
+         Slot := Natural ((W - Heap_Lo) / 8);
+         if Slot >= Heap_Next or else Marked_At (Slot) then
+            return;                     --  free space, or already reached
+         end if;
+         Mark_Set (Slot);
+         if Mark_Count = Mark_Stack'Length then
+            --  Out of worklist.  Give up on this collection and free nothing
+            --  rather than risk reclaiming something still reachable.
+            Mark_Done := False;
+         else
+            Mark_Stack (Mark_Count) := Slot;
+            Mark_Count := Mark_Count + 1;
+         end if;
+      end Mark_Word;
+
+      procedure Mark_All is
+         Slot : Natural;
+         Tag  : Natural;
+         Off  : Natural;
+      begin
+         Marked     := (others => 0);
+         Mark_Count := 0;
+         Mark_Done  := True;
+         for K in 0 .. SP - 1 loop
+            Mark_Word (Stack (K));
+         end loop;
+         for K in 0 .. Locals_Used - 1 loop
+            Mark_Word (Locals (K));
+         end loop;
+         for K in 0 .. Img.N_Globals - 1 loop
+            Mark_Word (Globals (K));
+         end loop;
+         while Mark_Count > 0 and then Mark_Done loop
+            Mark_Count := Mark_Count - 1;
+            Slot := Mark_Stack (Mark_Count);
+            Tag  := Tag_At (Heap (Slot));
+            Off  := Tag - 1;
+            if Off + 4 <= Img.Types_Len
+              and then Img.Types.all (Off + 1) mod 2 = 1
+            then
+               --  has_ptrs: this body may hold pointers, so every word of it
+               --  is a candidate.  The tag word is not part of the body.
+               for K in 0 .. Object_Slots (Img, Tag) - 2 loop
+                  Mark_Word (Heap (Slot + K));
+               end loop;
+            end if;
+         end loop;
+      end Mark_All;
+
+      --  Return every unmarked object to the arena.  The walk steps by object
+      --  extent, taken from each object's tag, and over free runs by their
+      --  recorded length; a freed run merges with one following it if there
+      --  is one, so a program that keeps freeing does not fragment the arena
+      --  indefinitely.  Merging is forward only, which is enough for the
+      --  common case of neighbours freed in the same pass.
+      procedure Sweep is
+         Slot : Natural := 0;
+         Tag  : Natural;
+         Len  : Natural;
+      begin
+         while Slot < Heap_Next loop
+            if Heap (Slot) = Free_Sentinel then
+               Slot := Slot + Natural (Heap (Slot + 1));
+            else
+               Tag := Natural (Heap (Slot));
+               Len := Object_Slots (Img, Tag);
+               if not Marked_At (Slot) then
+                  if Slot + Len < Heap_Next
+                    and then Heap (Slot + Len) = Free_Sentinel
+                  then
+                     Len := Len + Natural (Heap (Slot + Len + 1));
+                  end if;
+                  Heap (Slot) := Free_Sentinel;
+                  Heap (Slot + 1) := U64 (Len);
+               end if;
+               Slot := Slot + Len;
+            end if;
+         end loop;
+      end Sweep;
+
+      --  The first free run large enough, or an impossible slot when there is
+      --  none.  This is the whole of the free list: runs are discoverable by
+      --  walking the arena, so no separate structure can fall out of step
+      --  with the space it describes.
+      function Free_Fit (Need : Natural) return Natural is
+         Slot : Natural := 0;
+         Len  : Natural;
+      begin
+         while Slot < Heap_Next loop
+            if Heap (Slot) = Free_Sentinel then
+               Len := Natural (Heap (Slot + 1));
+               if Len >= Need then
+                  return Slot;
+               end if;
+               Slot := Slot + Len;
+            else
+               Slot := Slot + Object_Slots (Img, Natural (Heap (Slot)));
+            end if;
+         end loop;
+         return Heap_Words + 1;
+      end Free_Fit;
+
    begin
       --  module globals come from the DATA section (their initial values)
       for I in 0 .. Img.N_Globals - 1 loop
@@ -1302,11 +1482,45 @@ package body OBC_VM is
                   Ref   : constant Natural :=
                     Natural (LE32 (Code, PC + 1)) - 1;
                   Size  : constant Natural := LE16 (Img.Types.all, Ref + 2);
-                  Words : constant Natural := (Size + 7) / 8;
+                  --  The tag word is part of the extent, so the body is one
+                  --  slot less than Alloc_Slots reports.
+                  Words : constant Natural := Alloc_Slots (Size) - 1;
+                  Need  : constant Natural := Words + 1;
+                  Fit   : Natural := Free_Fit (Need);
+                  Base  : Natural;
+                  Left  : Natural;
                begin
-                  if Heap_Next + Words + 1 > Heap_Words then
-                     --  A distinct status would say more, but Bad_Code plus
-                     --  the note is what the current status set can report.
+                  if Fit > Heap_Words
+                    and then Heap_Next + Need > Heap_Words
+                  then
+                     --  The one collection point.  Allocation happens
+                     --  nowhere else, so the collector runs here: mark from
+                     --  the roots, sweep what is unreachable back into free
+                     --  runs, and look again.  Collecting only when free
+                     --  space is short is what keeps a steady-state loop
+                     --  from collecting on every allocation.
+                     Mark_All;
+                     Sweep;
+                     Fit := Free_Fit (Need);
+                  end if;
+                  if Fit <= Heap_Words then
+                     --  Take the head of the run and leave the remainder as
+                     --  its own run.  A single leftover slot cannot hold a
+                     --  sentinel and a length, so it is absorbed, which is
+                     --  why merging on the sweep matters.
+                     Base := Fit;
+                     Left := Natural (Heap (Fit + 1)) - Need;
+                     if Left >= 2 then
+                        Heap (Fit + Need) := Free_Sentinel;
+                        Heap (Fit + Need + 1) := U64 (Left);
+                     end if;
+                  elsif Heap_Next + Need <= Heap_Words then
+                     Base := Heap_Next;
+                     Heap_Next := Heap_Next + Need;
+                  else
+                     --  Nothing free and no room to grow: a collection has
+                     --  just run, so everything left is reachable.  This has
+                     --  to stay a loud failure rather than a corruption.
                      Note ("heap exhausted");
                      return Bad_Code;
                   end if;
@@ -1315,13 +1529,13 @@ package body OBC_VM is
                   --  nothing in the access paths has to know the tag exists.
                   --  The tag holds a biased reference, the form the walk
                   --  compares against, while `Ref` indexes TYPES directly.
-                  Heap (Heap_Next) := U64 (Ref + 1);
+                  Heap (Base) := U64 (Ref + 1);
                   for K in 1 .. Words loop
-                     Heap (Heap_Next + K) := 0;
+                     Heap (Base + K) := 0;
                   end loop;
                   Push (U64 (System.Storage_Elements.To_Integer
-                               (Heap (Heap_Next + 1)'Address)));
-                  Heap_Next := Heap_Next + Words + 1;
+                               (Heap (Base + 1)'Address)));
+
                end;
                PC := PC + 5;
             when Op_Load_Fld_I | Op_Load_Fld_R | Op_Load_Fld_P =>
