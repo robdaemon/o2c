@@ -108,13 +108,23 @@ package O2c_BC is
    --  TYPE_TEST and a descriptor's `base` all use, so that zero can mean
    --  none while the outermost descriptor still sits at offset zero.  Layout is
    --  declaration order, one scalar slot per field, so the size is N_F * 8.
-   function Desc_Rec (Size : Natural; Base : Natural) return Natural;
+   function Desc_Rec (Size : Natural; Base : Natural; Methods : Natural)
+                  return Natural;
    --  TYPE_TEST: leaves whether the pointer on top has that dynamic type,
    --  or an extension of it.
    procedure Type_Test (Ref : Natural);
    --  GUARD: leaves the pointer if its dynamic type is that one or an
    --  extension, and traps (kind 2) if not.  NIL passes.
    procedure Guard (Ref : Natural);
+   --  A method table: `n` u32 followed by n procedure ids.  The result is the
+   --  reference a descriptor's methods field holds.  A type's table is its
+   --  parent's followed by its own, so an override keeps its base's slot.
+   type Id_List is array (Natural range <>) of Natural;
+   function Method_Table (Ids : Id_List) return Natural;
+   --  DISPATCH through the receiver on the stack, under its arguments.
+   --  Both counts are static; the callee is not.
+   procedure Dispatch (Method_Idx : Natural; Arg_Count : Natural;
+                       Result_Count : Natural);
    --  Allocate a zeroed object of the descriptor's size and push its address.
    procedure Alloc_New (Desc_Ref : Natural);
    procedure Store_Fld (Off : Natural);

@@ -1066,16 +1066,82 @@ package body O2c_Compiler is
    --  reference, which is what makes a test for an ancestor succeed.
    Desc_Cache : array (1 .. Max_UTypes) of Natural := (others => 0);
 
+   --  A record type's method table, built from its ancestors' and then its
+   --  own.  An override keeps the slot the ancestor gave the name, which is
+   --  what lets DISPATCH resolve by index alone.
+   type Mb_Rec is record
+      Name : Unbounded_String;
+      Proc : Natural := 0;
+   end record;
+   type Mb_Array is array (1 .. 16) of Mb_Rec;
+   type Mtab_Rec is record
+      N : Natural := 0;
+      M : Mb_Array := (others => <>);
+      Ref : Natural := 0;
+   end record;
+   Mtabs : array (1 .. Max_UTypes) of Mtab_Rec;
+
+   procedure Fill_Table (UT : Natural) is
+      U : Natural := UT;
+   begin
+      if Mtabs (UT).Ref /= 0 then
+         return;
+      end if;
+      Mtabs (UT).Ref := 1;          --  in progress: the chain terminates
+      if UTypes (UT).Is_Ext and then UTypes (UT).Parent /= 0 then
+         Fill_Table (UTypes (UT).Parent);
+         Mtabs (UT).N := Mtabs (UTypes (UT).Parent).N;
+         Mtabs (UT).M (1 .. Mtabs (UT).N) :=
+           Mtabs (UTypes (UT).Parent).M (1 .. Mtabs (UT).N);
+      end if;
+      for B in 1 .. N_Bound loop
+         if Bounds (B).RecUT = U then
+            declare
+               Found : Boolean := False;
+            begin
+               for I in 1 .. Mtabs (UT).N loop
+                  if To_String (Mtabs (UT).M (I).Name) =
+                    To_String (Bounds (B).Name)
+                  then
+                     Mtabs (UT).M (I).Proc := Syms (Bounds (B).SymIdx).Bc_Proc;
+                     Found := True;
+                  end if;
+               end loop;
+               if not Found and then Mtabs (UT).N < Mtabs (UT).M'Last then
+                  Mtabs (UT).N := Mtabs (UT).N + 1;
+                  Mtabs (UT).M (Mtabs (UT).N) :=
+                    (Name => Bounds (B).Name,
+                     Proc => Syms (Bounds (B).SymIdx).Bc_Proc);
+               end if;
+            end;
+         end if;
+      end loop;
+   end Fill_Table;
+
    function Desc_For (UT : Natural) return Natural is
    begin
       if Desc_Cache (UT) /= 0 then
          return Desc_Cache (UT);
       end if;
+      if O2c_BC.Bytecode_Mode then
+         Fill_Table (UT);
+         declare
+            Ids : O2c_BC.Id_List (1 .. Mtabs (UT).N);
+         begin
+            for I in 1 .. Mtabs (UT).N loop
+               Ids (I) := Mtabs (UT).M (I).Proc;
+            end loop;
+            if Mtabs (UT).N > 0 then
+               Mtabs (UT).Ref := O2c_BC.Method_Table (Ids);
+            end if;
+         end;
+      end if;
       Desc_Cache (UT) := O2c_BC.Desc_Rec
         (Total_Slots (UT) * 8,
          (if UTypes (UT).Is_Ext and then UTypes (UT).Parent /= 0
           then Desc_For (UTypes (UT).Parent)
-          else 0));
+          else 0),
+         (if O2c_BC.Bytecode_Mode then Mtabs (UT).Ref else 0));
       return Desc_Cache (UT);
    end Desc_For;
 

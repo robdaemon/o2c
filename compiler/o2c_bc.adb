@@ -402,7 +402,8 @@ package body O2c_BC is
         when R2I_Round  => 16#8D#,
         when R2I_Trunc  => 16#8E#);
 
-   function Desc_Rec (Size : Natural; Base : Natural) return Natural is
+   function Desc_Rec (Size : Natural; Base : Natural; Methods : Natural)
+                     return Natural is
       Off : constant Natural := Length (Types_Buf);
    begin
       --  kind 3 (RECORD), flags 0, size, name_ref 0, an empty field list (a
@@ -410,6 +411,8 @@ package body O2c_BC is
       Types_Buf := Types_Buf & Character'Val (3) & Character'Val (0);
       Types_Buf := Types_Buf & Character'Val (Size mod 256)
         & Character'Val ((Size / 256) mod 256);
+      --  name_ref and the field-list terminator: eight bytes, so that base
+      --  lands at +12 and methods at +16, which is where the VM reads them.
       for K in 1 .. 8 loop
          Types_Buf := Types_Buf & Character'Val (0);
       end loop;
@@ -418,6 +421,11 @@ package body O2c_BC is
       for K in 0 .. 3 loop
          Types_Buf := Types_Buf
            & Character'Val ((Base / 256 ** K) mod 256);
+      end loop;
+      --  methods: the reference DISPATCH follows from the tag.  At +16.
+      for K in 0 .. 3 loop
+         Types_Buf := Types_Buf
+           & Character'Val ((Methods / 256 ** K) mod 256);
       end loop;
       --  References are biased so zero stays available to mean "none".
       return Off + 1;
@@ -431,6 +439,34 @@ package body O2c_BC is
       Popped;
       Pushed;
    end Type_Test;
+
+   function Method_Table (Ids : Id_List) return Natural is
+      Off : constant Natural := Length (Types_Buf);
+   begin
+      Types_Buf := Types_Buf & Character'Val (Ids'Length mod 256)
+        & Character'Val ((Ids'Length / 256) mod 256)
+        & Character'Val (0) & Character'Val (0);
+      for K in Ids'Range loop
+         for B in 0 .. 3 loop
+            Types_Buf := Types_Buf
+              & Character'Val ((Ids (K) / 256 ** B) mod 256);
+         end loop;
+      end loop;
+      return Off + 1;
+   end Method_Table;
+
+   procedure Dispatch (Method_Idx : Natural; Arg_Count : Natural;
+                       Result_Count : Natural) is
+   begin
+      Put_Byte (16#E2#);          --  DISPATCH
+      Put_Byte (U64 (Method_Idx mod 256));
+      Put_Byte (U64 (Method_Idx / 256));
+      Put_Byte (U64 (Arg_Count));
+      Put_Byte (U64 (Result_Count));
+      N_Insns := N_Insns + 1;
+      Popped (Arg_Count + 1);
+      Pushed (Result_Count);
+   end Dispatch;
 
    procedure Guard (Ref : Natural) is
    begin
