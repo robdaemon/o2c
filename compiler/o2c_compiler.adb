@@ -2060,6 +2060,7 @@ package body O2c_Compiler is
                R.Text := To_Unbounded_String
                  ("'" & Cur.Text (1 .. 1) & "'");
                R.Typ := T_Char;
+               R.Lit := True;
                if O2c_BC.Bytecode_Mode then
                   O2c_BC.Push_Char (Character'Pos (Cur.Text (1)));
                end if;
@@ -7009,12 +7010,35 @@ package body O2c_Compiler is
                         declare
                            A : Expr_Rec := Parse_Expr;
                         begin
-                           if A.Typ /= T_Str then
+                           if A.Typ = T_Char then
+                              --  A char is a one-character string here.
+                              --  The factor pushed its code, so replace it
+                              --  with the string; only a literal can be
+                              --  folded, since a variable's text is its
+                              --  name, not its value.
+                              if not A.Lit then
+                                 raise O2c_Error with
+                                   "Out.String needs a string, and a char "
+                                   & "variable cannot become one yet";
+                              end if;
+                              declare
+                                 Ch : constant String := To_String (A.Text);
+                              begin
+                                 if O2c_BC.Bytecode_Mode then
+                                    O2c_BC.Discard;
+                                    O2c_BC.Push_Str (Ch (2 .. 2));
+                                 end if;
+                                 M := To_Unbounded_String
+                                   (Ada_String_Literal (Ch (2 .. 2)));
+                              end;
+                              CArg := False;
+                           elsif A.Typ /= T_Str then
                               raise O2c_Error
                                 with "Out.String needs a string argument";
+                           else
+                              M := A.Text;
+                              CArg := A.CStr;
                            end if;
-                           M := A.Text;
-                           CArg := A.CStr;
                         end;
                      elsif Member = "Int" then
                         declare
