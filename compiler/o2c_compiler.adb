@@ -104,6 +104,7 @@ package body O2c_Compiler is
       Open_Arr : Boolean := False; --  ARRAY OF parameter (M12); Typ = elem
       By_Ref   : Boolean := False; --  formal VAR parameter
       Exp    : Boolean := False;   --  export mark 'name*' (M19)
+      Bc_Proc : Natural := 0;      --  bytecode procedure id (Begin_Proc)
       P      : Param_Array := (others => <>);
    end record;
 
@@ -4468,12 +4469,8 @@ package body O2c_Compiler is
       --  parameter slots, lowest slot first.  The names are interned under
       --  the same spelling the use sites look up, i.e. Ada_Id-mangled.
       if O2c_BC.Bytecode_Mode then
-         declare
-            Ignored : constant Natural :=
-              O2c_BC.Begin_Proc (N_Par, (if Is_Function then 1 else 0));
-         begin
-            null;
-         end;
+         Syms (N_Sym).Bc_Proc :=
+           O2c_BC.Begin_Proc (N_Par, (if Is_Function then 1 else 0));
          for I in 1 .. N_Par loop
             declare
                --  The slot value is held by the emitter's own table; all
@@ -5079,12 +5076,10 @@ package body O2c_Compiler is
    begin
       loop
          exit when At_Stop (Stop_On_Else, Stop_On_Until, Stop_On_Bar);
-         if O2c_BC.Bytecode_Mode and then In_Proc then
-            --  the slice emits the module body only; a procedure body
-            --  would land in the same code buffer
-            raise O2c_BC.Wrong_Construct with "bytecode backend: procedure "
-              & "bodies are not yet supported";
-         end if;
+         --  Procedure bodies used to be rejected here because they would
+         --  land in the body's code buffer.  Decl_Procedure now brackets
+         --  each one with Begin_Proc/End_Proc, so a procedure's code is its
+         --  own extent in the CODE payload and the module body comes last.
 
          if Cur.Kind = Lex.Tok_Case then
             Parse_Case;
@@ -6552,6 +6547,17 @@ package body O2c_Compiler is
                   end if;
                   Expect (Lex.Tok_RParen, "')'");
                   Next;
+                  if O2c_BC.Bytecode_Mode then
+                     --  A call to something the emitter never opened is an
+                     --  imported or undeclared procedure: fail loudly rather
+                     --  than emit a call to procedure 0.
+                     if Syms (Idx).Bc_Proc = 0 then
+                        raise O2c_Error with "bytecode backend: call to '"
+                          & Head (1 .. H_Len)
+                          & "', which is imported or undeclared";
+                     end if;
+                     O2c_BC.Call_Proc (Syms (Idx).Bc_Proc);
+                  end if;
                   Call := Call & Head (1 .. H_Len) & " (";
                   for I in 1 .. N_A loop
                      if I > 1 then
