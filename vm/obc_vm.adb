@@ -962,7 +962,13 @@ package body OBC_VM is
       --  frame lives at Locals (Frame_Base (Cur_Frame) + i), and the callee's
       --  parameter slots are the lowest slots of its frame.
       Locals      : constant U64_Array_Access := new U64_Array (0 .. Max_VM_Locals - 1);
-      Frame_Base  : array (0 .. Max_Frames - 1) of Natural := (others => 0);
+      --  Frame 0's base is only written when a CALL pushes a frame, so a
+      --  program with no calls reads it before any store.  The old local
+      --  array got zero from its initialiser; an access does not, so the
+      --  aggregate is spelled out rather than relying on a default that
+      --  never arrives.
+      Frame_Base  : constant Natural_Array_Access :=
+        new Natural_Array'(0 .. Max_Frames - 1 => 0);
       Frame_Slots : constant Natural_Array_Access := new Natural_Array (0 .. Max_Frames - 1);
       Return_PC   : array (0 .. Max_Frames - 1) of Natural := (others => 0);
       Cur_Frame   : Natural := 0;
