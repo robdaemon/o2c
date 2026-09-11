@@ -32,6 +32,11 @@ OPS = {
     "SET_UNION": (0x3D, 0), "SET_INTERSECT": (0x3E, 0), "SET_DIFF": (0x3F, 0),
     "SET_SYMDIFF": (0x40, 0), "SET_EQ": (0x41, 0), "SET_NE": (0x42, 0),
     "SET_IN": (0x43, 0), "SET_SINGLE": (0x44, 0),
+    "LOAD_CONST_R": (0x2D, 4),
+    "RADD": (0x80, 0), "RSUB": (0x81, 0), "RMUL": (0x82, 0), "RDIV": (0x83, 0),
+    "RNEG": (0x84, 0), "RABS": (0x85, 0), "REQ": (0x86, 0), "RNE": (0x87, 0),
+    "RLT": (0x88, 0), "RLE": (0x89, 0), "RGT": (0x8A, 0), "RGE": (0x8B, 0),
+    "I2R": (0x8C, 0), "R2I_ROUND": (0x8D, 0), "R2I_TRUNC": (0x8E, 0),
 }
 PROC_REC = 24
 CONST_SLOT = 8
@@ -76,6 +81,12 @@ def assemble(text):
             labels[parts[1]] = table + len(code)
             procs.append((labels[parts[1]], int(parts[2]), int(parts[3]),
                           int(parts[4])))
+            continue
+        if op == "POOL_R":
+            #  a REAL literal: its IEEE pattern goes in the word pool
+            words.append(struct.unpack("<Q", struct.pack("<d",
+                                                         float(parts[2])))[0])
+            pool_names[parts[1]] = len(words) - 1
             continue
         if op in ("POOL", "STR"):
             #  POOL name value      -> a pool word

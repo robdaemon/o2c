@@ -76,6 +76,10 @@ package body OBC_VM is
      (Natural (B (Off)) + Natural (B (Off + 1)) * 256);
 
    function To_I64 is new Ada.Unchecked_Conversion (U64, I64);
+   --  REAL and LONGREAL share the 8-byte slot and these ops; only the
+   --  formatting differs, so a real value is a word reinterpreted.
+   function To_R64 is new Ada.Unchecked_Conversion (U64, Long_Float);
+   function R64_To_U64 is new Ada.Unchecked_Conversion (Long_Float, U64);
    function To_U64 is new Ada.Unchecked_Conversion (I64, U64);
 
    --  ---- opcodes this slice implements ----------------------------------
@@ -90,6 +94,22 @@ package body OBC_VM is
    Op_Load_Const  : constant := 16#14#;
    Op_Load_L      : constant := 16#10#;
    Op_Store_L     : constant := 16#11#;
+   Op_Load_Const_R : constant := 16#2D#;
+   Op_Radd       : constant := 16#80#;
+   Op_Rsub       : constant := 16#81#;
+   Op_Rmul       : constant := 16#82#;
+   Op_Rdiv       : constant := 16#83#;
+   Op_Rneg       : constant := 16#84#;
+   Op_Rabs       : constant := 16#85#;
+   Op_Req        : constant := 16#86#;
+   Op_Rne        : constant := 16#87#;
+   Op_Rlt        : constant := 16#88#;
+   Op_Rle        : constant := 16#89#;
+   Op_Rgt        : constant := 16#8A#;
+   Op_Rge        : constant := 16#8B#;
+   Op_I2R        : constant := 16#8C#;
+   Op_R2I_Round  : constant := 16#8D#;
+   Op_R2I_Trunc  : constant := 16#8E#;
    Op_Set_Union   : constant := 16#3D#;
    Op_Set_Intersect : constant := 16#3E#;
    Op_Set_Diff    : constant := 16#3F#;
@@ -519,6 +539,26 @@ package body OBC_VM is
                end if;
                Depth := 0;
                PC := PC + 1;
+            --  REAL and LONGREAL share the 8-byte slot, so these move words
+            --  and the depth is all the verifier tracks.
+            when Op_Load_Const_R =>
+               if not Fits (PC + 1, 4) then
+                  return Bad_Code;
+               end if;
+               Depth := Depth + 1;
+               PC := PC + 5;
+            when Op_Radd | Op_Rsub | Op_Rmul | Op_Rdiv
+               | Op_Req | Op_Rne | Op_Rlt | Op_Rle | Op_Rgt | Op_Rge =>
+               if Depth < 2 then
+                  return Bad_Stack;
+               end if;
+               Depth := Depth - 1;
+               PC := PC + 1;
+            when Op_Rneg | Op_Rabs | Op_I2R | Op_R2I_Round | Op_R2I_Trunc =>
+               if Depth < 1 then
+                  return Bad_Stack;
+               end if;
+               PC := PC + 1;
             --  The verifier models the operand stack as Depth, not SP: it
             --  does not keep values, only their count.
             when Op_Set_Union | Op_Set_Intersect | Op_Set_Diff
@@ -894,6 +934,83 @@ package body OBC_VM is
                Cur_Frame := Cur_Frame - 1;
                PC := Return_PC (Cur_Frame);
 
+            when Op_Load_Const_R =>
+               if PC + 4 >= Code'Length then
+                  return Bad_Code;
+               end if;
+               --  Mirrors LOAD_CONST: the pool word is the real's 8-byte
+               --  pattern, and the index is checked where that one's is.
+               Push (LE64 (Consts, Natural (LE32 (Code, PC + 1)) * Const_Slot));
+               PC := PC + 5;
+            when Op_Radd | Op_Rsub | Op_Rmul | Op_Rdiv =>
+               if SP < 2 then
+                  return Bad_Stack;
+               end if;
+               declare
+                  B : constant Long_Float := To_R64 (Pop);
+                  A : constant Long_Float := To_R64 (Pop);
+               begin
+                  Push (R64_To_U64 (case Op is
+                                       when Op_Radd => A + B,
+                                       when Op_Rsub => A - B,
+                                       when Op_Rmul => A * B,
+                                       when others  => A / B));
+               end;
+               PC := PC + 1;
+            when Op_Rneg | Op_Rabs =>
+               if SP < 1 then
+                  return Bad_Stack;
+               end if;
+               declare
+                  A : constant Long_Float := To_R64 (Pop);
+               begin
+                  Push (R64_To_U64 (if Op = Op_Rneg then -A else abs A));
+               end;
+               PC := PC + 1;
+            when Op_Req | Op_Rne | Op_Rlt | Op_Rle | Op_Rgt | Op_Rge =>
+               if SP < 2 then
+                  return Bad_Stack;
+               end if;
+               declare
+                  B  : constant Long_Float := To_R64 (Pop);
+                  A  : constant Long_Float := To_R64 (Pop);
+                  R  : constant Boolean :=
+                    (case Op is
+                        when Op_Req => A = B,
+                        when Op_Rne => A /= B,
+                        when Op_Rlt => A < B,
+                        when Op_Rle => A <= B,
+                        when Op_Rgt => A > B,
+                        when others => A >= B);
+               begin
+                  Push ((if R then U64 (1) else 0));
+               end;
+               PC := PC + 1;
+            when Op_I2R =>
+               if SP < 1 then
+                  return Bad_Stack;
+               end if;
+               Push (R64_To_U64 (Long_Float (To_I64 (Pop))));
+               PC := PC + 1;
+            when Op_R2I_Round | Op_R2I_Trunc =>
+               if SP < 1 then
+                  return Bad_Stack;
+               end if;
+               declare
+                  A : constant Long_Float := To_R64 (Pop);
+                  V : Long_Float := A;
+               begin
+                  --  round to nearest, or truncate toward zero
+                  if Op = Op_R2I_Round and then A >= 0.0 then
+                     V := Long_Float (I64 (A + 0.5));
+                  elsif Op = Op_R2I_Round then
+                     V := Long_Float (I64 (A - 0.5));
+                  else
+                     V := Long_Float (I64 (A));
+                  end if;
+                  Push (To_U64 (I64 (V)));
+               end;
+               PC := PC + 1;
             when Op_Set_Union | Op_Set_Intersect | Op_Set_Diff
                | Op_Set_Symdiff =>
                if SP < 2 then

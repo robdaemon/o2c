@@ -5,7 +5,7 @@
 --  program needs - and raise rather than silently overflow.  They become
 --  growable (or per-procedure) when procedures land.
 with Ada.Strings.Unbounded;  use Ada.Strings.Unbounded;
-with Interfaces;
+with Ada.Unchecked_Conversion;
 
 package body O2c_BC is
 
@@ -210,6 +210,17 @@ package body O2c_BC is
       N_Words := N_Words + 1;
    end Add_Word;
 
+   function Real_Bits is new Ada.Unchecked_Conversion (Long_Float, U64);
+
+   procedure Push_Real (Value : Long_Float) is
+   begin
+      Add_Word (Real_Bits (Value));
+      Put_Byte (16#2D#);          --  LOAD_CONST_R
+      Put_U32 (U32 (N_Words - 1));
+      N_Insns := N_Insns + 1;
+      Pushed;
+   end Push_Real;
+
    procedure Push_Word (Value : Interfaces.Unsigned_64) is
    begin
       Add_Word (U64 (Value));
@@ -327,7 +338,23 @@ package body O2c_BC is
         when Set_Eq        => 16#41#,
         when Set_Ne        => 16#42#,
         when Set_In        => 16#43#,
-        when Set_Single    => 16#44#);
+        when Set_Single    => 16#44#,
+        --  docs/obc-image.md: REAL/LONGREAL at 0x80-0x8F.
+        when Radd       => 16#80#,
+        when Rsub       => 16#81#,
+        when Rmul       => 16#82#,
+        when Rdiv       => 16#83#,
+        when Rneg       => 16#84#,
+        when Rabs       => 16#85#,
+        when Req        => 16#86#,
+        when Rne        => 16#87#,
+        when Rlt        => 16#88#,
+        when Rle        => 16#89#,
+        when Rgt        => 16#8A#,
+        when Rge        => 16#8B#,
+        when I2R        => 16#8C#,
+        when R2I_Round  => 16#8D#,
+        when R2I_Trunc  => 16#8E#);
 
    procedure Bin (O : Op) is
    begin

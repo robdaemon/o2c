@@ -33,7 +33,9 @@ package O2c_BC is
       Load_L, Store_L, Call, Ret, Ret_Void,
       For_Enter_I, For_Next_I,
       Set_Union, Set_Intersect, Set_Diff, Set_Symdiff,
-      Set_Eq, Set_Ne, Set_In, Set_Single);
+      Set_Eq, Set_Ne, Set_In, Set_Single,
+      Radd, Rsub, Rmul, Rdiv, Rneg, Rabs,
+      Req, Rne, Rlt, Rle, Rgt, Rge, I2R, R2I_Round, R2I_Trunc);
 
    --  ---- mode ------------------------------------------------------------
    --  True while the front end should feed this package.  Only the hook
@@ -61,6 +63,9 @@ package O2c_BC is
    --  A 64-bit constant.  SET masks are 64 bits and an element index may be
    --  above 31, so Push_Int is not enough.
    procedure Push_Word (Value : Interfaces.Unsigned_64);
+   --  A REAL literal: its 8-byte pattern goes in the pool and is loaded with
+   --  LOAD_CONST_R (0x2D), not LOAD_CONST.
+   procedure Push_Real (Value : Long_Float);
    procedure Push_Char (Value : Integer);
    procedure Push_Bool (Value : Boolean);
    --  A string constant: its pool word holds the string's offset inside

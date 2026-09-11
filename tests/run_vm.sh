@@ -175,6 +175,20 @@ else
    bad "set.asm did not run: $(cat "$WORK/set.err" 2>/dev/null)"
 fi
 
+#  ---- positive: hand-assembled REAL arithmetic ---------------------------
+#  Exercises 0x80-0x8B and LOAD_CONST_R independently of the emitter:
+#  1.5 + 2.5 == 4.0, printing 1.
+if python3 "$ASM" "$ROOT/tests/vm/real.asm" "$WORK/real.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/real.obc" >"$WORK/real.out" 2>"$WORK/real.err"; then
+   if diff -u "$ROOT/tests/vm/real.out" "$WORK/real.out"; then
+      note "positive: real.asm (REAL arithmetic) matches the golden output"
+   else
+      bad "real.asm output differs from tests/vm/real.out"
+   fi
+else
+   bad "real.asm did not run: $(cat "$WORK/real.err" 2>/dev/null)"
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_vm: FAIL ($fails)" >&2
    exit 1
