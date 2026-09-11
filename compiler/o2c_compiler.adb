@@ -6784,6 +6784,16 @@ package body O2c_Compiler is
                            O2c_BC.Native_Call (0, 2);
                         elsif Member = "String" then
                            O2c_BC.Native_Call (1, 1);
+                        elsif Member = "Real" or else Member = "LongReal"
+                        then
+                           --  REAL and LONGREAL share a slot and the printing
+                           --  native; only the Ada formatting differs.  The
+                           --  optional width is accepted and unused, as it is
+                           --  in O2c_Put_Real.
+                           if not Had_Width then
+                              O2c_BC.Push_Int (0);
+                           end if;
+                           O2c_BC.Native_Call (3, 2);
                         else
                            raise O2c_BC.Wrong_Construct with
                              "bytecode backend: Out." & Member

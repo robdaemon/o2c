@@ -10,7 +10,6 @@ begin
   b := (x = 3.0);
   if b then Out.Int(42, 0) else Out.Int(1, 0) end;
   Out.Ln;
-  b := (x > 1.0);
-  if b then Out.Int(42, 0) else Out.Int(2, 0) end;
+  Out.Real(x, 0);
   Out.Ln
 end Rea.

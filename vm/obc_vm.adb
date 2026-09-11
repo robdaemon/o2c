@@ -50,7 +50,7 @@ package body OBC_VM is
    Max_Frames     : constant := 64;
    Max_VM_Locals  : constant := 1024;
    Max_Globals : constant := 4096;
-   Max_Natives : constant := 3;
+   Max_Natives : constant := 4;
 
    Const_Slot : constant := 8;      --  pool words are 8 bytes
    Proc_Rec   : constant := 24;     --  bytes per procedure table record
@@ -150,7 +150,7 @@ package body OBC_VM is
    --  live in the image, which is why the GC can treat image data as
    --  static roots later).
    Native_Pops : constant array (0 .. Max_Natives - 1) of Natural :=
-     (2, 1, 0);
+     (2, 1, 0, 2);
 
    --  Sizing note (project rule on fixed tables): how many procedures the
    --  loader will accept from an image.  Exceeding it is a rejected image,
@@ -646,6 +646,29 @@ package body OBC_VM is
          when 1 =>
             Put_Str (Natural (Arg1));
             return Ok;
+         when 3 =>
+            --  Out.Real: the integer part, a dot, then three zero-padded
+            --  digits - mirroring O2c_Put_Real in the Ada backend so the
+            --  two print the same thing.
+            declare
+               V   : constant Long_Float := To_R64 (Arg1);
+               IP  : constant I64 := (if V < 0.0
+                                      then I64 (V - 0.5) + 1
+                                      else I64 (V - 0.5));
+               FR  : I64 := I64 (abs (V - Long_Float (IP)) * 1000.0);
+               Ip2 : I64 := IP;
+            begin
+               if FR > 999 then
+                  Ip2 := Ip2 + 1;
+                  FR := 0;
+               end if;
+               Put_Int (Ip2, 0);
+               Put ('.');
+               Put (Character'Val (48 + Integer (FR / 100)));
+               Put (Character'Val (48 + Integer ((FR / 10) mod 10)));
+               Put (Character'Val (48 + Integer (FR mod 10)));
+               return Ok;
+            end;
          when 2 =>
             New_Line;
             return Ok;
