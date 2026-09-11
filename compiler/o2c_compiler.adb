@@ -7231,6 +7231,13 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
 
       if Cur.Kind = Lex.Tok_Begin then
          Next;
+         --  The module body is the last procedure in the image, so it is
+         --  opened here: after every declared procedure has been emitted and
+         --  closed, which is exactly what the CODE procedure table assumes
+         --  (and what the header's entry points at).
+         if O2c_BC.Bytecode_Mode then
+            O2c_BC.Begin_Body;
+         end if;
          Statement_Seq;
       end if;
 
