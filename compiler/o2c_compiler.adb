@@ -4940,6 +4940,8 @@ package body O2c_Compiler is
       Next;
    end Parse_With;
 
+   Bc_For_N : Natural := 0;   --  numbered so nested FOR slots cannot collide
+
    procedure Parse_For is
       V_Name : String (1 .. 64);
       V_Len  : Natural;
@@ -4947,6 +4949,15 @@ package body O2c_Compiler is
       Lo, Hi : Expr_Rec;
       By_Text : Unbounded_String;
       Asc    : Boolean;
+      --  Bytecode: the loop variable is a frame slot (the opcodes address
+      --  frames, not globals), followed by two synthesized slots for the
+      --  limit and the direction.  Nested loops get their own, so the names
+      --  carry a counter; they cannot collide with Oberon identifiers
+      --  because they start with '#'.
+      Had_By : Boolean := False;
+      Bc_Slot  : Natural := 0;
+      Bc_Top   : Natural := 0;
+      Bc_Else  : Natural := 0;
    begin
       Next;                          --  FOR
       V_Len := Cur.Len;
@@ -4971,6 +4982,7 @@ package body O2c_Compiler is
       if Hi.Typ /= T_Int then
          raise O2c_Error with "FOR bounds must be INTEGER";
       end if;
+      Had_By := Cur.Kind = Lex.Tok_By;
       By_Text := To_Unbounded_String ("1");
       if Cur.Kind = Lex.Tok_By then
          Next;
@@ -4998,6 +5010,32 @@ package body O2c_Compiler is
       Expect (Lex.Tok_Do, "'DO'");
       Next;
       Asc := To_String (By_Text) (1) /= '-';
+      if O2c_BC.Bytecode_Mode then
+         Bc_Slot := O2c_BC.Local (Ada_Id (V_Name (1 .. V_Len)));
+         declare
+            Unused  : constant Natural :=
+              O2c_BC.Local ("#for-limit-" & Natural'Image (Bc_For_N));
+            Unused2 : constant Natural :=
+              O2c_BC.Local ("#for-dir-" & Natural'Image (Bc_For_N));
+            pragma Unreferenced (Unused);
+            pragma Unreferenced (Unused2);
+         begin
+            null;
+         end;
+         Bc_For_N := Bc_For_N + 1;
+         Bc_Top := New_Bc_Label;
+         Bc_Else := New_Bc_Label;
+         --  BY's expression pushed a value on the operand stack; the step
+         --  comes from its text (the front end has checked it is an integer
+         --  constant), so the pushed value goes.
+         if Had_By then
+            O2c_BC.Discard;
+         end if;
+         --  from and to are on the stack, to on top
+         O2c_BC.For_Enter (Bc_Slot, Integer'Value (To_String (By_Text)),
+                           Bc_Else);
+         O2c_BC.Mark (Bc_Top);
+      end if;
       Append_Body ("      " & V_Name (1 .. V_Len) & " := "
                    & To_String (Lo.Text) & ";");
       Append_Body ("      while " & V_Name (1 .. V_Len) & " "
@@ -5018,6 +5056,17 @@ package body O2c_Compiler is
       Append_Body ("      " & V_Name (1 .. V_Len) & " := "
                    & V_Name (1 .. V_Len) & " + " & To_String (By_Text) & ";");
       Append_Body ("      end loop;");
+      if O2c_BC.Bytecode_Mode then
+         O2c_BC.For_Next (Bc_Slot, Integer'Value (To_String (By_Text)),
+                          Bc_Slot + 1, Bc_Top);
+         O2c_BC.Mark (Bc_Else);
+         --  The loop variable lived in a frame slot; a module variable has
+         --  to carry the final value back to its global.
+         if not In_Proc then
+            O2c_BC.Load_Local (Bc_Slot);
+            O2c_BC.Store (O2c_BC.Global (Ada_Id (V_Name (1 .. V_Len))));
+         end if;
+      end if;
    end Parse_For;
 
    procedure Parse_Case is
