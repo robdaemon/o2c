@@ -4841,8 +4841,21 @@ package body O2c_Compiler is
             UT => PUT (I), Open => POpen (I));
       end loop;
          if O2c_BC.Bytecode_Mode and then not O2c_BC.Proc_Open then
-         Syms (N_Sym).Bc_Proc :=
-           O2c_BC.Begin_Proc (N_Par, (if Is_Function then 1 else 0));
+            declare
+               --  Each open-array formal contributes two values at a call -
+               --  the array's address and its length - so the count the
+               --  emitter balances against is slots, not parameters.
+               N_Open : Natural := 0;
+            begin
+               for I in 1 .. N_Par loop
+                  if POpen (I) then
+                     N_Open := N_Open + 1;
+                  end if;
+               end loop;
+               Syms (N_Sym).Bc_Proc :=
+                 O2c_BC.Begin_Proc (N_Par + N_Open,
+                                    (if Is_Function then 1 else 0));
+            end;
          end if;
 
       if Recv_UT /= 0 then
@@ -5066,6 +5079,20 @@ package body O2c_Compiler is
             begin
                null;
             end;
+            if POpen (I) then
+               --  An open array's length is unknown to the callee, so it
+               --  travels with the array as a second slot, immediately
+               --  after the address.  Every later parameter therefore sits
+               --  one slot higher, which is the whole reason the convention
+               --  has to be spelled out rather than assumed.
+               declare
+                  Slot : constant Natural :=
+                    O2c_BC.Local ("#alen-" & Ada_Id (To_String (PName (I))));
+                  pragma Unreferenced (Slot);
+               begin
+                  null;
+               end;
+            end if;
          end loop;
       end if;
       --  local declarations (M10): optional CONST/TYPE/VAR sections
