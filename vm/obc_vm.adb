@@ -150,6 +150,8 @@ package body OBC_VM is
    --  unchanged; only the declaration and the growth differ.
    type U64_Array is array (Natural range <>) of U64;
    type U64_Array_Access is access U64_Array;
+   type Natural_Array is array (Natural range <>) of Natural;
+   type Natural_Array_Access is access Natural_Array;
    Heap       : array (0 .. Heap_Words - 1) of aliased U64;
    --  One bit per arena slot, marking what a collection reached.  Packed
    --  rather than one Boolean per slot: the arena is large next to the guest
@@ -961,7 +963,7 @@ package body OBC_VM is
       --  parameter slots are the lowest slots of its frame.
       Locals      : constant U64_Array_Access := new U64_Array (0 .. Max_VM_Locals - 1);
       Frame_Base  : array (0 .. Max_Frames - 1) of Natural := (others => 0);
-      Frame_Slots : array (0 .. Max_Frames - 1) of Natural := (others => 0);
+      Frame_Slots : constant Natural_Array_Access := new Natural_Array (0 .. Max_Frames - 1);
       Return_PC   : array (0 .. Max_Frames - 1) of Natural := (others => 0);
       Cur_Frame   : Natural := 0;
       Locals_Used : Natural := 0;
