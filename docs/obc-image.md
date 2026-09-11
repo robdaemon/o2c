@@ -295,7 +295,10 @@ guard failure, 3 = division by zero, 4 = `CASE` with no matching label
 | 0xA8–0xBF | reserved | | | short `i8`/`i16` jumps for the optimizing tier |
 
 `FOR_ENTER_*`/`FOR_NEXT_*` allocate **two hidden frame slots** (limit and
-direction) that the emitter accounts for in `frame_slots` — this is what makes
+direction), **at the loop variable's slot + 1 (limit) and + 2 (direction)**:
+the variable slot is the only one the opcode names, so the placement has to be
+a convention, and this is it - a FOR inside a procedure therefore grows
+`frame_slots` by three that the emitter accounts for in `frame_slots` — this is what makes
 the Oberon-2 rule ("the step direction is decided by the initial comparison")
 exact, and it keeps the loop limit out of the operand stack so nested loops and
 procedure calls inside the body cannot disturb it.

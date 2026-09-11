@@ -306,7 +306,10 @@ package body O2c_BC is
         when Store_L     => 16#11#,
         when Call        => 16#C0#,
         when Ret         => 16#C1#,
-        when Ret_Void    => 16#C2#);
+        when Ret_Void    => 16#C2#,
+        --  docs/obc-image.md: FOR_ENTER_* / FOR_NEXT_* at 0xA4/0xA5.
+        when For_Enter_I => 16#A4#,
+        when For_Next_I  => 16#A5#);
 
    procedure Bin (O : Op) is
    begin
@@ -466,6 +469,45 @@ package body O2c_BC is
       N_Insns := N_Insns + 1;
    end Return_Value;
 
+   --  A label operand inside a FOR opcode is a fixup like any jump target,
+   --  patched at Encode: Jump() would emit a separate JMP instruction, which
+   --  is not what these opcodes carry.
+   procedure For_Fixup (Label_Id : Natural) is
+   begin
+      if Label_Id = 0 or else Label_Id > Max_Labels then
+         raise Wrong_Construct with "bytecode backend: bad label id";
+      end if;
+      if N_Fixups = Max_Fixups then
+         raise Wrong_Construct with "bytecode backend: too many fixups";
+      end if;
+      N_Fixups := N_Fixups + 1;
+      Fixups (N_Fixups) := (Pos => Length (Code), Label => Label_Id,
+                            Proc => 0);
+      Put_U32 (0);
+   end For_Fixup;
+
+   procedure For_Enter (Slot : Natural; Step : Integer;
+                        Else_Label : Natural) is
+   begin
+      Put_Byte (16#A4#);
+      Put_U16 (U16 (Slot));
+      Put_U32 (U32 (Step) and 16#FFFF_FFFF#);
+      For_Fixup (Else_Label);
+      N_Insns := N_Insns + 1;
+      Popped (2);                 --  from and to are consumed
+   end For_Enter;
+
+   procedure For_Next (Slot : Natural; Step : Integer; Limit_Slot : Natural;
+                       Body_Label : Natural) is
+   begin
+      Put_Byte (16#A5#);
+      Put_U16 (U16 (Slot));
+      Put_U32 (U32 (Step) and 16#FFFF_FFFF#);
+      Put_U16 (U16 (Limit_Slot));
+      For_Fixup (Body_Label);
+      N_Insns := N_Insns + 1;
+   end For_Next;
+
    procedure Return_Void is
    begin
       Put_Byte (16#C2#);          --  RET_VOID
@@ -563,6 +605,10 @@ package body O2c_BC is
          --  for real procedures, would have recorded it).
          Procs (Body_Proc).Buf_Off := 0;
       end if;
+      --  The body may hold frame slots too (a FOR loop's variable and its
+      --  hidden slots), and the VM bounds-checks frame accesses against
+      --  this figure.
+      Procs (Body_Proc).Frame_Slots := Next_Frame;
 
       --  string layout: each string follows the previous one
       for I in 1 .. N_Strings loop

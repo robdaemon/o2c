@@ -28,7 +28,8 @@ package O2c_BC is
       --  Procedures and frames (M53 widening).  Appended, not inserted:
       --  the enum's order is fixed by the same append-only rule that fixes
       --  the byte numbers, and the byte numbers below are the spec's.
-      Load_L, Store_L, Call, Ret, Ret_Void);
+      Load_L, Store_L, Call, Ret, Ret_Void,
+      For_Enter_I, For_Next_I);
 
    --  ---- mode ------------------------------------------------------------
    --  True while the front end should feed this package.  Only the hook
@@ -105,6 +106,14 @@ package O2c_BC is
    procedure Call_Proc (Proc_Id : Natural);
    procedure Return_Value;
    procedure Return_Void;
+
+   --  FOR loops.  The variable's slot is followed by two hidden frame slots,
+   --  limit then direction - the convention the VM reads, and why a FOR
+   --  inside a procedure grows frame_slots by three.  from and to are on
+   --  the operand stack when FOR_ENTER runs, to on top.
+   procedure For_Enter (Slot : Natural; Step : Integer; Else_Label : Natural);
+   procedure For_Next (Slot : Natural; Step : Integer; Limit_Slot : Natural;
+                       Body_Label : Natural);
 
    --  Byte offset of the next instruction in the code buffer: a procedure
    --  captures this when its code starts.
