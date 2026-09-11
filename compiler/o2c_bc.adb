@@ -24,6 +24,7 @@ package body O2c_BC is
 
    --  ---- state -----------------------------------------------------------
    Code     : Unbounded_String;         --  code-relative bytes
+   Types_Buf : Unbounded_String;        --  TYPES descriptors, back to back
    Words    : Unbounded_String;         --  CONST pool words (8 bytes each)
    N_Words  : Natural := 0;
    N_Insns  : Natural := 0;
@@ -139,6 +140,7 @@ package body O2c_BC is
    procedure Reset is
    begin
       Code := Null_Unbounded_String;
+      Types_Buf := Null_Unbounded_String;
       Words := Null_Unbounded_String;
       N_Words := 0;
       N_Insns := 0;
@@ -395,6 +397,29 @@ package body O2c_BC is
         when I2R        => 16#8C#,
         when R2I_Round  => 16#8D#,
         when R2I_Trunc  => 16#8E#);
+
+   function Desc_Rec (Size : Natural) return Natural is
+      Off : constant Natural := Length (Types_Buf);
+   begin
+      --  kind 3 (RECORD), flags 0 (no pointer fields), size, name_ref 0,
+      --  an empty field list (a zero name_ref terminates it), base 0,
+      --  methods 0.
+      Types_Buf := Types_Buf & Character'Val (3) & Character'Val (0);
+      Types_Buf := Types_Buf & Character'Val (Size mod 256)
+        & Character'Val ((Size / 256) mod 256);
+      for K in 1 .. 12 loop
+         Types_Buf := Types_Buf & Character'Val (0);
+      end loop;
+      return Off;
+   end Desc_Rec;
+
+   procedure Alloc_New (Desc_Ref : Natural) is
+   begin
+      Put_Byte (16#2A#);          --  ALLOC_NEW
+      Put_U32 (U32 (Desc_Ref));
+      N_Insns := N_Insns + 1;
+      Pushed;
+   end Alloc_New;
 
    procedure Push_Nil is
    begin
@@ -828,12 +853,19 @@ package body O2c_BC is
             Cst_Sec  : constant String := Padded (Const_Pay);
             Data_Sec : constant String :=
               (1 .. N_Globals * 8 => Character'Val (0));
-            N_Sec    : constant := 3;
-            Base     : constant Natural := 64 + 24 * N_Sec;
+            --  A fourth section only when there are descriptors to carry,
+            --  so an image that allocates nothing keeps the old layout and
+            --  the section table size it had.
+            Base     : constant Natural :=
+              64 + 24 * (if Length (Types_Buf) > 0 then 4 else 3);
             Off_Code : constant Natural := Base;
             Off_Cst  : constant Natural := Off_Code + Code_Sec'Length;
             Off_Data : constant Natural := Off_Cst + Cst_Sec'Length;
-            Total    : constant Natural := Off_Data + Data_Sec'Length;
+            Typ_Sec  : constant String :=
+              (if Length (Types_Buf) > 0 then Padded (Types_Buf) else "");
+            Off_Typ  : constant Natural := Off_Data + Data_Sec'Length;
+            Total    : constant Natural :=
+              Off_Typ + Typ_Sec'Length;
             Header   : String (1 .. 64);
          begin
             Header (1 .. 4) := "O2CB";
@@ -842,7 +874,8 @@ package body O2c_BC is
             Header (9 .. 10) := (Character'Val (8), Character'Val (0));
             Header (11 .. 12) := (Character'Val (1), Character'Val (0));
             Header (13 .. 14) :=
-              (Character'Val (N_Sec), Character'Val (0));
+              (Character'Val ((if Length (Types_Buf) > 0 then 4 else 3)),
+                Character'Val (0));
             Header (15 .. 16) := (Character'Val (0), Character'Val (0));
             declare
                procedure W64 (Pos : Natural; V : Natural) is
@@ -894,8 +927,11 @@ package body O2c_BC is
                Sect (6, Off_Code, Code_Sec'Length);
                Sect (4, Off_Cst, Cst_Sec'Length);
                Sect (5, Off_Data, Data_Sec'Length);
+               if Typ_Sec'Length > 0 then
+                  Sect (3, Off_Typ, Typ_Sec'Length);
+               end if;
                return Header & To_String (Table) & Code_Sec & Cst_Sec
-                 & Data_Sec;
+                 & Data_Sec & Typ_Sec;
             end;
          end;
       end;

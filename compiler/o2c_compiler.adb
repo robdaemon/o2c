@@ -1457,10 +1457,16 @@ package body O2c_Compiler is
                      --  whole record variable for now: a chain of records
                      --  would need the offsets composed, and an extension's
                      --  layout is shared with its parent.
-                     if D.Sc /= T_Int or else UT /= Base_UT then
+                     if D.Sc /= T_Int
+                       or else not (UT = Base_UT
+                                    or else (UTypes (Base_UT).Is_Ptr
+                                             and then UT =
+                                               UTypes (Base_UT).Ptr_Tgt))
+                     then
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
                           & "only INTEGER fields reached directly from a "
-                          & "record variable are supported";
+                          & "record variable or a pointer to one are "
+                          & "supported";
                      end if;
                      D.Off := (F - 1) * 8;
                      D.K := D_Field;
@@ -5977,10 +5983,30 @@ package body O2c_Compiler is
                         raise O2c_Error with "cannot NEW an opaque POINTER "
                           & "here (M26)";
                      end if;
-                     Append_Body ("      " & To_String (D.Text) & " := new "
-                                  & Ada_Last (To_String
-                                    (UTypes (UTypes (D.UT).Ptr_Tgt).Name))
-                                  & ";");
+                     if O2c_BC.Bytecode_Mode then
+                        --  The target record is N_F scalar slots, so the
+                        --  descriptor's size is N_F * 8.  A designator
+                        --  argument would intern a global named after the
+                        --  Ada text, so it is refused.
+                        if (for some Ch of NNm =>
+                              Ch not in 'A' .. 'Z' | 'a' .. 'z'
+                                        | '0' .. '9' | '_')
+                        then
+                           raise O2c_BC.Wrong_Construct with "bytecode "
+                             & "backend: NEW of a pointer designator is not "
+                             & "yet supported";
+                        end if;
+                        O2c_BC.Alloc_New
+                          (O2c_BC.Desc_Rec
+                             (UTypes (UTypes (D.UT).Ptr_Tgt).N_F * 8));
+                        Bc_Store (NNm);
+                     else
+                        Append_Body ("      " & To_String (D.Text)
+                                     & " := new "
+                                     & Ada_Last (To_String
+                                       (UTypes (UTypes (D.UT).Ptr_Tgt).Name))
+                                     & ";");
+                     end if;
                   end;
                end;
             elsif Imported_Mod (Head (1 .. H_Len)) then
