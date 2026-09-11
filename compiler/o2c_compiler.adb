@@ -1,4 +1,5 @@
 with Ada.Strings.Unbounded;
+with Ada.Text_IO;
 with O2c_Lexer;
 with O2c_BC;
 with Interfaces;
@@ -244,6 +245,8 @@ package body O2c_Compiler is
    Recv_UT  : Natural := 0;      --  record type the method binds to
    Recv_Var : Boolean := False;  --  VAR receiver
    Recv_Nm  : Unbounded_String;  --  receiver variable name
+   Foreign_Sym : Unbounded_String;
+   Foreign_Id_Val : Natural := 0;
 
    --  active WITH guards (M13): variable name -> guard record type
    Max_Guards : constant := 32;
@@ -5126,6 +5129,27 @@ package body O2c_Compiler is
          end;
          Next;
          Is_Function := True;
+      end if;
+      --  EXTERN "symbol" is parsed here, at the end of the heading: this
+      --  procedure is not Oberon code but a binding to a C function.  The
+      --  symbol resolves now, so a name the VM does not know is a compile
+      --  error naming it rather than a call to whatever id sits nearby.
+      Foreign_Sym := Null_Unbounded_String;
+      Foreign_Id_Val := 0;
+      if Cur.Kind = Lex.Tok_Extern then
+         Next;
+         if Cur.Kind /= Lex.Tok_String then
+            raise O2c_Error with "a string literal expected after EXTERN "
+              & "(line " & Natural'Image (Cur.Line) & ")";
+         end if;
+         Foreign_Sym := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
+         Foreign_Id_Val := O2c_BC.Foreign_Id (Cur.Text (1 .. Cur.Len));
+         if Foreign_Id_Val = 0 then
+            raise O2c_Error with "the VM has no foreign function named '"
+              & Cur.Text (1 .. Cur.Len) & "' (line "
+              & Natural'Image (Cur.Line) & ")";
+         end if;
+         Next;
       end if;
       Expect (Lex.Tok_Semi, "';' after the procedure header");
       Next;

@@ -196,6 +196,12 @@ package O2c_BC is
    --  construct emitted any code at all.
    function Insns return Natural;
 
+   --  The native id bound to a C symbol, or 0 when the VM does not know it.
+   --  The compiler asks the emitter rather than the VM directly: O2c_BC is
+   --  already its view of the bytecode world, and the VM dependency belongs
+   --  on this side of that line rather than as a second path to it.
+   function Foreign_Id (Sym : String) return Natural;
+
    --  Raised by Encode if a jump was never resolved, and by the front end
    --  when bytecode mode meets a construct this backend cannot express.
    Wrong_Construct : exception;

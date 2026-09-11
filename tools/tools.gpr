@@ -1,7 +1,12 @@
 --  Host-side o2c tools.  The bytecode front end builds here against the
 --  compiler core (../compiler) with no Aegir runtime at all.
 project Tools is
-   for Source_Dirs use (".", "../compiler");
+   --  ../vm is here because O2c_BC resolves foreign C symbols through
+   --  OBC_VM.Native_Id, so the emitter carries the VM dependency rather than
+   --  the compiler growing a second path to it.  compat-host supplies the
+   --  host body of VM_Platform, whose spec is shared - the same split
+   --  vm/vm.gpr uses.
+   for Source_Dirs use (".", "../compiler", "../vm", "../vm/compat-host");
    for Object_Dir use "obj";
    for Exec_Dir use "bin";
    for Main use ("o2c_bc_host.adb");

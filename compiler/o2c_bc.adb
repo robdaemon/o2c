@@ -6,6 +6,7 @@
 --  growable (or per-procedure) when procedures land.
 with Ada.Strings.Unbounded;  use Ada.Strings.Unbounded;
 with Ada.Unchecked_Conversion;
+with OBC_VM;
 
 package body O2c_BC is
 
@@ -1044,5 +1045,10 @@ package body O2c_BC is
          end;
       end;
    end Encode;
+
+   function Foreign_Id (Sym : String) return Natural is
+   begin
+      return OBC_VM.Native_Id (Sym);
+   end Foreign_Id;
 
 end O2c_BC;
