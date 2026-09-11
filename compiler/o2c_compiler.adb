@@ -1362,6 +1362,15 @@ package body O2c_Compiler is
       VK : VK_Kind;
       UT : Natural := Base_UT;
    begin
+      if O2c_BC.Bytecode_Mode and then UTypes (UT).Is_Ptr then
+         --  A pointer's value is what it designates, and a bare pointer is a
+         --  value in its own right (p = q, p := q), so push it once here.  A
+         --  field access then needs only its offset: the base is already on
+         --  the stack, and is the record's address rather than the pointer
+         --  variable's - which is why the scalar leaf below must not push an
+         --  address for a pointer base.
+         Bc_Load (Base_Name);
+      end if;
       D.Text := To_Unbounded_String (Base_Name);
       if UTypes (UT).Is_Ptr then
          VK := V_Ptr;
@@ -1455,9 +1464,11 @@ package body O2c_Compiler is
                      end if;
                      D.Off := (F - 1) * 8;
                      D.K := D_Field;
-                     O2c_BC.Load_Addr_G
-                       (O2c_BC.Global_Array (Base_Name,
-                                             UTypes (FO).N_F));
+                     if not UTypes (Base_UT).Is_Ptr then
+                        O2c_BC.Load_Addr_G
+                          (O2c_BC.Global_Array (Base_Name,
+                                                UTypes (FO).N_F));
+                     end if;
                   else
                      D.K := D_Scalar;
                   end if;
@@ -1577,6 +1588,9 @@ package body O2c_Compiler is
       if Cur.Kind = Lex.Tok_Nil then
          R.Typ := T_Nil;
          R.Text := To_Unbounded_String ("null");
+         if O2c_BC.Bytecode_Mode then
+            O2c_BC.Push_Nil;
+         end if;
          Next;
          return R;
       end if;
@@ -1891,7 +1905,20 @@ package body O2c_Compiler is
       else
          raise O2c_Error with "pointer type mismatch assigning " & LHS;
       end if;
-      if Conv then
+      if O2c_BC.Bytecode_Mode then
+         --  The value is already on the stack: the RHS was parsed by
+         --  Parse_Expr and NIL emits PUSH_NIL.  A pointer is one scalar slot,
+         --  so a whole variable is an ordinary store - but a designator like
+         --  p^.next would intern a global named after the Ada text, so it is
+         --  refused instead.
+         if (for some Ch of LHS =>
+               Ch not in 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_')
+         then
+            raise O2c_BC.Wrong_Construct with "bytecode backend: assigning "
+              & "through a pointer designator is not yet supported";
+         end if;
+         Bc_Store (LHS);
+      elsif Conv then
          Append_Body ("      " & LHS & " := "
                       & To_String (UTypes (LHS_UT).Name) & " ("
                       & To_String (R.Text) & ");");
@@ -1995,6 +2022,9 @@ package body O2c_Compiler is
          when Lex.Tok_Nil =>
             R.Text := To_Unbounded_String ("null");
             R.Typ := T_Nil;
+            if O2c_BC.Bytecode_Mode then
+               O2c_BC.Push_Nil;
+            end if;
             Next;
          when Lex.Tok_LBrace =>
             --  SET literal (M17/M34): { e1, e2, ... } with INTEGER or
@@ -2822,6 +2852,20 @@ package body O2c_Compiler is
                         Next;
                      end;
                      return R;
+                  end if;
+                  if O2c_BC.Bytecode_Mode
+                    and then UTypes (U).Is_Ptr
+                    and then Cur.Kind /= Lex.Tok_Dot
+                    and then Cur.Kind /= Lex.Tok_Caret
+                    and then Cur.Kind /= Lex.Tok_LBracket
+                  then
+                     --  A bare pointer used as a value: no selector follows,
+                     --  so no designator path will push its base.  Every
+                     --  user-typed variable enters this branch before the
+                     --  scalar one, which is why a pointer operand was
+                     --  silently absent from the stack - p = q compared two
+                     --  words that were never pushed.
+                     Bc_Load (Nm);
                   end if;
                   if Cur.Kind = Lex.Tok_Dot then
                      --  method function call r.M(...) / p.M(...) (M15):
@@ -3651,6 +3695,13 @@ package body O2c_Compiler is
                         R_P : constant Boolean := R.Typ = T_Ptr;
                         X_P : constant Boolean := X.Typ = T_Ptr;
                      begin
+                        --  No bytecode emission here: this block only types
+                        --  the comparison and returns a text rendering, and
+                        --  it does not return - the general comparison below
+                        --  emits the opcode.  Emitting here too produced two
+                        --  comparisons for one expression, so the second one
+                        --  compared the first one's result.
+
                         if R.Typ = T_Nil and then X.Typ = T_Nil then
                            raise O2c_Error with "comparing NIL with NIL is "
                              & "meaningless (line "
@@ -3732,16 +3783,23 @@ package body O2c_Compiler is
                   declare
                      Rl : constant Boolean :=
                        (R.Typ = T_Real or else R.Typ = T_LReal);
+                     Pl : constant Boolean :=
+                       ((R.Typ = T_Ptr or else R.Typ = T_Nil)
+                        and then (X.Typ = T_Ptr or else X.Typ = T_Nil))
+                       and then (R.Typ = T_Ptr or else X.Typ = T_Ptr)
+                       and then (Op = " = " or else Op = " /= ");
                   begin
                      if not ((R.Typ = T_Int and then X.Typ = T_Int)
                              or else (R.Typ = T_Char
                                       and then X.Typ = T_Char)
                              or else (Rl
                                       and then (X.Typ = T_Real
-                                                or else X.Typ = T_LReal)))
+                                                or else X.Typ = T_LReal))
+                             or else Pl)
                      then
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                          & "only INTEGER/CHAR/REAL comparisons are supported";
+                          & "only INTEGER/CHAR/REAL comparisons are supported, "
+                          & "and pointers compare only with NIL";
                      end if;
                      if Op = " = " then
                         O2c_BC.Bin ((if Rl then O2c_BC.Req else O2c_BC.Eq));
@@ -3911,6 +3969,7 @@ package body O2c_Compiler is
                   Ok_Arr : constant Boolean :=
                     UTypes (UT).Arr_Len > 0
                     and then UTypes (UT).Elem = T_Int;
+                  Ok_Ptr : constant Boolean := UTypes (UT).Is_Ptr;
                   Ok_Rec : constant Boolean :=
                     UTypes (UT).Is_Rec
                     and then not UTypes (UT).Is_Ptr
@@ -3921,11 +3980,11 @@ package body O2c_Compiler is
                                 UTypes (UT).F (J).UT = 0
                                 and then UTypes (UT).F (J).Typ = T_Int);
                begin
-                  if not (Ok_Arr or else Ok_Rec) then
+                  if not (Ok_Arr or else Ok_Rec or else Ok_Ptr) then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                       & "pointers, non-INTEGER arrays, record extensions "
-                       & "and records with non-INTEGER or user-typed fields "
-                       & "are not yet supported";
+                       & "non-INTEGER arrays, record extensions and records "
+                       & "with non-INTEGER or user-typed fields are not yet "
+                       & "supported";
                   end if;
                end;
             end if;
