@@ -325,6 +325,21 @@ else
    bad "guardbad.asm did not assemble"
 fi
 
+#  ---- positive: hand-assembled dynamic dispatch ----------------------------
+#  Exchanges the tag, the method table and the call frame: child extends base,
+#  overrides method 0 and inherits method 1, so dispatching 0 must reach the
+#  override and 1 the inherited implementation.
+if python3 "$ASM" "$ROOT/tests/vm/dispatch.asm" "$WORK/dispatch.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/dispatch.obc" >"$WORK/dispatch.out" 2>"$WORK/dispatch.err"; then
+   if diff -u "$ROOT/tests/vm/dispatch.out" "$WORK/dispatch.out"; then
+      note "positive: dispatch.asm (DISPATCH) matches the golden output"
+   else
+      bad "dispatch.asm output differs from tests/vm/dispatch.out"
+   fi
+else
+   bad "dispatch.asm did not run: $(cat "$WORK/dispatch.err" 2>/dev/null)"
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_vm: FAIL ($fails)" >&2
    exit 1

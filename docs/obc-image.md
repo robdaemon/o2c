@@ -103,11 +103,17 @@ its own address + 0.  `DESC_OF` reads it, and `TYPE_TEST`/`GUARD` walk the
 Objects allocated before this existed have no tag, so an image that allocates
 must be built by an emitter that writes one.
 
-A descriptor's first sixteen bytes are what everything reads: kind, flags,
-size, name_ref, the field-list terminator and `base`.  The emitter writes
-exactly those and the test assembler writes four more (a `methods` word),
-which nothing consults yet - two writers disagreeing on a length is worth
-reconciling when the method table lands.
+A descriptor's first twenty bytes are what everything reads: kind, flags,
+size, name_ref, the field-list terminator, `base` and `methods`.  `base` and
+`methods` are both references in the biased form.
+
+A method table is `n` u32 followed by `n` procedure ids, and `methods` is a
+reference to it.  A type's table is its parent's followed by its own, copied
+rather than walked, so a child inherits a base method's slot and an override
+keeps it: `DISPATCH` resolves by index into the dynamic type's table and needs
+no search.  Method ids are procedure ids, not code offsets, so the VM can
+reach a resolved method's arity and frame size from the same table `CALL`
+uses.
 
 **`flags` bit0 (`has_ptrs`) is load-bearing:** it tells the VM whether objects
 of this type may contain pointers.  It drives (a) which allocation call an
@@ -350,7 +356,7 @@ it as a root through the VM API (none currently needs to).
 |----|----------|----------|-------|-------|
 | 0xE0 | `GUARD` | u32 desc ref | `[ptr] -> [ptr]` | `WITH`/type guard; `TRAP` 2 on failure; `NIL` passes |
 | 0xE1 | `TYPE_TEST` | u32 desc ref | `[ptr] -> [bool]` | descriptor-chain walk |
-| 0xE2 | `DISPATCH` | u16 method idx | `[self,args...] -> [rets...]` | resolve through `self`'s descriptor method table |
+| 0xE2 | `DISPATCH` | u16 method idx, u8 arg count, u8 result count | `[self,args...] -> [rets...]` | resolve through `self`'s descriptor method table.  Both counts are needed and both are known statically - an override must repeat its base method's signature - because `self` sits *under* the arguments, so the arity is what locates it, and the result count is what the verifier tracks the depth with |
 | 0xE3 | `DESC_OF` | — | `[ptr] -> [desc_addr]` | for native bookkeeping / debugging |
 | 0xE4–0xEF | reserved | | | fused guard+branch, inline caches |
 

@@ -33,7 +33,8 @@ OPS = {
     "SET_SYMDIFF": (0x40, 0), "SET_EQ": (0x41, 0), "SET_NE": (0x42, 0),
     "SET_IN": (0x43, 0), "SET_SINGLE": (0x44, 0),
     "LOAD_ADDR_G": (0x16, 4), "LOAD_FLD_I": (0x23, 2), "LOAD_FLD_R": (0x24, 2), "STORE_FLD_R": (0x27, 2), "LOAD_FLD_P": (0x25, 2), "STORE_FLD_P": (0x28, 2), "LOAD_CONST_P": (0x2C, 4), "ALLOC_NEW": (0x2A, 4), "STORE_FLD_I": (0x26, 2), "LOAD_IDX_I": (0x1D, 0), "STORE_IDX_I": (0x20, 0),
-    "GUARD": (0xE0, 4), "TYPE_TEST": (0xE1, 4), "DESC_OF": (0xE3, 0),
+    "GUARD": (0xE0, 4), "TYPE_TEST": (0xE1, 4), "DISPATCH": (0xE2, 3),
+    "DESC_OF": (0xE3, 0),
     "LOAD_CONST_R": (0x2D, 4),
     "RADD": (0x80, 0), "RSUB": (0x81, 0), "RMUL": (0x82, 0), "RDIV": (0x83, 0),
     "RNEG": (0x84, 0), "RABS": (0x85, 0), "REQ": (0x86, 0), "RNE": (0x87, 0),
@@ -50,6 +51,9 @@ def assemble(text):
     #  Type descriptors for the TYPES section: a name to a byte offset,
     #  which is what an ALLOC_NEW operand names.
     desc_names = {}
+    table_names = {}      #  method table name -> its biased reference
+    meth_fixups = []      #  (offset in types, the table's procedure names)
+    proc_ids = {}         #  procedure name -> its 1-based id
     types = bytearray()
     globals_n, maxstack, entry = 0, 0, None
     #  PROC name slots nparams nresults: a procedure.  The module body is the
@@ -87,21 +91,43 @@ def assemble(text):
             labels[parts[1]] = table + len(code)
             procs.append((labels[parts[1]], int(parts[2]), int(parts[3]),
                           int(parts[4])))
+            proc_ids[parts[1]] = len(procs)   #  1-based, the order the
+                                              #  procedure table gives them
+            continue
+        if op == "METHODS":
+            #  METHODS table-name proc-name ...: a method table as `n` u32
+            #  followed by n procedure ids.  Its reference is recorded for a
+            #  DESC_REC to point at; the ids themselves are patched at the end
+            #  because the procedures they name may be declared later.
+            if len(parts) < 3:
+                raise SystemExit("obc_asm: METHODS wants a name and at least "
+                                 "one procedure")
+            names = parts[2:]
+            at = len(types)
+            types += struct.pack("<I", len(names))
+            types += b"\x00" * 4 * len(names)
+            table_names[parts[1]] = at + 1
+            meth_fixups.append((at + 4, names))
             continue
         if op == "DESC_REC":
             #  DESC_REC name size: a RECORD descriptor with no pointer
             #  fields.  kind 3 (RECORD), flags 0, size, name_ref 0, an empty
             #  field list (a zero name_ref terminates it), base 0, methods 0.
-            if len(parts) not in (3, 4):
-                raise SystemExit("obc_asm: DESC_REC wants name size [base]")
+            if len(parts) not in (3, 4, 5):
+                raise SystemExit("obc_asm: DESC_REC wants name size [base] "
+                                 "[methods]")
             #  A reference is the offset plus one, so 0 can mean none: the
-            #  first descriptor sits at offset 0.  `base` is stored raw and
-            #  biased back by whoever walks it.
-            base = desc_names[parts[3]] if len(parts) == 4 else 0
+            #  first descriptor sits at offset 0.  `base` and `methods` are
+            #  both stored in that form, and the walk reads `base` back at +12.
+            #  '-' is an absent base or method table: zero, which means none.
+            base = (desc_names[parts[3]]
+                    if len(parts) >= 4 and parts[3] != "-" else 0)
+            meth = (table_names[parts[4]]
+                    if len(parts) == 5 and parts[4] != "-" else 0)
             desc_names[parts[1]] = len(types) + 1
             types += struct.pack("<BBHI", 3, 0, int(parts[2]), 0)
             types += struct.pack("<I", 0)      # end of the field list
-            types += struct.pack("<II", base, 0)   # base, methods
+            types += struct.pack("<II", base, meth)   # base, methods
             continue
         if op == "POOL_R":
             #  a REAL literal: its IEEE pattern goes in the word pool
@@ -149,7 +175,8 @@ def assemble(text):
         code.append(opcode)
         args = parts[1:]
         if nbytes:
-            if len(args) != (2 if op == "CALL_NATIVE" else 1):
+            if len(args) != (2 if op == "CALL_NATIVE"
+                             else 3 if op == "DISPATCH" else 1):
                 raise SystemExit(f"obc_asm: {op} wants "
                                  f"{2 if op == 'CALL_NATIVE' else 1} operand(s)")
             vals = []
@@ -164,6 +191,8 @@ def assemble(text):
                     vals.append(a)          # a code label: fix up later
             if op == "CALL_NATIVE":
                 code += struct.pack("<HB", vals[0], vals[1])
+            elif op == "DISPATCH":
+                code += struct.pack("<HBB", vals[0], vals[1], vals[2])
             elif op in ("JMP", "JZ", "JNZ", "CALL") \
                     and isinstance(vals[0], str):
                 pending.append((len(code), vals[0]))
@@ -175,6 +204,13 @@ def assemble(text):
                     code += struct.pack("<B", vals[0] & 0xFF)
                 else:
                     code += struct.pack("<I", vals[0] & 0xFFFFFFFF)
+    #  patch the method tables now that every procedure is known
+    for at, names in meth_fixups:
+        for k, nm in enumerate(names):
+            if nm not in proc_ids:
+                raise SystemExit("obc_asm: METHODS names unknown procedure "
+                                 + nm)
+            types[at + 4 * k:at + 4 * k + 4] = struct.pack("<I", proc_ids[nm])
     # patch jumps now that all labels are known
     for at, name in pending:
         if name not in labels:

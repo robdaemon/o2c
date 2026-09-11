@@ -119,6 +119,7 @@ package body OBC_VM is
    Op_Guard        : constant := 16#E0#;
    Op_Type_Test    : constant := 16#E1#;
    Op_Desc_Of      : constant := 16#E3#;
+   Op_Dispatch     : constant := 16#E2#;
    Op_Alloc_New    : constant := 16#2A#;
    Op_Load_Fld_R   : constant := 16#24#;
    Op_Load_Fld_P   : constant := 16#25#;
@@ -642,6 +643,22 @@ package body OBC_VM is
                   return Bad_Code;
                end if;
                PC := PC + 5;
+            when Op_Dispatch =>
+               --  u16 method idx, u8 arg count, u8 result count.  The counts
+               --  are static, so the depth change is too.
+               if not Fits (PC + 1, 4) then
+                  return Bad_Code;
+               end if;
+               declare
+                  NArgs : constant Natural := Natural (Code (PC + 3));
+                  NRes  : constant Natural := Natural (Code (PC + 4));
+               begin
+                  if Depth < NArgs + 1 then
+                     return Bad_Stack;
+                  end if;
+                  Depth := Depth - NArgs - 1 + NRes;
+               end;
+               PC := PC + 5;
             when Op_Desc_Of =>
                PC := PC + 1;
             when Op_Alloc_New =>
@@ -1144,6 +1161,75 @@ package body OBC_VM is
                end;
                PC := PC + 1;
 
+            when Op_Dispatch =>
+               --  u16 method idx, u8 arg count, u8 result count.  self sits
+               --  under the arguments, so the arity is what locates it; the
+               --  frame is then set up exactly as CALL sets it up.
+               if PC + 4 >= Code'Length then
+                  return Bad_Code;
+               end if;
+               declare
+                  Idx   : constant Natural :=
+                    Natural (Code (PC + 1)) + Natural (Code (PC + 2)) * 256;
+                  NArgs : constant Natural := Natural (Code (PC + 3));
+                  Self  : U64;
+                  Tag   : Natural;
+                  Table : Natural;
+                  N_M   : Natural;
+                  Callee : Natural;
+               begin
+                  if SP < NArgs + 1 then
+                     return Bad_Stack;
+                  end if;
+                  Self := Stack (SP - 1 - NArgs);
+                  if Self = 0 then
+                     Note_At ("dispatch on NIL", PC);
+                     return Bad_Stack;
+                  end if;
+                  Tag := Tag_At (Self);
+                  if Tag = 0 or else Tag + 16 >= Img.Types_Len then
+                     Note_At ("dispatch on an object with no type tag", PC);
+                     return Bad_Code;
+                  end if;
+                  Table := Natural (LE32 (Img.Types.all, Tag - 1 + 16));
+                  if Table = 0 then
+                     Note_At ("dispatch on a type with no method table", PC);
+                     return Bad_Code;
+                  end if;
+                  N_M := Natural (LE32 (Img.Types.all, Table - 1));
+                  if Idx >= N_M then
+                     Note_At ("dispatch index past the method table", PC);
+                     return Bad_Code;
+                  end if;
+                  Callee := Natural
+                    (LE32 (Img.Types.all, Table - 1 + 4 + Idx * 4));
+                  if Callee = 0 or else Callee > Img.N_Procs then
+                     Note_At ("dispatch resolved to no procedure", PC);
+                     return Bad_Code;
+                  end if;
+                  if Cur_Frame + 1 >= Max_Frames then
+                     Note_At ("call depth exceeded", PC);
+                     return Bad_Stack;
+                  end if;
+                  declare
+                     Base : constant Natural := Locals_Used;
+                  begin
+                     if Base + Img.Procs (Callee).Frame_Slots > Max_VM_Locals
+                     then
+                        Note_At ("frame pool exhausted", PC);
+                        return Bad_Stack;
+                     end if;
+                     for K in reverse 0 .. Img.Procs (Callee).NParams - 1 loop
+                        Locals (Base + K) := Pop;
+                     end loop;
+                     Return_PC (Cur_Frame) := PC + 5;
+                     Cur_Frame := Cur_Frame + 1;
+                     Frame_Base (Cur_Frame) := Base;
+                     Frame_Slots (Cur_Frame) := Img.Procs (Callee).Frame_Slots;
+                     Locals_Used := Base + Img.Procs (Callee).Frame_Slots;
+                  end;
+                  PC := Img.Procs (Callee).Code_Off;
+               end;
             when Op_Type_Test =>
                declare
                   Obj : constant U64 := Pop;
