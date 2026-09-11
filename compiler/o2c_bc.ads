@@ -83,6 +83,11 @@ package O2c_BC is
    --  numbered from 0, so the frame slots are the parameter slots.
    function Local (Ada_Name : String) return Natural;
    function Local_Count return Natural;
+   --  Look up a frame local of the currently open procedure WITHOUT
+   --  interning one: -1 means "no such local", so a use site can fall back
+   --  to a module global instead of silently minting a fresh frame slot for
+   --  a name that was never declared as a local.
+   function Local_Slot (Ada_Name : String) return Integer;
 
    procedure Load_Local (Slot : Natural);
    procedure Store_Local (Slot : Natural);

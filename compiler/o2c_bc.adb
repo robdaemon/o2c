@@ -393,6 +393,21 @@ package body O2c_BC is
    function Local_Count return Natural is
      (Next_Frame);
 
+   function Local_Slot (Ada_Name : String) return Integer is
+   begin
+      if Cur_Proc = 0 then
+         return -1;
+      end if;
+      for I in 1 .. N_Locals loop
+         if Locals (I).Proc = Cur_Proc
+           and then To_String (Locals (I).Name) = Ada_Name
+         then
+            return Integer (Locals (I).Slot);
+         end if;
+      end loop;
+      return -1;
+   end Local_Slot;
+
    procedure Load_Local (Slot : Natural) is
    begin
       Put_Byte (16#10#);          --  LOAD_L
