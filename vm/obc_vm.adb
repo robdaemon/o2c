@@ -964,6 +964,7 @@ package body OBC_VM is
       function Top return U64 is
         (Stack (SP - 1));
 
+
       --  Frames.  Frame 0 is the module body; a CALL pushes the next frame
       --  at the current top of the locals pool, so slot i of the current
       --  frame lives at Locals (Frame_Base (Cur_Frame) + i), and the callee's
@@ -985,6 +986,33 @@ package body OBC_VM is
         new Natural_Array'(0 .. Max_Frames - 1 => 0);
       Cur_Frame   : Natural := 0;
       Locals_Used : Natural := 0;
+
+      --  Push the frame for Callee, so the body resumes at the instruction
+      --  after the call.  CALL and DISPATCH each built this themselves, which
+      --  meant every change to frames had to be made twice - and the two
+      --  copies had already drifted apart in what they reported.  False means
+      --  the call could not be set up, with the reason already noted.
+      function Push_Frame (Callee : Natural) return Boolean is
+         Base : constant Natural := Locals_Used;
+      begin
+         if Cur_Frame + 1 >= Max_Frames then
+            Note_At ("call depth exceeded", PC);
+            return False;
+         end if;
+         if Base + Img.Procs (Callee).Frame_Slots > Max_VM_Locals then
+            Note_At ("frame pool exhausted", PC);
+            return False;
+         end if;
+         for K in reverse 0 .. Img.Procs (Callee).NParams - 1 loop
+            Locals (Base + K) := Pop;
+         end loop;
+         Return_PC (Cur_Frame) := PC + 5;
+         Cur_Frame := Cur_Frame + 1;
+         Frame_Base (Cur_Frame) := Base;
+         Frame_Slots (Cur_Frame) := Img.Procs (Callee).Frame_Slots;
+         Locals_Used := Base + Img.Procs (Callee).Frame_Slots;
+         return True;
+      end Push_Frame;
 
       Op : Byte;
       --  The mark phase, nested inside Execute because that is what makes the
@@ -1324,27 +1352,9 @@ package body OBC_VM is
                   if SP < Img.Procs (Callee).NParams then
                      return Bad_Stack;
                   end if;
-                  if Cur_Frame + 1 >= Max_Frames then
-                     Note_At ("call depth exceeded", PC);
+                  if not Push_Frame (Callee) then
                      return Bad_Stack;
                   end if;
-                  declare
-                     Base : constant Natural := Locals_Used;
-                  begin
-                     if Base + Img.Procs (Callee).Frame_Slots > Max_VM_Locals
-                     then
-                        Note_At ("frame pool exhausted", PC);
-                        return Bad_Stack;
-                     end if;
-                     for K in reverse 0 .. Img.Procs (Callee).NParams - 1 loop
-                        Locals (Base + K) := Pop;
-                     end loop;
-                     Return_PC (Cur_Frame) := PC + 5;
-                     Cur_Frame := Cur_Frame + 1;
-                     Frame_Base (Cur_Frame) := Base;
-                     Frame_Slots (Cur_Frame) := Img.Procs (Callee).Frame_Slots;
-                     Locals_Used := Base + Img.Procs (Callee).Frame_Slots;
-                  end;
                   PC := Target;
                end;
 
@@ -1455,27 +1465,9 @@ package body OBC_VM is
                      Note_At ("dispatch resolved to no procedure", PC);
                      return Bad_Code;
                   end if;
-                  if Cur_Frame + 1 >= Max_Frames then
-                     Note_At ("call depth exceeded", PC);
+                  if not Push_Frame (Callee) then
                      return Bad_Stack;
                   end if;
-                  declare
-                     Base : constant Natural := Locals_Used;
-                  begin
-                     if Base + Img.Procs (Callee).Frame_Slots > Max_VM_Locals
-                     then
-                        Note_At ("frame pool exhausted", PC);
-                        return Bad_Stack;
-                     end if;
-                     for K in reverse 0 .. Img.Procs (Callee).NParams - 1 loop
-                        Locals (Base + K) := Pop;
-                     end loop;
-                     Return_PC (Cur_Frame) := PC + 5;
-                     Cur_Frame := Cur_Frame + 1;
-                     Frame_Base (Cur_Frame) := Base;
-                     Frame_Slots (Cur_Frame) := Img.Procs (Callee).Frame_Slots;
-                     Locals_Used := Base + Img.Procs (Callee).Frame_Slots;
-                  end;
                   PC := Img.Procs (Callee).Code_Off;
                end;
             when Op_Type_Test =>
