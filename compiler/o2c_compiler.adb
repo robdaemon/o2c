@@ -3141,11 +3141,20 @@ package body O2c_Compiler is
                   R.Typ := Res;
                   R.Lit := False;
                   if O2c_BC.Bytecode_Mode then
-                     if Res /= T_Int then
+                     if Res = T_Long then
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
                           & "LONGINT is not yet supported";
+                     elsif Res = T_Int then
+                        O2c_BC.Bin (O2c_BC.Mul);
+                     elsif R.Typ /= T_Int and then X.Typ /= T_Int then
+                        --  REAL and LONGREAL share the ops; both operands must be
+                        --  non-integer, or an implicit I2R would be needed and the wrong
+                        --  opcode would be silent.
+                        O2c_BC.Bin (O2c_BC.Rmul);
+                     else
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "a mixed INTEGER/REAL operation is not yet supported";
                      end if;
-                     O2c_BC.Bin (O2c_BC.Mul);
                   end if;
                elsif Real_Like (R, X, Res) then
                   declare
@@ -3186,11 +3195,20 @@ package body O2c_Compiler is
                R.Typ := Res;
                R.Lit := False;
                if O2c_BC.Bytecode_Mode then
-                  if Res /= T_Int then
+                  if Res = T_Long then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
                        & "LONGINT is not yet supported";
+                  elsif Res = T_Int then
+                     O2c_BC.Bin (O2c_BC.IDiv);
+                  elsif R.Typ /= T_Int and then X.Typ /= T_Int then
+                     --  REAL and LONGREAL share the ops; both operands must be
+                     --  non-integer, or an implicit I2R would be needed and the wrong
+                     --  opcode would be silent.
+                     O2c_BC.Bin (O2c_BC.Rdiv);
+                  else
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & "a mixed INTEGER/REAL operation is not yet supported";
                   end if;
-                  O2c_BC.Bin (O2c_BC.IDiv);
                end if;
             end;
          elsif Cur.Kind = Lex.Tok_Mod then
@@ -3208,7 +3226,7 @@ package body O2c_Compiler is
                if O2c_BC.Bytecode_Mode then
                   if Res /= T_Int then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                       & "LONGINT is not yet supported";
+                       & "MOD needs INTEGER operands";
                   end if;
                   O2c_BC.Bin (O2c_BC.IMod);
                end if;
@@ -3295,11 +3313,20 @@ package body O2c_Compiler is
                   R.Typ := Res;
                   R.Lit := False;
                   if O2c_BC.Bytecode_Mode then
-                     if Res /= T_Int then
+                     if Res = T_Long then
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
                           & "LONGINT is not yet supported";
+                     elsif Res = T_Int then
+                        O2c_BC.Bin (O2c_BC.Add);
+                     elsif R.Typ /= T_Int and then X.Typ /= T_Int then
+                        --  REAL and LONGREAL share the ops; both operands must be
+                        --  non-integer, or an implicit I2R would be needed and the wrong
+                        --  opcode would be silent.
+                        O2c_BC.Bin (O2c_BC.Radd);
+                     else
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "a mixed INTEGER/REAL operation is not yet supported";
                      end if;
-                     O2c_BC.Bin (O2c_BC.Add);
                   end if;
                elsif Real_Like (R, X, Res) then
                   declare
@@ -3344,11 +3371,20 @@ package body O2c_Compiler is
                   R.Typ := Res;
                   R.Lit := False;
                   if O2c_BC.Bytecode_Mode then
-                     if Res /= T_Int then
+                     if Res = T_Long then
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
                           & "LONGINT is not yet supported";
+                     elsif Res = T_Int then
+                        O2c_BC.Bin (O2c_BC.Sub);
+                     elsif R.Typ /= T_Int and then X.Typ /= T_Int then
+                        --  REAL and LONGREAL share the ops; both operands must be
+                        --  non-integer, or an implicit I2R would be needed and the wrong
+                        --  opcode would be silent.
+                        O2c_BC.Bin (O2c_BC.Rsub);
+                     else
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "a mixed INTEGER/REAL operation is not yet supported";
                      end if;
-                     O2c_BC.Bin (O2c_BC.Sub);
                   end if;
                elsif Real_Like (R, X, Res) then
                   declare
