@@ -959,7 +959,7 @@ package body OBC_VM is
       --  at the current top of the locals pool, so slot i of the current
       --  frame lives at Locals (Frame_Base (Cur_Frame) + i), and the callee's
       --  parameter slots are the lowest slots of its frame.
-      Locals      : array (0 .. Max_VM_Locals - 1) of U64 := (others => 0);
+      Locals      : constant U64_Array_Access := new U64_Array (0 .. Max_VM_Locals - 1);
       Frame_Base  : array (0 .. Max_Frames - 1) of Natural := (others => 0);
       Frame_Slots : array (0 .. Max_Frames - 1) of Natural := (others => 0);
       Return_PC   : array (0 .. Max_Frames - 1) of Natural := (others => 0);
