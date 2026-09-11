@@ -332,6 +332,9 @@ package body O2c_BC is
         when Drop        => 16#03#,
         when Assert_Fail => 16#05#,
         when Trap        => 16#06#,
+        when Load_Addr_G  => 16#16#,
+        when Load_Idx_I   => 16#1D#,
+        when Store_Idx_I  => 16#20#,
         when Load_G      => 16#12#,
         when Store_G     => 16#13#,
         when Load_Const  => 16#14#,
@@ -389,6 +392,13 @@ package body O2c_BC is
         when I2R        => 16#8C#,
         when R2I_Round  => 16#8D#,
         when R2I_Trunc  => 16#8E#);
+
+   procedure Trap (Kind : Natural) is
+   begin
+      Put_Byte (16#06#);          --  TRAP
+      Put_Byte (U64 (Kind));
+      N_Insns := N_Insns + 1;
+   end Trap;
 
    procedure Bin (O : Op) is
    begin

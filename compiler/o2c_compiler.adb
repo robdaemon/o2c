@@ -1333,7 +1333,7 @@ package body O2c_Compiler is
 
    --  expressions -------------------------------------------------
 
-   type Desig_Kind is (D_Scalar, D_Ptr, D_Str);
+   type Desig_Kind is (D_Scalar, D_Ptr, D_Str, D_Index);
 
    type Desig is record
       Text : Unbounded_String;
@@ -1459,6 +1459,16 @@ package body O2c_Compiler is
                  & Natural'Image (Cur.Line) & ")";
             end if;
             Next;                --  past '['
+            if O2c_BC.Bytecode_Mode and then UTypes (UT).Elem = T_Int then
+               --  An array is a run of scalar slots: push the address of its
+               --  first slot before the index is evaluated, so the stack
+               --  reads [base, index] for the access the caller emits.  The
+               --  chain cannot emit that access itself - it does not know
+               --  whether the caller is reading or assigning.
+               O2c_BC.Load_Addr_G
+                 (O2c_BC.Global_Array
+                    (Base_Name, Natural (UTypes (UT).Arr_Len)));
+            end if;
             declare
                Ix : Expr_Rec := Parse_Expr;
             begin
@@ -1487,7 +1497,32 @@ package body O2c_Compiler is
                   return D;
                else
                   D.Text := D.Text & " (" & To_String (Ix.Text) & ")";
-                  D.K := D_Scalar;
+                  if O2c_BC.Bytecode_Mode then
+                     --  Check the index before the access: the stack holds
+                     --  [base, index] and an address carries no length.  Two
+                     --  compares, because the opcodes are signed and an index
+                     --  below zero has to fail as well.
+                     declare
+                        L_In : constant Natural := New_Bc_Label;
+                        L_Up : constant Natural := New_Bc_Label;
+                        begin
+                        O2c_BC.Dup_Top;
+                        O2c_BC.Push_Int (0);
+                        O2c_BC.Bin (O2c_BC.Ge);
+                        O2c_BC.Jump (O2c_BC.Jnz, L_In);
+                        O2c_BC.Trap (0);
+                        O2c_BC.Mark (L_In);
+                        O2c_BC.Dup_Top;
+                        O2c_BC.Push_Int (UTypes (UT).Arr_Len);
+                        O2c_BC.Bin (O2c_BC.Lt);
+                        O2c_BC.Jump (O2c_BC.Jnz, L_Up);
+                        O2c_BC.Trap (0);
+                        O2c_BC.Mark (L_Up);
+                        end;
+                     D.K := D_Index;
+                  else
+                     D.K := D_Scalar;
+                  end if;
                   D.Sc := UTypes (UT).Elem;
                   return D;
                end if;
@@ -2580,7 +2615,11 @@ package body O2c_Compiler is
                                     D : Desig := Parse_Rec_Ptr_Chain
                                       (Ada_Id (FNm) & "." & Ada_Id (MName), U);
                                  begin
-                                    if D.K = D_Scalar then
+                                    if D.K = D_Index then
+                                       --  [base, index]: load the element.
+                                       R.Typ := D.Sc;
+                                       O2c_BC.Bin (O2c_BC.Load_Idx_I);
+                                    elsif D.K = D_Scalar then
                                        R.Typ := D.Sc;
                                     elsif D.K = D_Ptr then
                                        R.Typ := T_Ptr;
@@ -2973,7 +3012,11 @@ package body O2c_Compiler is
                   declare
                      D : Desig := Parse_Rec_Ptr_Chain (Nm, U);
                   begin
-                     if D.K = D_Scalar then
+                     if D.K = D_Index then
+                        --  [base, index]: load the element.
+                        R.Typ := D.Sc;
+                        O2c_BC.Bin (O2c_BC.Load_Idx_I);
+                     elsif D.K = D_Scalar then
                         R.Typ := D.Sc;
                      elsif D.K = D_Ptr then
                         R.Typ := T_Ptr;
@@ -3834,9 +3877,12 @@ package body O2c_Compiler is
             --  subscript was silently dropped and the variable treated as a
             --  scalar.  Refusing here catches every such variable, since all
             --  of them come through this declaration.
-            if O2c_BC.Bytecode_Mode then
-               raise O2c_BC.Wrong_Construct with "bytecode backend: array, "
-                 & "record and pointer variables are not yet supported";
+            if O2c_BC.Bytecode_Mode
+              and then (UTypes (UT).Arr_Len = 0
+                        or else UTypes (UT).Elem /= T_Int)
+            then
+               raise O2c_BC.Wrong_Construct with "bytecode backend: records, "
+                 & "pointers and non-INTEGER arrays are not yet supported";
             end if;
             if UTypes (UT).Is_Ptr then
                Init_Txt := Init_Txt & "null";
@@ -6007,7 +6053,14 @@ package body O2c_Compiler is
                            begin
                               Expect (Lex.Tok_Assign, "':='");
                               Next;
-                              if D.K = D_Scalar then
+                              if D.K = D_Index then
+                                 --  [base, index]: evaluate the value, store it.
+                                 declare
+                                    V : Expr_Rec := Parse_Expr;
+                                 begin
+                                    O2c_BC.Bin (O2c_BC.Store_Idx_I);
+                                 end;
+                              elsif D.K = D_Scalar then
                                  if D.Sc = T_Char
                                    and then Cur.Kind = Lex.Tok_String
                                    and then Cur.Len = 1
@@ -6283,7 +6336,14 @@ package body O2c_Compiler is
                      begin
                         Expect (Lex.Tok_Assign, "':='");
                         Next;
-                        if D.K = D_Scalar then
+                        if D.K = D_Index then
+                           --  [base, index]: evaluate the value, store it.
+                           declare
+                              V : Expr_Rec := Parse_Expr;
+                           begin
+                              O2c_BC.Bin (O2c_BC.Store_Idx_I);
+                           end;
+                        elsif D.K = D_Scalar then
                            if D.Sc = T_Char and then Cur.Kind = Lex.Tok_String
                              and then Cur.Len = 1
                            then

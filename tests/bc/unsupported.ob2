@@ -1,8 +1,8 @@
 module Unsup;
 import Out;
-type Vec = array 4 of integer;
-var a: Vec;
+type Pt = record x: integer end;
+var p: Pt;
 begin
-  a[0] := 1;
+  p.x := 1;
   Out.Ln
 end Unsup.
