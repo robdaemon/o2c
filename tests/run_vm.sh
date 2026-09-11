@@ -130,6 +130,22 @@ for img in badmagic futurever badsize badjump notimpl badnative; do
    fi
 done
 
+#  ---- positive: a hand-assembled procedure call --------------------------
+#  add(a, b) returns a + b and the body passes 40 and 2, so the output is 42.
+#  Assembled rather than emitted, so the interpreter is checked against
+#  something that is not the emitter - the only way to exercise CALL until
+#  the front end emits procedures.
+if python3 "$ASM" "$ROOT/tests/vm/call.asm" "$WORK/call.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/call.obc" >"$WORK/call.out" 2>"$WORK/call.err"; then
+   if diff -u "$ROOT/tests/vm/call.out" "$WORK/call.out"; then
+      note "positive: call.asm (procedure call) matches the golden output"
+   else
+      bad "call.asm output differs from tests/vm/call.out"
+   fi
+else
+   bad "call.asm did not run: $(cat "$WORK/call.err" 2>/dev/null)"
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_vm: FAIL ($fails)" >&2
    exit 1
