@@ -284,6 +284,17 @@ fi
 #  ---- positive: hand-assembled Out.Char ------------------------------------
 #  Exercises native 4 independently of the emitter: two character codes go to
 #  the native, which prints the characters themselves.
+if python3 "$ASM" "$ROOT/tests/vm/ffilabs.asm" "$WORK/ffilabs.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/ffilabs.obc" >"$WORK/ffilabs.out" 2>"$WORK/ffilabs.err"; then
+   if diff -u "$ROOT/tests/vm/ffilabs.out" "$WORK/ffilabs.out"; then
+      note "positive: ffilabs.asm (first foreign call) matches the golden output"
+   else
+      bad "ffilabs.asm output differs from tests/vm/ffilabs.out"
+   fi
+else
+   bad "ffilabs.asm failed: $(cat "$WORK/ffilabs.err")"
+fi
+
 if python3 "$ASM" "$ROOT/tests/vm/charout.asm" "$WORK/charout.obc" >/dev/null \
    && timeout 60 "$VM" "$WORK/charout.obc" >"$WORK/charout.out" 2>"$WORK/charout.err"; then
    if diff -u "$ROOT/tests/vm/charout.out" "$WORK/charout.out"; then

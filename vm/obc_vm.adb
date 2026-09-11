@@ -276,11 +276,27 @@ package body OBC_VM is
       5 => 1,     --  labs
       others => 0);
 
+   --  Which natives produce a result.  Most write and return nothing; a
+   --  foreign function usually returns one, and the verifier has to know
+   --  which or the pushed value reads as a stack imbalance.  The interpreter
+   --  learns the same thing from the native itself, via Native_Result.
+   Native_Pushes : constant array (0 .. Native_Count - 1) of Boolean :=
+     (5 => True, others => False);
+
    --  Arguments handed to a native, leftmost first.  The table above gives
    --  the arity per id and the verifier enforces it, so this is only the
    --  widest a call may be - foreign functions reach five and six.
    Max_Native_Args : constant := 8;
    type Arg_Block is array (0 .. Max_Native_Args - 1) of U64;
+
+   --  What a native hands back.  Most are void - Out.Int writes and returns
+   --  nothing - but a foreign function usually produces a value, and
+   --  Call_Native sits outside Execute and cannot push it itself.  So the
+   --  native says whether it produced one and the interpreter pushes.
+   type Native_Result is record
+      Pushes : Boolean := False;
+      Value  : U64 := 0;
+   end record;
 
    --  A policy limit, not a storage bound: the proc table is allocated to
    --  the N_Procs the image declares, so this only says how many procedures
@@ -738,10 +754,13 @@ package body OBC_VM is
                     Natural (Code (PC + 1)) + Natural (Code (PC + 2)) * 256;
                   NArgs : constant Natural := Natural (Code (PC + 3));
                begin
-                  if Idx >= Max_Natives or else NArgs /= Native_Pops (Idx) then
+                  if Idx >= Native_Count or else NArgs /= Native_Pops (Idx) then
                      return Bad_Native;
                   end if;
                   Depth := Depth - Integer (NArgs);
+                  if Native_Pushes (Idx) then
+                     Depth := Depth + 1;
+                  end if;
                end;
                PC := PC + 4;
             when Op_Load_L | Op_Store_L =>
@@ -942,8 +961,16 @@ package body OBC_VM is
    end Verify;
 
    --  ---- natives --------------------------------------------------------
+   --  The first foreign function.  The point is not what it computes but
+   --  that the FFI path runs end to end: Ada's linkage goes to C for us, so
+   --  the ABI - registers, alignment, struct returns - is the compiler's
+   --  business and not the VM's.
+   function C_Labs (X : Interfaces.Integer_64) return Interfaces.Integer_64;
+   pragma Import (C, C_Labs, "labs");
+
    function Call_Native (Idx : Natural; Args : Arg_Block;
-                         NArgs : Natural; Consts : Byte_Array) return Status is
+                         NArgs : Natural; Consts : Byte_Array;
+                         Result : out Native_Result) return Status is
       pragma Unreferenced (NArgs);   --  arity is per-id, checked by Verify
       use Ada.Text_IO;
 
@@ -975,6 +1002,13 @@ package body OBC_VM is
       end Put_Str;
    begin
       case Idx is
+         when Max_Natives =>
+            --  labs, the first foreign function: id 5, the first entry in
+            --  the foreign table.  It returns a value, so it sets Result and
+            --  the interpreter pushes it - most natives are void.
+            Result := (Pushes => True,
+                       Value  => To_U64 (C_Labs (To_I64 (Args (0)))));
+            return Ok;
          when 0 =>
             Put_Int (To_I64 (Args (0)),
                      Natural'Max (0, Natural (To_I64 (Args (1)))));
@@ -1511,6 +1545,7 @@ package body OBC_VM is
                     Natural (Code (PC + 1)) + Natural (Code (PC + 2)) * 256;
                   NArgs : constant Natural := Natural (Code (PC + 3));
                   Args : Arg_Block := (others => 0);
+                  Res  : Native_Result;
                   St   : Status;
                begin
                   if NArgs > Max_Native_Args then
@@ -1524,10 +1559,14 @@ package body OBC_VM is
                      end if;
                      Args (K) := Pop;
                   end loop;
-                  St := Call_Native (Idx, Args, NArgs, Consts);
+                  Res := (Pushes => False, Value => 0);
+                  St := Call_Native (Idx, Args, NArgs, Consts, Res);
                   if St /= Ok then
                      Note_At ("native call failed", PC);
                      return St;
+                  end if;
+                  if Res.Pushes then
+                     Push (Res.Value);
                   end if;
                end;
                PC := PC + 4;
