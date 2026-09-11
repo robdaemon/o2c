@@ -90,6 +90,8 @@ package body OBC_VM is
    Op_Load_Const  : constant := 16#14#;
    Op_Load_L      : constant := 16#10#;
    Op_Store_L     : constant := 16#11#;
+   Op_For_Enter   : constant := 16#A4#;
+   Op_For_Next    : constant := 16#A5#;
    Op_Call        : constant := 16#C0#;
    Op_Ret         : constant := 16#C1#;
    Op_Ret_Void    : constant := 16#C2#;
@@ -509,6 +511,26 @@ package body OBC_VM is
                end if;
                Depth := 0;
                PC := PC + 1;
+            when Op_For_Enter =>
+               --  u16 var slot, i32 step, u32 else target.  from and to are
+               --  consumed; frame-slot bounds are the interpreter's business.
+               if not Fits (PC + 3, 8) then
+                  return Bad_Code;
+               end if;
+               if Natural (LE32 (Code, PC + 7)) > Code'Length then
+                  return Bad_Target;
+               end if;
+               Depth := Depth - 2;
+               PC := PC + 11;
+            when Op_For_Next =>
+               --  u16 var slot, i32 step, u16 limit slot, u32 body target.
+               if not Fits (PC + 3, 10) then
+                  return Bad_Code;
+               end if;
+               if Natural (LE32 (Code, PC + 9)) > Code'Length then
+                  return Bad_Target;
+               end if;
+               PC := PC + 13;
             when others =>
                Note_At ("verification stopped: opcode not implemented in this "
                    & "slice", PC);
@@ -850,6 +872,95 @@ package body OBC_VM is
                Cur_Frame := Cur_Frame - 1;
                PC := Return_PC (Cur_Frame);
 
+            when Op_For_Enter =>
+               --  u16 var slot, i32 step, u32 else target.  from and to are
+               --  on the operand stack, to on top; the variable's slot is
+               --  followed by the hidden limit and direction slots.
+               if PC + 10 >= Code'Length then
+                  return Bad_Code;
+               end if;
+               declare
+                  Slot   : constant Natural :=
+                    Natural (Code (PC + 1)) + Natural (Code (PC + 2)) * 256;
+                  Target : constant Natural := Natural (LE32 (Code, PC + 7));
+                  Raw    : constant U64 := U64 (LE32 (Code, PC + 3));
+                  Step   : constant I64 := (if Raw < 16#8000_0000#
+                                            then To_I64 (Raw)
+                                            else To_I64 (Raw - 16#1_0000_0000#));
+                  From   : U64;
+                  To     : U64;
+                  Base   : Natural;
+               begin
+                  if Target > Code'Length then
+                     return Bad_Target;
+                  end if;
+                  if Slot + 2 >= Frame_Slots (Cur_Frame) then
+                     Note_At ("FOR slots out of range", PC);
+                     return Bad_Stack;
+                  end if;
+                  Base := Frame_Base (Cur_Frame);
+                  To := Pop;
+                  From := Pop;
+                  Locals (Base + Slot) := From;
+                  Locals (Base + Slot + 1) := To;
+                  Locals (Base + Slot + 2) :=
+                    (if From <= To then U64 (1) else U64 (0));
+                  --  Oberon-2: the step's direction decides whether the body
+                  --  runs at all, from the initial comparison.
+                  if (Step >= 0 and then From > To)
+                    or else (Step < 0 and then From < To)
+                  then
+                     PC := Target;
+                  else
+                     PC := PC + 11;
+                  end if;
+               end;
+            when Op_For_Next =>
+               --  u16 var slot, i32 step, u16 limit slot, u32 body target:
+               --  step by the direction decided at entry, loop while in range.
+               if PC + 12 >= Code'Length then
+                  return Bad_Code;
+               end if;
+               declare
+                  Slot   : constant Natural :=
+                    Natural (Code (PC + 1)) + Natural (Code (PC + 2)) * 256;
+                  Limit  : constant Natural :=
+                    Natural (Code (PC + 7)) + Natural (Code (PC + 8)) * 256;
+                  Target : constant Natural := Natural (LE32 (Code, PC + 9));
+                  Raw    : constant U64 := U64 (LE32 (Code, PC + 3));
+                  Step   : constant I64 := (if Raw < 16#8000_0000#
+                                            then To_I64 (Raw)
+                                            else To_I64 (Raw - 16#1_0000_0000#));
+                  Base   : constant Natural := Frame_Base (Cur_Frame);
+                  V      : I64;
+                  Lim    : I64;
+                  More   : Boolean;
+               begin
+                  if Target > Code'Length then
+                     return Bad_Target;
+                  end if;
+                  if Slot + 2 >= Frame_Slots (Cur_Frame)
+                    or else Limit >= Frame_Slots (Cur_Frame)
+                  then
+                     Note_At ("FOR slots out of range", PC);
+                     return Bad_Stack;
+                  end if;
+                  V := To_I64 (Locals (Base + Slot));
+                  Lim := To_I64 (Locals (Base + Limit));
+                  if Locals (Base + Slot + 2) = 1 then
+                     V := V + abs (Step);
+                  else
+                     V := V - abs (Step);
+                  end if;
+                  Locals (Base + Slot) := To_U64 (V);
+                  More := (if Locals (Base + Slot + 2) = 1 then V <= Lim
+                           else V >= Lim);
+                  if More then
+                     PC := Target;
+                  else
+                     PC := PC + 13;
+                  end if;
+               end;
             when others =>
                Note_At ("opcode not implemented in this slice", PC);
                return Not_Implemented;

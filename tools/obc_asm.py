@@ -26,6 +26,9 @@ OPS = {
     "CALL_NATIVE": (0xC3, 3),
     "LOAD_L": (0x10, 2), "STORE_L": (0x11, 2),
     "CALL": (0xC0, 4), "RET": (0xC1, 0), "RET_VOID": (0xC2, 0),
+    #  FOR opcodes carry several operands including a label, so they are
+    #  encoded specially below rather than through the width table.
+    "FOR_ENTER_I": (0xA4, 0), "FOR_NEXT_I": (0xA5, 0),
 }
 PROC_REC = 24
 CONST_SLOT = 8
@@ -92,6 +95,21 @@ def assemble(text):
         if op not in OPS:
             raise SystemExit(f"obc_asm: unknown mnemonic {op}")
         opcode, nbytes = OPS[op]
+        if op in ("FOR_ENTER_I", "FOR_NEXT_I"):
+            #  FOR_ENTER_I slot step label   /  FOR_NEXT_I slot step limit label
+            want = 3 if op == "FOR_ENTER_I" else 4
+            if len(parts[1:]) != want:
+                raise SystemExit(f"obc_asm: {op} wants {want} operands")
+            a = parts[1:]
+            code.append(opcode)
+            code += struct.pack("<H", int(a[0], 0))
+            code += struct.pack("<i", int(a[1], 0))
+            label = a[-1]
+            if op == "FOR_NEXT_I":
+                code += struct.pack("<H", int(a[2], 0))
+            pending.append((len(code), label))
+            code += b"\x00" * 4
+            continue
         code.append(opcode)
         args = parts[1:]
         if nbytes:

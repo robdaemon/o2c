@@ -146,6 +146,21 @@ else
    bad "call.asm did not run: $(cat "$WORK/call.err" 2>/dev/null)"
 fi
 
+#  ---- positive: a hand-assembled FOR loop ---------------------------------
+#  Exercises FOR_ENTER_I/FOR_NEXT_I independently of the emitter: the loop
+#  variable and its two hidden slots, the increment, the range test and the
+#  exit, printing 1 through 5.
+if python3 "$ASM" "$ROOT/tests/vm/for.asm" "$WORK/for.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/for.obc" >"$WORK/for.out" 2>"$WORK/for.err"; then
+   if diff -u "$ROOT/tests/vm/for.out" "$WORK/for.out"; then
+      note "positive: for.asm (FOR loop) matches the golden output"
+   else
+      bad "for.asm output differs from tests/vm/for.out"
+   fi
+else
+   bad "for.asm did not run: $(cat "$WORK/for.err" 2>/dev/null)"
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_vm: FAIL ($fails)" >&2
    exit 1
