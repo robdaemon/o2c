@@ -5134,6 +5134,16 @@ package body O2c_Compiler is
                end if;
                Append_Body ("      return;");
             end if;
+            --  Bytecode: the value (a function) is already on the operand
+            --  stack from the expression's own hooks, so the return is the
+            --  last step.  Cur_Proc_Ret says which kind of return this is.
+            if O2c_BC.Bytecode_Mode then
+               if Cur_Proc_Ret then
+                  O2c_BC.Return_Value;
+               else
+                  O2c_BC.Return_Void;
+               end if;
+            end if;
          elsif Cur.Kind = Lex.Tok_If then
             Parse_If;
          elsif Cur.Kind = Lex.Tok_While then
