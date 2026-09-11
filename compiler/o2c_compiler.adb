@@ -1009,6 +1009,71 @@ package body O2c_Compiler is
       return D;
    end Rec_Depth;
 
+   --  Scalar slots a record occupies, its parent's fields first: an
+   --  extension's layout begins with its ancestors'.
+   function Total_Slots (UT : Natural) return Natural is
+      N : Natural := 0;
+      U : Natural := UT;
+   begin
+      while U /= 0 loop
+         N := N + UTypes (U).N_F;
+         U := UTypes (U).Parent;
+      end loop;
+      return N;
+   end Total_Slots;
+
+   --  Byte offset of field F of record FO, seen through a variable declared
+   --  as Base_UT.  Every ancestor's fields between the two come first, which
+   --  is what lets an inherited field sit at the offset it has in its
+   --  parent - and makes the plain case, FO = Base_UT, come out as the
+   --  declaration-order formula it always was.
+   function Field_Offset (Base_UT : Natural; FO : Natural; F : Natural)
+                          return Natural is
+      N : Natural := 0;
+      U : Natural := Base_UT;
+   begin
+      while U /= 0 and then U /= FO loop
+         N := N + UTypes (U).N_F;
+         U := UTypes (U).Parent;
+      end loop;
+      if U = 0 then
+         --  FO is not on the chain, so nothing can name its offset; say so
+         --  rather than guess one.
+         raise O2c_BC.Wrong_Construct with
+           "bytecode backend: a field's owning record is not on the "
+           & "variable's type chain";
+      end if;
+      return (N + F - 1) * 8;
+   end Field_Offset;
+
+   --  True when every field of the record, and of each of its ancestors, is
+   --  one the bytecode can reach: a scalar of a type that fits a slot, or a
+   --  field naming its own record.
+   function Fields_Allowed (U : Natural) return Boolean is
+   begin
+      return (for all J in 1 .. UTypes (U).N_F =>
+                (UTypes (U).F (J).UT = 0
+                 and then (UTypes (U).F (J).Typ = T_Int
+                           or else UTypes (U).F (J).Typ = T_Char
+                           or else UTypes (U).F (J).Typ = T_Bool
+                           or else UTypes (U).F (J).Typ = T_Set
+                           or else UTypes (U).F (J).Typ = T_Real
+                           or else UTypes (U).F (J).Typ = T_LReal))
+                or else UTypes (U).F (J).UT = U);
+   end Fields_Allowed;
+
+   function Chain_Fields_Allowed (UT : Natural) return Boolean is
+      U : Natural := UT;
+   begin
+      while U /= 0 loop
+         if not Fields_Allowed (U) then
+            return False;
+         end if;
+         U := UTypes (U).Parent;
+      end loop;
+      return True;
+   end Chain_Fields_Allowed;
+
    --  Nearest type-bound method named Name visible on record type UT:
    --  searches UT then its ancestors (M13); returns a Bounds index.
    function Bound_Find (UT : Natural; Name : String) return Natural is
@@ -1509,14 +1574,14 @@ package body O2c_Compiler is
                             & "directly from a record variable or a pointer "
                             & "to one are supported";
                      end if;
-                     D.Off := (F - 1) * 8;
+                     D.Off := Field_Offset (Base_UT, FO, F);
                      D.K := D_Field;
                      if not UTypes (Base_UT).Is_Ptr
                        and then not D.Base_On_Stack
                      then
                         O2c_BC.Load_Addr_G
-                          (O2c_BC.Global_Array (Base_Name,
-                                                UTypes (FO).N_F));
+                          (O2c_BC.Global_Array
+                             (Base_Name, Total_Slots (Base_UT)));
                      end if;
                   else
                      D.K := D_Scalar;
@@ -4043,30 +4108,12 @@ package body O2c_Compiler is
                   Ok_Rec : constant Boolean :=
                     UTypes (UT).Is_Rec
                     and then not UTypes (UT).Is_Ptr
-                    and then not UTypes (UT).Is_Ext
                     and then UTypes (UT).Arr_Len = 0
                     and then UTypes (UT).N_F > 0
                     --  A field may be a scalar INTEGER, or one that names
                     --  the record itself - Oberon's implicit pointer, whose
                     --  default is null and which is how a list is built.
-                    and then (for all J in 1 .. UTypes (UT).N_F =>
-                                (UTypes (UT).F (J).UT = 0
-                                 --  CHAR, BOOLEAN and SET share INTEGER's
-                                 --  8-byte slot, so the same field ops apply
-                                 --  and only the type check knows the
-                                 --  difference.
-                                 and then (UTypes (UT).F (J).Typ = T_Int
-                                           or else UTypes (UT).F (J).Typ
-                                             = T_Char
-                                           or else UTypes (UT).F (J).Typ
-                                             = T_Bool
-                                           or else UTypes (UT).F (J).Typ
-                                             = T_Set
-                                           or else UTypes (UT).F (J).Typ
-                                             = T_Real
-                                           or else UTypes (UT).F (J).Typ
-                                             = T_LReal))
-                                or else UTypes (UT).F (J).UT = UT);
+                    and then Chain_Fields_Allowed (UT);
                begin
                   if not (Ok_Arr or else Ok_Rec or else Ok_Ptr) then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
