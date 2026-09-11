@@ -103,8 +103,10 @@ package O2c_BC is
    --  NIL: a pointer constant.  The pool word is zero, so the opcode differs
    --  from LOAD_CONST only in what a reader can conclude about it.
    procedure Push_Nil;
-   --  A RECORD type descriptor for TYPES.  The result is the descriptor's
-   --  byte offset in that payload, which is what ALLOC_NEW names.  Layout is
+   --  A RECORD type descriptor for TYPES.  The result is a *reference* to
+   --  it - the byte offset plus one - which is the form ALLOC_NEW, GUARD,
+   --  TYPE_TEST and a descriptor's `base` all use, so that zero can mean
+   --  none while the outermost descriptor still sits at offset zero.  Layout is
    --  declaration order, one scalar slot per field, so the size is N_F * 8.
    function Desc_Rec (Size : Natural) return Natural;
    --  Allocate a zeroed object of the descriptor's size and push its address.

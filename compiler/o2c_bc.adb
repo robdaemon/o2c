@@ -414,7 +414,8 @@ package body O2c_BC is
       for K in 1 .. 12 loop
          Types_Buf := Types_Buf & Character'Val (0);
       end loop;
-      return Off;
+      --  References are biased so zero stays available to mean "none".
+      return Off + 1;
    end Desc_Rec;
 
    procedure Alloc_New (Desc_Ref : Natural) is
