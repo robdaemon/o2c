@@ -1544,6 +1544,22 @@ package body O2c_Compiler is
             Next;
             Implied_Deref := False;
          end if;
+         if Cur.Kind = Lex.Tok_Dot and then VK = V_Ptr then
+            --  Oberon's implicit dereference: p.f means p^.f.  There is
+            --  nothing to emit, because a pointer's value *is* the address
+            --  of what it designates, so this only moves the static view -
+            --  exactly what the '^' branch does, minus the token.
+            VK := V_Rec;
+            if UTypes (UT).Ptr_Tgt = 0 and then UTypes (UT).Imported then
+               raise O2c_Error with "this POINTER is opaque: dereference "
+                 & "only inside its defining module (M26)";
+            end if;
+            if UTypes (UT).Ptr_Tgt = 0 then
+               raise O2c_Error with "internal: deref of an unresolved "
+                 & "POINTER TO (line " & Natural'Image (Cur.Line) & ")";
+            end if;
+            UT := UTypes (UT).Ptr_Tgt;
+         end if;
          if Cur.Kind = Lex.Tok_Caret then
             if VK /= V_Ptr then
                raise O2c_Error with "'^' needs a POINTER operand (line "
