@@ -5023,6 +5023,9 @@ package body O2c_Compiler is
    procedure Parse_Case is
       Sel : Expr_Rec;
       Used_Else : Boolean := False;
+      Bc_L_End  : Natural := 0;
+      Bc_L_Next : Natural := 0;   --  where a failed alternative resumes
+      Bc_L_Body : Natural := 0;
    begin
       Next;                       --  CASE
       Sel := Parse_Expr;
@@ -5032,11 +5035,25 @@ package body O2c_Compiler is
       end if;
       Expect (Lex.Tok_Of, "'OF'");
       Next;
+      if O2c_BC.Bytecode_Mode then
+         --  A CASE is a comparison chain over the selector, which stays on
+         --  the stack for the whole statement and is dropped once at the
+         --  end.  Bc_L_Next is where a failed alternative resumes: it is
+         --  allocated here and marked at the start of the next alternative,
+         --  never at its own - marking it at its own made the failed
+         --  comparisons re-run, which looped.
+         Bc_L_End := New_Bc_Label;
+         Bc_L_Next := New_Bc_Label;
+      end if;
       Append_Body ("      case " & To_String (Sel.Text) & " is");
 
       --  alternatives: label {"," label} ":" seq  separated by "|",
       --  optional ELSE, closed by END
       loop
+         if O2c_BC.Bytecode_Mode then
+            O2c_BC.Mark (Bc_L_Next);
+            Bc_L_Next := New_Bc_Label;
+         end if;
          if Cur.Kind = Lex.Tok_Else then
             if Used_Else then
                raise O2c_Error with "duplicate CASE ELSE";
@@ -5060,12 +5077,31 @@ package body O2c_Compiler is
                      else
                         Labels := Labels & " | -" & Cur.Text (1 .. Cur.Len);
                      end if;
+                     if O2c_BC.Bytecode_Mode then
+                        if First then
+                           Bc_L_Body := New_Bc_Label;
+                        end if;
+                        O2c_BC.Dup_Top;
+                        O2c_BC.Push_Int
+                          (-Integer'Value (Cur.Text (1 .. Cur.Len)));
+                        O2c_BC.Bin (O2c_BC.Eq);
+                        O2c_BC.Jump (O2c_BC.Jnz, Bc_L_Body);
+                     end if;
                      Next;
                   elsif Cur.Kind = Lex.Tok_Number then
                      if First then
                         Labels := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
                      else
                         Labels := Labels & " | " & Cur.Text (1 .. Cur.Len);
+                     end if;
+                     if O2c_BC.Bytecode_Mode then
+                        if First then
+                           Bc_L_Body := New_Bc_Label;
+                        end if;
+                        O2c_BC.Dup_Top;
+                        O2c_BC.Push_Int (Integer'Value (Cur.Text (1 .. Cur.Len)));
+                        O2c_BC.Bin (O2c_BC.Eq);
+                        O2c_BC.Jump (O2c_BC.Jnz, Bc_L_Body);
                      end if;
                      Next;
                   else
@@ -5078,10 +5114,16 @@ package body O2c_Compiler is
                end loop;
                Expect (Lex.Tok_Colon, "':' after the CASE labels");
                Next;
+               if O2c_BC.Bytecode_Mode then
+                  O2c_BC.Jump (O2c_BC.Jmp, Bc_L_Next);
+               end if;
                Append_Body ("      when " & To_String (Labels) & " =>");
             end;
          end if;
 
+         if O2c_BC.Bytecode_Mode and then not Used_Else then
+            O2c_BC.Mark (Bc_L_Body);
+         end if;
          --  this alternative's statement sequence
          declare
             Before : constant Natural := Length (Body_Buf);
@@ -5093,6 +5135,10 @@ package body O2c_Compiler is
                Append_Body ("         null;");
             end if;
          end;
+
+         if O2c_BC.Bytecode_Mode then
+            O2c_BC.Jump (O2c_BC.Jmp, Bc_L_End);
+         end if;
 
          if Cur.Kind = Lex.Tok_Bar then
             Next;
@@ -5108,6 +5154,11 @@ package body O2c_Compiler is
 
       Expect (Lex.Tok_End, "'END' closing the CASE");
       Next;
+      if O2c_BC.Bytecode_Mode then
+         O2c_BC.Mark (Bc_L_Next);     --  the last alternative's skip lands here
+         O2c_BC.Mark (Bc_L_End);
+         O2c_BC.Discard;
+      end if;
       if not Used_Else then
          Append_Body ("      when others => null;");
       end if;
