@@ -3828,6 +3828,16 @@ package body O2c_Compiler is
          Next;
 
          if Is_UT then
+            --  Bytecode: an array, record or pointer variable needs storage
+            --  wider than the scalar slot the backend emits for, and its
+            --  element and field accesses are not emitted at all - an array
+            --  subscript was silently dropped and the variable treated as a
+            --  scalar.  Refusing here catches every such variable, since all
+            --  of them come through this declaration.
+            if O2c_BC.Bytecode_Mode then
+               raise O2c_BC.Wrong_Construct with "bytecode backend: array, "
+                 & "record and pointer variables are not yet supported";
+            end if;
             if UTypes (UT).Is_Ptr then
                Init_Txt := Init_Txt & "null";
             else
