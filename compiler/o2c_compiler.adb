@@ -3076,6 +3076,20 @@ package body O2c_Compiler is
                      end if;
                      Expect (Lex.Tok_RParen, "')'");
                      Next;
+                     if O2c_BC.Bytecode_Mode then
+                        --  The arguments are already on the stack, pushed by
+                        --  Parse_Actual; this is the call itself.  It was
+                        --  never emitted on the expression path, so f(x)
+                        --  pushed x and silently took it as the result -
+                        --  Twice(21) was 21.  A function call as a statement
+                        --  went through the other path, which had it.
+                        if Syms (Id).Bc_Proc = 0 then
+                           raise O2c_Error with "bytecode backend: call to '"
+                             & Cur.Text (1 .. Cur.Len)
+                             & "' with no procedure id";
+                        end if;
+                        O2c_BC.Call_Proc (Syms (Id).Bc_Proc);
+                     end if;
                      Call := Call & To_String (R.Text) & " (";
                      for I in 1 .. N_A loop
                         if I > 1 then
