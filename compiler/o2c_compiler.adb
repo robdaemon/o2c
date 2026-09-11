@@ -1280,7 +1280,14 @@ package body O2c_Compiler is
                end if;
                S := S & Ada_Id (To_String (UTypes (U).F (F).Name))
                  & " => "
-                 & (if UTypes (U).F (F).UT /= 0
+                 & (if UTypes (U).F (F).UT = U
+                    --  A field that names the record it is a field of is
+                    --  Oberon's implicit pointer, and expanding the record
+                    --  inside its own initial value recursed forever - a
+                    --  STORAGE_ERROR from a five-line program.  Its default
+                    --  is null, like any other pointer's.
+                    then "null"
+                    elsif UTypes (U).F (F).UT /= 0
                     then Value_Init (UTypes (U).F (F).UT)
                     else Scalar_Init (UTypes (U).F (F).Typ));
             end loop;
