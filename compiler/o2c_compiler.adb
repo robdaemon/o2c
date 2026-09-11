@@ -1370,6 +1370,7 @@ package body O2c_Compiler is
       D  : Desig;
       VK : VK_Kind;
       UT : Natural := Base_UT;
+      Implied_Deref : Boolean := False;
    begin
       if O2c_BC.Bytecode_Mode and then UTypes (UT).Is_Ptr then
          --  A pointer's value is what it designates, and a bare pointer is a
@@ -1408,6 +1409,12 @@ package body O2c_Compiler is
          end loop;
       end if;
       loop
+         if Implied_Deref and then Cur.Kind = Lex.Tok_Caret then
+            --  The field just loaded the pointer it holds, so this '^' is
+            --  implied and the view is the record already.
+            Next;
+            Implied_Deref := False;
+         end if;
          if Cur.Kind = Lex.Tok_Caret then
             if VK /= V_Ptr then
                raise O2c_Error with "'^' needs a POINTER operand (line "
@@ -1520,6 +1527,7 @@ package body O2c_Compiler is
                      O2c_BC.Load_Fld_P ((F - 1) * 8);
                      D.Base_On_Stack := True;
                   end if;
+                  Implied_Deref := True;
                end if;
                UT := UTypes (FO).F (F).UT;
                if UTypes (UT).Is_Ptr then

@@ -9,5 +9,5 @@ begin
   p^.v := 42;
   q^.next := p;
   if q^.next # NIL then Out.Int(1, 0) end;
-  Out.Ln
+  Out.Int(q^.next^.v, 0); Out.Ln
 end List.
