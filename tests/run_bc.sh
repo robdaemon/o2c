@@ -32,7 +32,7 @@ if ! ( cd "$ROOT" && make tools-host vm-host AEGIR_ROOT="$AEGIR_ROOT" >"$WORK/bu
 fi
 
 #  ---- positives: source -> image -> VM output vs golden -------------------
-for name in sum ifelsif vmgreet proc local repeat case for set real arr rec ptr newt list recmix strch recreal outchar ext nested impderef fnexpr openarr typetest withguard typeguard dispatch newloop deepcall gcloop; do
+for name in sum ifelsif vmgreet proc local repeat case for set real arr rec ptr newt list recmix strch recreal outchar ext nested impderef fnexpr openarr typetest withguard typeguard dispatch newloop deepcall gcloop gcscalar; do
    src="$ROOT/tests/bc/$name.ob2"
    gold="$ROOT/tests/bc/$name.out"
    if ! timeout 120 "$FRONT" "$src" "$WORK/$name.obc" >"$WORK/$name.compile" 2>&1; then
@@ -63,6 +63,27 @@ else
    else
       bad "unsupported.ob2 failed without a clear diagnostic: $(cat "$WORK/unsup.log")"
    fi
+fi
+
+#  ---- the collector's contract: a live set larger than the arena --------
+#  The VM must report exhaustion rather than corrupt itself.  Before the
+#  collector was fixed it freed the live list and returned a wrong answer,
+#  which is indistinguishable from success without this check.
+if timeout 120 "$FRONT" "$ROOT/tests/bc/gclive.ob2" "$WORK/glive.obc" \
+   >"$WORK/glive.compile" 2>&1
+then
+   if timeout 120 "$VM" "$WORK/glive.obc" >"$WORK/glive.out" 2>"$WORK/glive.err"
+   then
+      bad "gclive.ob2 ran to completion, but its live set exceeds the arena"
+   else
+      if grep -aq 'heap exhausted' "$WORK/glive.err" "$WORK/glive.out"; then
+         note "negative: live set larger than the arena reported as exhaustion"
+      else
+         bad "gclive.ob2 failed without reporting exhaustion: $(cat "$WORK/glive.err")"
+      fi
+   fi
+else
+   bad "gclive.ob2 did not compile: $(cat "$WORK/glive.compile")"
 fi
 
 if [ "$fails" -gt 0 ]; then
