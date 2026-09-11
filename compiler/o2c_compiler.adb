@@ -1565,6 +1565,10 @@ package body O2c_Compiler is
          elsif Cur.Kind = Lex.Tok_Dot then
             if VK /= V_Rec then
                if VK = V_Ptr then
+                  --  A deliberate deviation: Oberon and Oberon-2 both read
+                  --  p.f as p^.f - "the dot implies dereferencing" - while
+                  --  this dialect requires the explicit '^'.  The diagnostic
+                  --  says what to write rather than implying a language rule.
                   raise O2c_Error with "'.' selects a record field; deref "
                     & "the POINTER with '^' first (line "
                     & Natural'Image (Cur.Line) & ")";
