@@ -55,18 +55,27 @@ single-threaded today does not make that true, it only makes the requirement
 invisible, so the reason is a property of the collector rather than of there
 being one thread.
 
-What threads will change, and what they will not:
+What threads will change, and what they will not — **the first two are done**:
 
-- **Roots become one region per thread** plus the shared globals.  The root set
-  is already three live prefixes read inside `Execute`; it becomes a registry of
-  such regions, which is why it should be written as a list of ranges rather
-  than three hardcoded loops.
-- **Allocation becomes one entry point**, so a thread-local buffer or a lock
-  lands in a single place.  It already has exactly one call site.
+- **Roots are a registry, not three loops.**  *Landed.*  The root set was three
+  hardcoded prefixes read inside `Execute`; it is now live contexts, each
+  registered for the duration of one call by a controlled type, so finalization
+  unregisters on every return path *and every exception* - which matters because
+  the interpreter returns early from dozens of places by design.  `Mark_All`
+  reads each context's live lengths at collection time, so an outer frame's roots
+  are correct while an inner `Execute` runs.  That is also what C calling back
+  into Oberon needs.
+- **Allocation is one entry point.**  *Landed.*  `Allocate (Need)` is the only
+  place the arena is touched, so a thread-local buffer or a lock goes there.
+  Collection happens inside it, which still gives exactly one collection point.
 - **Nothing else moves.**  Tags, `has_ptrs`, descriptor layout, the run format
   and the mark and sweep themselves all derive from the read-only image, so
   concurrency does not touch them.  Stop-the-world needs no write barrier, which
   is the reason for choosing it.
+- **What remains is the safepoint hook**: where a thread agrees to be stopped.
+  That is precisely what separates green threads from kernel threads and cannot
+  be written until that choice is made.  Note that both pieces above are
+  deliberately model-independent - neither assumes one or the other.
 
 The collection point follows from that: allocation happens in exactly one
 place, so the collector runs there, when the bump would pass the end of the
