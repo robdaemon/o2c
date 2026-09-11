@@ -336,7 +336,9 @@ package body O2c_BC is
         when Trap        => 16#06#,
         when Load_Addr_G  => 16#16#,
         when Load_Fld_I   => 16#23#,
+        when Load_Fld_R   => 16#24#,
         when Load_Fld_P   => 16#25#,
+        when Store_Fld_R  => 16#27#,
         when Store_Fld_P  => 16#28#,
         when Load_Const_P => 16#2C#,
         when Store_Fld_I  => 16#26#,
@@ -431,6 +433,23 @@ package body O2c_BC is
       N_Insns := N_Insns + 1;
       Pushed;
    end Push_Nil;
+
+   procedure Load_Fld_R (Off : Natural) is
+   begin
+      Put_Byte (16#24#);          --  LOAD_FLD_R
+      Put_Byte (U64 (Off mod 256));
+      Put_Byte (U64 (Off / 256));
+      N_Insns := N_Insns + 1;
+      Pushed;
+   end Load_Fld_R;
+
+   procedure Store_Fld_R (Off : Natural) is
+   begin
+      Put_Byte (16#27#);          --  STORE_FLD_R
+      Put_Byte (U64 (Off mod 256));
+      Put_Byte (U64 (Off / 256));
+      N_Insns := N_Insns + 1;
+   end Store_Fld_R;
 
    procedure Load_Fld_P (Off : Natural) is
    begin

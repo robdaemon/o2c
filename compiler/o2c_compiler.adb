@@ -1494,14 +1494,17 @@ package body O2c_Compiler is
                         null;      --  a pointer field is an 8-byte word
                      elsif not (D.Sc = T_Int or else D.Sc = T_Char
                               or else D.Sc = T_Bool
-                              or else D.Sc = T_Set)
+                              or else D.Sc = T_Set
+                              or else D.Sc = T_Real
+                              or else D.Sc = T_LReal)
                        or else not (UT = Base_UT
                                     or else (UTypes (Base_UT).Is_Ptr
                                              and then UT =
                                                UTypes (Base_UT).Ptr_Tgt))
                      then
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                            & "only INTEGER, CHAR, BOOLEAN, SET and "
+                            & "only INTEGER, CHAR, BOOLEAN, SET, REAL, "
+                            & "LONGREAL and "
                             & "self-referencing pointer fields reached "
                             & "directly from a record variable or a pointer "
                             & "to one are supported";
@@ -2747,6 +2750,8 @@ package body O2c_Compiler is
                                        --  [record]: the field at a known offset.
                                        R.Typ := D.Sc;
                                        if D.Ptr_Field then O2c_BC.Load_Fld_P (D.Off);
+                                        elsif D.Sc = T_Real or else D.Sc = T_LReal then
+                                           O2c_BC.Load_Fld_R (D.Off);
                                         else O2c_BC.Load_Fld (D.Off);
                                         end if;
                                     elsif D.K = D_Scalar then
@@ -3150,6 +3155,8 @@ package body O2c_Compiler is
                         --  [record]: the field at a known offset.
                         R.Typ := D.Sc;
                         if D.Ptr_Field then O2c_BC.Load_Fld_P (D.Off);
+                         elsif D.Sc = T_Real or else D.Sc = T_LReal then
+                            O2c_BC.Load_Fld_R (D.Off);
                          else O2c_BC.Load_Fld (D.Off);
                          end if;
                      elsif D.K = D_Scalar then
@@ -4054,7 +4061,11 @@ package body O2c_Compiler is
                                            or else UTypes (UT).F (J).Typ
                                              = T_Bool
                                            or else UTypes (UT).F (J).Typ
-                                             = T_Set))
+                                             = T_Set
+                                           or else UTypes (UT).F (J).Typ
+                                             = T_Real
+                                           or else UTypes (UT).F (J).Typ
+                                             = T_LReal))
                                 or else UTypes (UT).F (J).UT = UT);
                begin
                   if not (Ok_Arr or else Ok_Rec or else Ok_Ptr) then
@@ -6267,6 +6278,8 @@ package body O2c_Compiler is
                                     V : Expr_Rec := Parse_Expr;
                                  begin
                                     if D.Ptr_Field then O2c_BC.Store_Fld_P (D.Off);
+                                     elsif D.Sc = T_Real or else D.Sc = T_LReal then
+                                        O2c_BC.Store_Fld_R (D.Off);
                                      else O2c_BC.Store_Fld (D.Off);
                                      end if;
                                  end;
@@ -6566,6 +6579,8 @@ package body O2c_Compiler is
                               V : Expr_Rec := Parse_Expr;
                            begin
                               if D.Ptr_Field then O2c_BC.Store_Fld_P (D.Off);
+                               elsif D.Sc = T_Real or else D.Sc = T_LReal then
+                                  O2c_BC.Store_Fld_R (D.Off);
                                else O2c_BC.Store_Fld (D.Off);
                                end if;
                            end;

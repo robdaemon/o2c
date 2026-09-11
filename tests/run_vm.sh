@@ -266,6 +266,21 @@ else
    bad "list.asm did not run: $(cat "$WORK/list.err" 2>/dev/null)"
 fi
 
+#  ---- positive: hand-assembled REAL record field ---------------------------
+#  Exercises LOAD_FLD_R/STORE_FLD_R independently of the emitter: a record is
+#  allocated, 0.5 goes into its offset-8 real field, and the value is read
+#  back and printed through the REAL native.
+if python3 "$ASM" "$ROOT/tests/vm/recr.asm" "$WORK/recr.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/recr.obc" >"$WORK/recr.out" 2>"$WORK/recr.err"; then
+   if diff -u "$ROOT/tests/vm/recr.out" "$WORK/recr.out"; then
+      note "positive: recr.asm (REAL record field) matches the golden output"
+   else
+      bad "recr.asm output differs from tests/vm/recr.out"
+   fi
+else
+   bad "recr.asm did not run: $(cat "$WORK/recr.err" 2>/dev/null)"
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_vm: FAIL ($fails)" >&2
    exit 1
