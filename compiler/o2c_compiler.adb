@@ -1878,9 +1878,25 @@ package body O2c_Compiler is
                end if;
                if O2c_BC.Bytecode_Mode then
                   if Has_D or else Has_Dot then
-                     raise O2c_BC.Wrong_Construct with
-                       "bytecode backend: REAL/LONGREAL literals are not "
-                       & "yet supported";
+                     --  REAL and LONGREAL share the ops and the slot, so
+                     --  both are the same literal here.  Ada's Value wants
+                     --  an 'E' exponent, so a 'D' is rewritten.
+                     declare
+                        T : String := To_String (R.Text);
+                     begin
+                        for I in T'Range loop
+                           if T (I) = 'D' or else T (I) = 'd' then
+                              T (I) := 'E';
+                           end if;
+                        end loop;
+                        O2c_BC.Push_Real (Long_Float'Value (T));
+                     exception
+                        when Constraint_Error =>
+                           raise O2c_BC.Wrong_Construct with
+                             "bytecode backend: real literal out of range: "
+                             & To_String (R.Text);
+                     end;
+                     return R;
                   end if;
                   begin
                      O2c_BC.Push_Int (Integer'Value (Raw));
@@ -3029,6 +3045,8 @@ package body O2c_Compiler is
                     and then Syms (Id).Typ /= T_Char
                     and then Syms (Id).Typ /= T_Bool
                   and then Syms (Id).Typ /= T_Set
+                  and then Syms (Id).Typ /= T_Real
+                  and then Syms (Id).Typ /= T_LReal
                   then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
                        & "only INTEGER/CHAR/BOOLEAN variables are supported";
@@ -6790,6 +6808,8 @@ package body O2c_Compiler is
                           and then Syms (Idx).Typ /= T_Char
                           and then Syms (Idx).Typ /= T_Bool
                           and then Syms (Idx).Typ /= T_Set
+                        and then Syms (Idx).Typ /= T_Real
+                        and then Syms (Idx).Typ /= T_LReal
                         then
                            raise O2c_BC.Wrong_Construct with "bytecode "
                              & "backend: only INTEGER/CHAR/BOOLEAN "
