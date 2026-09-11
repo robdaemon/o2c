@@ -6245,9 +6245,16 @@ package body O2c_Compiler is
                                        if V.Typ /= D.Sc
                                          or else V.Typ = T_Str
                                        then
+                                          --  Naming both sides is worth the
+                                          --  words: a mistyped designator
+                                          --  is otherwise a puzzle.
                                           raise O2c_Error with
                                             "type mismatch assigning "
-                                            & To_String (D.Text);
+                                            & To_String (D.Text)
+                                            & " (value is "
+                                            & EType'Image (V.Typ)
+                                            & ", target is "
+                                            & EType'Image (D.Sc) & ")";
                                        end if;
                                        Append_Body ("      "
                                                     & To_String (D.Text)
