@@ -388,7 +388,7 @@ about the *emitter and the VM*, not about o2c's accepted input:
 | stack, locals, globals | `DUP`, `DROP`, `LOAD_L`, `STORE_L`, `LOAD_G`, `STORE_G`, `LOAD_CONST` |
 | arithmetic, comparison, sets | `ADD` … `GE`, `NEG`, `IABS`, `BTEST`, `ORD`, `CHR` |
 | control flow | `JMP`, `JZ`, `JNZ` (u32 target absolute in the `CODE` payload) |
-| procedures | `CALL`, `RET`, `RET_VOID` — opcodes and emitter machinery exist; the front end does not emit them yet |
+| procedures | `CALL`, `RET`, `RET_VOID` — a declared procedure is emitted as its own procedure with its parameters as its lowest frame slots in order, and the module body is the last one; procedure-local *variables* are not hooked yet (only parameters are frame slots) |
 | builtins | `CALL_NATIVE` (`Out.Int`, `Out.String`, `Out.Ln`) |
 | traps | `TRAP`, `ASSERT_FAIL` |
 
