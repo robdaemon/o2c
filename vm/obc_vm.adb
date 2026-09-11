@@ -1164,6 +1164,13 @@ package body OBC_VM is
          Tag  : Natural;
          Len  : Natural;
       begin
+         if not Mark_Done then
+            --  Marking gave up part way - the worklist filled - so nothing
+            --  is known to be unreachable and freeing anything would reclaim
+            --  live objects.  Sweeping a partial mark is how a list lost its
+            --  tail and a sum came out larger than the data.
+            return;
+         end if;
          while Slot < Heap_Next loop
             if Heap (Slot) = Free_Sentinel then
                Slot := Slot + Natural (Heap (Slot + 1));
