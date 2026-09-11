@@ -280,11 +280,30 @@ package body O2c_Compiler is
    --  Lookup, never interning - a read must not mint a frame slot, or it
    --  would silently mean uninitialised memory instead of the global.
    --  Called only while Bytecode_Mode is on, since Global raises outside it.
-   function Bc_Var (Ada_Name : String) return Natural is
+   --  Load and store pick the opcode as well as the slot: a frame local is
+   --  LOAD_L/STORE_L against the current frame, a module variable is
+   --  LOAD_G/STORE_G against the globals block.  Getting this wrong is
+   --  silent - reading a zeroed global instead of a parameter - so it is
+   --  one helper rather than a convention at each site.
+   procedure Bc_Load (Ada_Name : String) is
       S : constant Integer := O2c_BC.Local_Slot (Ada_Name);
    begin
-      return (if S >= 0 then Natural (S) else O2c_BC.Global (Ada_Name));
-   end Bc_Var;
+      if S >= 0 then
+         O2c_BC.Load_Local (Natural (S));
+      else
+         O2c_BC.Load (O2c_BC.Global (Ada_Name));
+      end if;
+   end Bc_Load;
+
+   procedure Bc_Store (Ada_Name : String) is
+      S : constant Integer := O2c_BC.Local_Slot (Ada_Name);
+   begin
+      if S >= 0 then
+         O2c_BC.Store_Local (Natural (S));
+      else
+         O2c_BC.Store (O2c_BC.Global (Ada_Name));
+      end if;
+   end Bc_Store;
    Used_Int_Arr  : Boolean := False;  --  need O2c_Int_Arr base (M12)
    Used_Bool_Arr : Boolean := False;  --  need O2c_Bool_Arr base (M12)
    Used_Set      : Boolean := False;  --  need O2c_Set type + Interfaces
@@ -2969,8 +2988,7 @@ package body O2c_Compiler is
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
                        & "only INTEGER/CHAR/BOOLEAN variables are supported";
                   end if;
-                  O2c_BC.Load
-                    (Bc_Var (Ada_Id (Cur.Text (1 .. Cur.Len))));
+                  Bc_Load (Ada_Id (Cur.Text (1 .. Cur.Len)));
                end if;
                R.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
                R.Typ := Syms (Id).Typ;
@@ -6602,8 +6620,7 @@ package body O2c_Compiler is
                              & "backend: only INTEGER/CHAR/BOOLEAN "
                              & "assignments are supported";
                         end if;
-                        O2c_BC.Store
-                          (Bc_Var (Ada_Id (Head (1 .. H_Len))));
+                        Bc_Store (Ada_Id (Head (1 .. H_Len)));
                      end if;
                      if Syms (Idx).Typ = T_LReal then
                         if V.Typ = T_Int
