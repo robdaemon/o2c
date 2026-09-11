@@ -43,7 +43,13 @@ package body OBC_VM is
    --  what a test program needs with headroom, and go away when frames
    --  and ALLOC_NEW land.
    Max_File    : constant := 1_048_576;
-   Max_Stack   : constant := 256;
+   --  A policy limit, not a storage bound.  The operand stack grows on
+   --  demand, so this says only how much a program may ask for: it caps what
+   --  the verifier will accept as a procedure's Stack_Max, which stops a
+   --  runaway image from allocating without limit.  A fixed ceiling here is
+   --  what turned a one-slot-per-iteration leak into a bound-dependent
+   --  failure instead of a report about depth.
+   Max_Stack   : constant := 4096;
 
    --  Sizing note (project rule on fixed tables): call depth and frame slots
    --  for one run.  Both bounds fail loudly (Bad_Stack) instead of
@@ -137,6 +143,13 @@ package body OBC_VM is
    --  once per process today.  A guest build also has to move it off the
    --  stack (the guest stack is 256 KiB) rather than shrink it.
    Heap_Words : constant := 8192;      --  64 KiB of object bodies
+
+   --  A U64 run that lives on the heap rather than the guest stack, which is
+   --  only 256 KiB and is why these were local arrays before.  Indexing an
+   --  access to an array reads like indexing the array, so call sites are
+   --  unchanged; only the declaration and the growth differ.
+   type U64_Array is array (Natural range <>) of U64;
+   type U64_Array_Access is access U64_Array;
    Heap       : array (0 .. Heap_Words - 1) of aliased U64;
    --  One bit per arena slot, marking what a collection reached.  Packed
    --  rather than one Boolean per slot: the arena is large next to the guest
@@ -901,7 +914,7 @@ package body OBC_VM is
    function Execute (Data : Byte_Array; Img : Image_Info) return Status is
       Code   : Byte_Array renames Img.Code.all;
       Consts : Byte_Array renames Img.Consts_Copy.all;
-      Stack   : array (0 .. Max_Stack - 1) of U64 := (others => 0);
+      Stack   : U64_Array_Access := new U64_Array (0 .. Max_Stack - 1);
       --  The collector's root set is the *live prefix* of each of these three
       --  arrays, never the whole array: Stack (0 .. SP - 1), Locals
       --  (0 .. Locals_Used - 1) and Globals (0 .. Img.N_Globals - 1).  Slots
@@ -916,6 +929,19 @@ package body OBC_VM is
 
       procedure Push (V : U64) is
       begin
+         if SP = Stack'Length then
+            --  Doubling: amortised, and the only place the operand stack
+            --  ever grows.  A program that recurses deeply or nests
+            --  expressions deeply is no longer capped by a compile-time
+            --  ceiling, only by Max_Stack and then by memory.
+            declare
+               Bigger : constant U64_Array_Access :=
+                 new U64_Array (0 .. Stack'Length * 2 - 1);
+            begin
+               Bigger (0 .. Stack'Length - 1) := Stack.all;
+               Stack := Bigger;
+            end;
+         end if;
          Stack (SP) := V;
          SP := SP + 1;
       end Push;
