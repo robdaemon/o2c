@@ -1011,14 +1011,41 @@ package body O2c_Compiler is
 
    --  Scalar slots a record occupies, its parent's fields first: an
    --  extension's layout begins with its ancestors'.
-   function Total_Slots (UT : Natural) return Natural is
+   function Total_Slots (UT : Natural; Depth : Natural := 0) return Natural is
       N : Natural := 0;
-      U : Natural := UT;
    begin
-      while U /= 0 loop
-         N := N + UTypes (U).N_F;
-         U := UTypes (U).Parent;
-      end loop;
+      if UTypes (UT).Arr_Len > 0 then
+         --  An array of slot-scalars is its length: that is both its
+         --  footprint and what a variable of it needs nominating.  A record
+         --  has Arr_Len zero and falls through to the field walk.
+         return Natural (UTypes (UT).Arr_Len);
+      end if;
+      if Depth > 8 then
+         --  A record containing itself without an intervening pointer would
+         --  be infinite; refuse instead of recursing.
+         raise O2c_BC.Wrong_Construct with
+           "bytecode backend: a record nests too deeply to lay out";
+      end if;
+      declare
+         U : Natural := UT;
+      begin
+         while U /= 0 loop
+            for F in 1 .. UTypes (U).N_F loop
+               if UTypes (U).F (F).UT /= 0 then
+                  if UTypes (UTypes (U).F (F).UT).Arr_Len > 0 then
+                     N := N + Natural (UTypes (UTypes (U).F (F).UT).Arr_Len);
+                  elsif not UTypes (UTypes (U).F (F).UT).Is_Ptr then
+                     N := N + Total_Slots (UTypes (U).F (F).UT, Depth + 1);
+                  else
+                     N := N + 1;   --  a pointer is one word
+                  end if;
+               else
+                  N := N + 1;      --  a scalar is one word
+               end if;
+            end loop;
+            U := UTypes (U).Parent;
+         end loop;
+      end;
       return N;
    end Total_Slots;
 
@@ -1055,17 +1082,47 @@ package body O2c_Compiler is
    --  True when every field of the record, and of each of its ancestors, is
    --  one the bytecode can reach: a scalar of a type that fits a slot, or a
    --  field naming its own record.
-   function Fields_Allowed (U : Natural) return Boolean is
+   function Fields_Allowed (U : Natural; Depth : Natural := 0) return Boolean is
+      Slot_Scalar : Boolean;
    begin
-      return (for all J in 1 .. UTypes (U).N_F =>
-                (UTypes (U).F (J).UT = 0
-                 and then (UTypes (U).F (J).Typ = T_Int
-                           or else UTypes (U).F (J).Typ = T_Char
-                           or else UTypes (U).F (J).Typ = T_Bool
-                           or else UTypes (U).F (J).Typ = T_Set
-                           or else UTypes (U).F (J).Typ = T_Real
-                           or else UTypes (U).F (J).Typ = T_LReal))
-                or else UTypes (U).F (J).UT = U);
+      if Depth > 8 then
+         return False;
+      end if;
+      for J in 1 .. UTypes (U).N_F loop
+         if UTypes (U).F (J).UT = 0 then
+            Slot_Scalar := UTypes (U).F (J).Typ = T_Int
+              or else UTypes (U).F (J).Typ = T_Char
+              or else UTypes (U).F (J).Typ = T_Bool
+              or else UTypes (U).F (J).Typ = T_Set
+              or else UTypes (U).F (J).Typ = T_Real
+              or else UTypes (U).F (J).Typ = T_LReal;
+            if not Slot_Scalar then
+               return False;
+            end if;
+         elsif UTypes (U).F (J).UT = U
+           or else UTypes (UTypes (U).F (J).UT).Is_Ptr
+         then
+            null;                  --  one word: a pointer either way
+         elsif UTypes (UTypes (U).F (J).UT).Arr_Len > 0 then
+            --  a fixed array of slot scalars
+            if not (UTypes (UTypes (U).F (J).UT).Elem = T_Int
+                    or else UTypes (UTypes (U).F (J).UT).Elem = T_Char
+                    or else UTypes (UTypes (U).F (J).UT).Elem = T_Bool
+                    or else UTypes (UTypes (U).F (J).UT).Elem = T_Set
+                    or else UTypes (UTypes (U).F (J).UT).Elem = T_Real
+                    or else UTypes (UTypes (U).F (J).UT).Elem = T_LReal)
+            then
+               return False;
+            end if;
+         elsif UTypes (UTypes (U).F (J).UT).Is_Rec then
+            if not Fields_Allowed (UTypes (U).F (J).UT, Depth + 1) then
+               return False;
+            end if;
+         else
+            return False;
+         end if;
+      end loop;
+      return True;
    end Fields_Allowed;
 
    function Chain_Fields_Allowed (UT : Natural) return Boolean is
@@ -1442,6 +1499,7 @@ package body O2c_Compiler is
       VK : VK_Kind;
       UT : Natural := Base_UT;
       Implied_Deref : Boolean := False;
+      Nested : Natural := 0;
    begin
       if O2c_BC.Bytecode_Mode and then UTypes (UT).Is_Ptr then
          --  A pointer's value is what it designates, and a bare pointer is a
@@ -1568,19 +1626,18 @@ package body O2c_Compiler is
                               or else D.Sc = T_Set
                               or else D.Sc = T_Real
                               or else D.Sc = T_LReal)
-                       or else not (UT = Base_UT
-                                    or else (UTypes (Base_UT).Is_Ptr
-                                             and then UT =
-                                               UTypes (Base_UT).Ptr_Tgt))
                      then
+                        --  Reachability of the owning record is Field_Offset's
+                        --  business: it raises, with a message naming the
+                        --  problem, when the owner is not on the chain.  A
+                        --  nested record's field is reached through one, so
+                        --  testing the owner against the variable's type here
+                        --  would refuse valid accesses.
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                            & "only INTEGER, CHAR, BOOLEAN, SET, REAL, "
-                            & "LONGREAL and "
-                            & "self-referencing pointer fields reached "
-                            & "directly from a record variable or a pointer "
-                            & "to one are supported";
+                            & "only INTEGER, CHAR, BOOLEAN, SET, REAL and "
+                            & "LONGREAL record fields are supported";
                      end if;
-                     D.Off := Field_Offset (Base_UT, FO, F);
+                     D.Off := Nested + Field_Offset (UT, FO, F);
                      D.K := D_Field;
                      if not UTypes (Base_UT).Is_Ptr
                        and then not D.Base_On_Stack
@@ -1606,6 +1663,18 @@ package body O2c_Compiler is
                   end if;
                   Implied_Deref := True;
                end if;
+               if O2c_BC.Bytecode_Mode
+                 and then UTypes (FO).F (F).UT /= 0
+                 and then UTypes (FO).F (F).UT /= FO
+                 and then not UTypes (UTypes (FO).F (F).UT).Is_Ptr
+               then
+                  --  Walking into a nested record or an array: its storage
+                  --  starts at this field's own offset inside the record we
+                  --  are leaving, so carry that along for whatever the next
+                  --  selector computes from.
+                  Nested := Nested
+                    + Field_Offset (UT, FO, F);
+               end if;
                UT := UTypes (FO).F (F).UT;
                if UTypes (UT).Is_Ptr then
                   VK := V_Ptr;
@@ -1628,9 +1697,13 @@ package body O2c_Compiler is
                --  reads [base, index] for the access the caller emits.  The
                --  chain cannot emit that access itself - it does not know
                --  whether the caller is reading or assigning.
+               --  The variable's whole run, at the slot the chain has
+               --  walked to: offsets are byte counts and the run is slots,
+               --  and every offset here is a multiple of eight.
                O2c_BC.Load_Addr_G
                  (O2c_BC.Global_Array
-                    (Base_Name, Natural (UTypes (UT).Arr_Len)));
+                    (Base_Name, Total_Slots (Base_UT))
+                  + Nested / 8);
             end if;
             declare
                Ix : Expr_Rec := Parse_Expr;
