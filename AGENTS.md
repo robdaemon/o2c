@@ -54,6 +54,44 @@ silence or noise as the answer. Concretely, in this repo:
   mark/sweep convention mismatch in one run, after several rounds of deduction
   had not.
 
+## The o2c ↔ aegir coupling
+
+The two repos are separate, but `o2c.elf` embeds the VM and the Aegir image
+ships that one artifact, so the pieces are co-deployed even though the trees
+are not. The coupling is real; it just needs writing down.
+
+**What is shared, and by whom:**
+
+- **The VM is `vm/` plus `vm/compat-host/`.** The split is spec-shared /
+  body-per-platform: `VM_Platform`'s spec is common, its host body is in
+  `compat-host/`, and the Aegir body is in `compat-aegir/`.
+- `vm/vm.gpr` builds the host VM from (`.`, `compat-host`, `../compiler`).
+- `tools/tools.gpr` builds `o2c_bc_host` from (`.`, `../compiler`, `../vm`,
+  `../vm/compat-host`). It needs the VM because `O2c_BC` resolves foreign C
+  symbols through `OBC_VM.Native_Id`; the emitter carries that dependency so
+  the compiler does not grow a second path to the VM.
+- **Host-only targets** — `make vm-host`, `make tools-host` — need no Aegir.
+  **`AEGIR_ROOT` is required** for anything touching the Aegir side:
+  `make build AEGIR_ROOT=…`, and the guest tests.
+
+**If you add a directory to the VM, add it to both gprs.** A missing source
+directory does *not* announce itself as a build failure at the point of use —
+it surfaces as a stale tool, which is worse.
+
+**Never suppress a build's output.** `make tools-host >/dev/null 2>&1` with no
+exit-status check hid a failing tool build for two turns: `O2c_BC` had gained
+the `OBC_VM` dependency, `tools.gpr` did not have `../vm`, the link kept the
+old compiler, and every test after that ran a binary without the change in it
+and produced confident nonsense.
+
+So: check `$?`, do not redirect a build to `/dev/null`, and before concluding
+anything from what a tool printed, confirm the tool contains your change:
+
+    strings tools/bin/o2c_bc_host | grep <something-you-just-added>
+
+That check is cheap and it settles in one command what reasoning about the
+source cannot.
+
 ## Repository conventions
 
 - Builds are serial; never `make -jN`.
