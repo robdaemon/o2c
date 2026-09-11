@@ -28,7 +28,8 @@ package OBC_VM is
       Trap_Guard,      --  TRAP 2
       Trap_Divzero,    --  TRAP 3
       Trap_Range,      --  TRAP 5
-      Assert_Failed);  --  ASSERT_FAIL
+      Assert_Failed,   --  ASSERT_FAIL
+      Wants_More);     --  a native that would block, for the VM to park on
 
    --  Load, verify and interpret Path.  Returns Ok when the program ran to
    --  HALT, otherwise the first failure.  Diagnostics go to stderr.

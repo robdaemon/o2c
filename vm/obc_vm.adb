@@ -406,6 +406,7 @@ package body OBC_VM is
         when Bad_Const       => "constant-pool reference out of range",
         when Bad_Native      => "bad native call",
         when Not_Implemented => "opcode not implemented in this slice",
+        when Wants_More      => "a native call would block",
         when Trap_Index      => "index out of range",
         when Trap_Nil        => "NIL dereference",
         when Trap_Guard      => "type guard failure",
