@@ -154,6 +154,21 @@ package body OBC_VM is
    type U64_Array is array (Natural range <>) of U64;
    type U64_Array_Access is access U64_Array;
 
+   --  One interpreter invocation's root-bearing state.  It lives in a
+   --  record rather than as locals of Execute because interpretation can
+   --  nest - a C callback calling back into Oberon runs a second Execute
+   --  whose frames are roots while it runs - and because a thread will
+   --  contribute a second one of these.  The collection walks the contexts
+   --  that are live, not a fixed set of locals.
+   type Context is record
+      Stack       : U64_Array_Access := null;
+      SP          : Natural := 0;
+      Locals      : U64_Array_Access := null;
+      Pool_Used   : Natural := 0;
+      Globals     : U64_Array_Access := null;
+   end record;
+   type Context_Access is access Context;
+
    --  A run of operand state that a collection must treat as roots.  The set
    --  is a registry rather than three fixed loops because a thread will
    --  contribute its own stack and frames, and the collector should not have
@@ -936,10 +951,11 @@ package body OBC_VM is
    end Call_Native;
 
    --  ---- interpreter ----------------------------------------------------
-   function Execute (Data : Byte_Array; Img : Image_Info) return Status is
+   function Execute (Data : Byte_Array; Img : Image_Info;
+                     Ctx : Context_Access) return Status is
       Code   : Byte_Array renames Img.Code.all;
       Consts : Byte_Array renames Img.Consts_Copy.all;
-      Stack   : U64_Array_Access := new U64_Array (0 .. Max_Stack - 1);
+      Stack   : U64_Array_Access renames Ctx.Stack;
       --  The collector's root set is the *live prefix* of each of these three
       --  arrays, never the whole array: Stack (0 .. SP - 1), Locals
       --  (0 .. Locals_Used - 1) and Globals (0 .. Img.N_Globals - 1).  Slots
@@ -951,9 +967,8 @@ package body OBC_VM is
       --  Sized by the image, not by a ceiling: the loader has already
       --  rejected anything past Max_Globals, so this is exactly what the
       --  program declared and no more.
-      Globals : constant U64_Array_Access :=
-        new U64_Array (0 .. Natural'Max (Img.N_Globals, 1) - 1);
-      SP      : Natural := 0;
+      Globals : U64_Array_Access renames Ctx.Globals;
+      SP      : Natural renames Ctx.SP;
       PC      : Natural := Img.Body_Off;
 
       procedure Push (V : U64) is
@@ -989,7 +1004,7 @@ package body OBC_VM is
       --  at the current top of the locals pool, so slot i of the current
       --  frame lives at Locals (Frame_Base (Cur_Frame) + i), and the callee's
       --  parameter slots are the lowest slots of its frame.
-      Locals      : U64_Array_Access := new U64_Array (0 .. Max_VM_Locals - 1);
+      Locals      : U64_Array_Access renames Ctx.Locals;
       --  Frame 0's base is only written when a CALL pushes a frame, so a
       --  program with no calls reads it before any store.  The old local
       --  array got zero from its initialiser; an access does not, so the
@@ -1005,7 +1020,7 @@ package body OBC_VM is
       Return_PC   : Natural_Array_Access :=
         new Natural_Array'(0 .. Max_Frames - 1 => 0);
       Cur_Frame   : Natural := 0;
-      Locals_Used : Natural := 0;
+      Locals_Used : Natural renames Ctx.Pool_Used;
 
       --  Push the frame for Callee, so the body resumes at the instruction
       --  after the call.  CALL and DISPATCH each built this themselves, which
@@ -1963,7 +1978,17 @@ package body OBC_VM is
          return St;
       end if;
       Phase := 3;
-      return Execute (Data, Img);
+      --  The interpreter's root-bearing state, sized once the image has
+      --  been read.  One context today; a nested Execute will push another.
+      return Execute
+        (Data, Img,
+         new Context'(Stack       => new U64_Array (0 .. Max_Stack - 1),
+                      SP          => 0,
+                      Locals      => new U64_Array (0 .. Max_VM_Locals - 1),
+                      Pool_Used   => 0,
+                      Globals     =>
+                        new U64_Array
+                          (0 .. Natural'Max (Img.N_Globals, 1) - 1)));
    exception
       --  A malformed image must be *rejected*, never crash the VM: the
       --  spec's verification rules are checked, but a bug in the checks
