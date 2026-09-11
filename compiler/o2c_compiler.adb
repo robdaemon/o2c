@@ -1492,16 +1492,19 @@ package body O2c_Compiler is
                      --  layout is shared with its parent.
                      if D.Ptr_Field then
                         null;      --  a pointer field is an 8-byte word
-                     elsif D.Sc /= T_Int
+                     elsif not (D.Sc = T_Int or else D.Sc = T_Char
+                              or else D.Sc = T_Bool
+                              or else D.Sc = T_Set)
                        or else not (UT = Base_UT
                                     or else (UTypes (Base_UT).Is_Ptr
                                              and then UT =
                                                UTypes (Base_UT).Ptr_Tgt))
                      then
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                            & "only INTEGER and self-referencing pointer "
-                            & "fields reached directly from a record "
-                            & "variable or a pointer to one are supported";
+                            & "only INTEGER, CHAR, BOOLEAN, SET and "
+                            & "self-referencing pointer fields reached "
+                            & "directly from a record variable or a pointer "
+                            & "to one are supported";
                      end if;
                      D.Off := (F - 1) * 8;
                      D.K := D_Field;
@@ -4025,7 +4028,17 @@ package body O2c_Compiler is
                     --  default is null and which is how a list is built.
                     and then (for all J in 1 .. UTypes (UT).N_F =>
                                 (UTypes (UT).F (J).UT = 0
-                                 and then UTypes (UT).F (J).Typ = T_Int)
+                                 --  CHAR, BOOLEAN and SET share INTEGER's
+                                 --  8-byte slot, so the same field ops apply
+                                 --  and only the type check knows the
+                                 --  difference.
+                                 and then (UTypes (UT).F (J).Typ = T_Int
+                                           or else UTypes (UT).F (J).Typ
+                                             = T_Char
+                                           or else UTypes (UT).F (J).Typ
+                                             = T_Bool
+                                           or else UTypes (UT).F (J).Typ
+                                             = T_Set))
                                 or else UTypes (UT).F (J).UT = UT);
                begin
                   if not (Ok_Arr or else Ok_Rec or else Ok_Ptr) then
