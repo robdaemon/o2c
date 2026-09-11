@@ -4574,6 +4574,15 @@ package body O2c_Compiler is
             Body_Buf := Saved;
          end;
       end if;
+      if O2c_BC.Bytecode_Mode then
+         --  A procedure that falls off its end returns no value.  A function
+         --  must end with RETURN (the front end enforces it above), and that
+         --  statement emits the return itself.
+         if not Is_Function then
+            O2c_BC.Return_Void;
+         end if;
+         O2c_BC.End_Proc;
+      end if;
       Expect (Lex.Tok_End, "'END'");
       Next;
       Expect (Lex.Tok_Ident, "the procedure name after END");
