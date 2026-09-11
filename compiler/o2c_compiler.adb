@@ -3610,6 +3610,21 @@ package body O2c_Compiler is
          Next;
       end loop;
 
+      --  Bytecode: a procedure's variables are frame slots, taken after its
+      --  parameters (which Begin_Proc interned first, in order).  They are
+      --  interned here, at the declaration, rather than on first use, so a
+      --  name that was never declared local cannot quietly become one.
+      if O2c_BC.Bytecode_Mode and then In_Proc then
+         for I in 1 .. N loop
+            declare
+               Slot : constant Natural :=
+                 O2c_BC.Local (Ada_Id (To_String (Names (I))));
+               pragma Unreferenced (Slot);
+            begin
+               null;
+            end;
+         end loop;
+      end if;
       for I in 1 .. N loop
          if Exps (I) and then In_Proc then
             raise O2c_Error with "variables cannot be exported inside a "
