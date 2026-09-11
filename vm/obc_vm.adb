@@ -1249,6 +1249,43 @@ package body OBC_VM is
          return Heap_Words + 1;
       end Free_Fit;
 
+      --  The single place the arena grows.  Free space first, then a
+      --  collection and a retry, then the bump, and Heap_Words + 1 for "no
+      --  space at all".  Having one entry point is what lets threads add a
+      --  thread-local buffer or a lock in one place rather than two.
+      function Allocate (Need : Natural) return Natural is
+         Fit  : Natural := Free_Fit (Need);
+         Left : Natural;
+      begin
+         if Fit > Heap_Words
+           and then Heap_Next + Need > Heap_Words
+         then
+            Mark_All;
+            Sweep;
+            Fit := Free_Fit (Need);
+         end if;
+         if Fit <= Heap_Words then
+            --  Take the head of the run and leave the remainder as its own.
+            --  A single leftover slot cannot hold a sentinel and a length,
+            --  so it is absorbed, which is why merging on the sweep matters.
+            Left := Natural (Heap (Fit + 1)) - Need;
+            if Left >= 2 then
+               Heap (Fit + Need) := Free_Sentinel;
+               Heap (Fit + Need + 1) := U64 (Left);
+            end if;
+            return Fit;
+         end if;
+         if Heap_Next + Need <= Heap_Words then
+            declare
+               Slot : constant Natural := Heap_Next;
+            begin
+               Heap_Next := Heap_Next + Need;
+               return Slot;
+            end;
+         end if;
+         return Heap_Words + 1;
+      end Allocate;
+
    begin
       --  module globals come from the DATA section (their initial values)
       for I in 0 .. Img.N_Globals - 1 loop
@@ -1619,42 +1656,17 @@ package body OBC_VM is
                   --  The tag word is part of the extent, so the body is one
                   --  slot less than Alloc_Slots reports.
                   Words : constant Natural := Alloc_Slots (Size) - 1;
-                  Need  : constant Natural := Words + 1;
-                  Fit   : Natural := Free_Fit (Need);
-                  Base  : Natural;
-                  Left  : Natural;
+                  Need : constant Natural := Words + 1;
+                  Base : Natural;
                begin
-                  if Fit > Heap_Words
-                    and then Heap_Next + Need > Heap_Words
-                  then
-                     --  The one collection point.  Allocation happens
-                     --  nowhere else, so the collector runs here: mark from
-                     --  the roots, sweep what is unreachable back into free
-                     --  runs, and look again.  Collecting only when free
-                     --  space is short is what keeps a steady-state loop
-                     --  from collecting on every allocation.
-                     Mark_All;
-                     Sweep;
-                     Fit := Free_Fit (Need);
-                  end if;
-                  if Fit <= Heap_Words then
-                     --  Take the head of the run and leave the remainder as
-                     --  its own run.  A single leftover slot cannot hold a
-                     --  sentinel and a length, so it is absorbed, which is
-                     --  why merging on the sweep matters.
-                     Base := Fit;
-                     Left := Natural (Heap (Fit + 1)) - Need;
-                     if Left >= 2 then
-                        Heap (Fit + Need) := Free_Sentinel;
-                        Heap (Fit + Need + 1) := U64 (Left);
-                     end if;
-                  elsif Heap_Next + Need <= Heap_Words then
-                     Base := Heap_Next;
-                     Heap_Next := Heap_Next + Need;
-                  else
-                     --  Nothing free and no room to grow: a collection has
-                     --  just run, so everything left is reachable.  This has
-                     --  to stay a loud failure rather than a corruption.
+                  --  Collection happens inside Allocate, which is the one
+                  --  place the arena is touched: mark from the roots, sweep
+                  --  what is unreachable back into free runs, try again.
+                  Base := Allocate (Need);
+                  if Base > Heap_Words then
+                     --  Nothing free and no room to grow, so a collection
+                     --  has just run and everything left is reachable.  This
+                     --  stays a loud failure rather than a corruption.
                      Note ("heap exhausted");
                      return Bad_Code;
                   end if;
