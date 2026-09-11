@@ -3173,6 +3173,16 @@ package body O2c_Compiler is
                           (Conv & To_String (X.Text) & ")");
                      end if;
                   end;
+                  --  Both operands are real-valued here; a coerced
+                  --  integer would need an I2R first and is refused.
+                  if O2c_BC.Bytecode_Mode then
+                     if R.Typ = T_Int or else X.Typ = T_Int then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "a mixed INTEGER/REAL operation is not yet "
+                          & "supported";
+                     end if;
+                     O2c_BC.Bin (O2c_BC.Rmul);
+                  end if;
                   R.Text := R.Text & " * " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
@@ -3262,6 +3272,16 @@ package body O2c_Compiler is
                           (Conv & To_String (X.Text) & ")");
                      end if;
                   end;
+                  --  Both operands are real-valued here; a coerced
+                  --  integer would need an I2R first and is refused.
+                  if O2c_BC.Bytecode_Mode then
+                     if R.Typ = T_Int or else X.Typ = T_Int then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "a mixed INTEGER/REAL operation is not yet "
+                          & "supported";
+                     end if;
+                     O2c_BC.Bin (O2c_BC.Rdiv);
+                  end if;
                   R.Text := R.Text & " / " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
@@ -3345,6 +3365,16 @@ package body O2c_Compiler is
                           (Conv & To_String (X.Text) & ")");
                      end if;
                   end;
+                  --  Both operands are real-valued here; a coerced
+                  --  integer would need an I2R first and is refused.
+                  if O2c_BC.Bytecode_Mode then
+                     if R.Typ = T_Int or else X.Typ = T_Int then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "a mixed INTEGER/REAL operation is not yet "
+                          & "supported";
+                     end if;
+                     O2c_BC.Bin (O2c_BC.Radd);
+                  end if;
                   R.Text := R.Text & " + " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
@@ -3403,6 +3433,16 @@ package body O2c_Compiler is
                           (Conv & To_String (X.Text) & ")");
                      end if;
                   end;
+                  --  Both operands are real-valued here; a coerced
+                  --  integer would need an I2R first and is refused.
+                  if O2c_BC.Bytecode_Mode then
+                     if R.Typ = T_Int or else X.Typ = T_Int then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "a mixed INTEGER/REAL operation is not yet "
+                          & "supported";
+                     end if;
+                     O2c_BC.Bin (O2c_BC.Rsub);
+                  end if;
                   R.Text := R.Text & " - " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
