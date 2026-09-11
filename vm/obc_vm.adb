@@ -42,6 +42,13 @@ package body OBC_VM is
    --  and ALLOC_NEW land.
    Max_File    : constant := 1_048_576;
    Max_Stack   : constant := 256;
+
+   --  Sizing note (project rule on fixed tables): call depth and frame slots
+   --  for one run.  Both bounds fail loudly (Bad_Stack) instead of
+   --  truncating, and both are generous relative to what the emitter
+   --  produces; a procedure's own frame size comes from its record.
+   Max_Frames     : constant := 64;
+   Max_VM_Locals  : constant := 1024;
    Max_Globals : constant := 4096;
    Max_Natives : constant := 3;
 
@@ -83,6 +90,9 @@ package body OBC_VM is
    Op_Load_Const  : constant := 16#14#;
    Op_Load_L      : constant := 16#10#;
    Op_Store_L     : constant := 16#11#;
+   Op_Call        : constant := 16#C0#;
+   Op_Ret         : constant := 16#C1#;
+   Op_Ret_Void    : constant := 16#C2#;
    Op_Add         : constant := 16#30#;
    Op_Sub         : constant := 16#31#;
    Op_Mul         : constant := 16#32#;
@@ -468,6 +478,37 @@ package body OBC_VM is
                   Depth := Depth - 1;
                end if;
                PC := PC + 3;
+            when Op_Call =>
+               if not Fits (PC + 1, 4) then
+                  return Bad_Code;
+               end if;
+               declare
+                  Target : constant Natural := Natural (LE32 (Code, PC + 1));
+                  Found  : Boolean := False;
+               begin
+                  for P in 1 .. Img.N_Procs loop
+                     if Img.Procs (P).Code_Off = Target then
+                        Found := True;
+                        Depth := Depth
+                          - Integer (Img.Procs (P).NParams)
+                          + Integer (Img.Procs (P).NResults);
+                     end if;
+                  end loop;
+                  if not Found then
+                     return Bad_Target;
+                  end if;
+               end;
+               PC := PC + 5;
+            when Op_Ret | Op_Ret_Void =>
+               --  This walk is linear, and by construction the code after a
+               --  return is the next procedure in the payload, so the
+               --  frame's depth is not carried across: reset it.  The
+               --  interpreter, which actually returns, has no need of this.
+               if Depth < 0 then
+                  return Bad_Stack;
+               end if;
+               Depth := 0;
+               PC := PC + 1;
             when others =>
                Note_At ("verification stopped: opcode not implemented in this "
                    & "slice", PC);
@@ -553,12 +594,27 @@ package body OBC_VM is
       function Top return U64 is
         (Stack (SP - 1));
 
+      --  Frames.  Frame 0 is the module body; a CALL pushes the next frame
+      --  at the current top of the locals pool, so slot i of the current
+      --  frame lives at Locals (Frame_Base (Cur_Frame) + i), and the callee's
+      --  parameter slots are the lowest slots of its frame.
+      Locals      : array (0 .. Max_VM_Locals - 1) of U64 := (others => 0);
+      Frame_Base  : array (0 .. Max_Frames - 1) of Natural := (others => 0);
+      Frame_Slots : array (0 .. Max_Frames - 1) of Natural := (others => 0);
+      Return_PC   : array (0 .. Max_Frames - 1) of Natural := (others => 0);
+      Cur_Frame   : Natural := 0;
+      Locals_Used : Natural := 0;
+
       Op : Byte;
    begin
       --  module globals come from the DATA section (their initial values)
       for I in 0 .. Img.N_Globals - 1 loop
          Globals (I) := LE64 (Data, Img.Globals_Off + I * Const_Slot);
       end loop;
+
+      Frame_Slots (0) := Img.Procs (Img.Body_Proc).Frame_Slots;
+      Locals_Used := Frame_Slots (0);
+      Cur_Frame := 0;
 
       loop
          if PC >= Code'Length then
@@ -702,6 +758,98 @@ package body OBC_VM is
                   end if;
                end;
                PC := PC + 4;
+            when Op_Load_L | Op_Store_L =>
+               if PC + 2 >= Code'Length then
+                  return Bad_Code;
+               end if;
+               declare
+                  Slot : constant Natural :=
+                    Natural (Code (PC + 1)) + Natural (Code (PC + 2)) * 256;
+                  Addr : constant Natural := Frame_Base (Cur_Frame) + Slot;
+               begin
+                  if Slot >= Frame_Slots (Cur_Frame) then
+                     Note_At ("local slot out of range", PC);
+                     return Bad_Stack;
+                  end if;
+                  if Op = Op_Load_L then
+                     if SP >= Max_Stack then
+                        return Bad_Stack;
+                     end if;
+                     Push (Locals (Addr));
+                  else
+                     if SP = 0 then
+                        return Bad_Stack;
+                     end if;
+                     Locals (Addr) := Pop;
+                  end if;
+               end;
+               PC := PC + 3;
+
+            when Op_Call =>
+               if PC + 4 >= Code'Length then
+                  return Bad_Code;
+               end if;
+               declare
+                  Target : constant Natural := Natural (LE32 (Code, PC + 1));
+                  Callee : Natural := 0;
+               begin
+                  for P in 1 .. Img.N_Procs loop
+                     if Img.Procs (P).Code_Off = Target then
+                        Callee := P;
+                     end if;
+                  end loop;
+                  if Callee = 0 then
+                     Note_At ("call target is not a procedure", PC);
+                     return Bad_Target;
+                  end if;
+                  if SP < Img.Procs (Callee).NParams then
+                     return Bad_Stack;
+                  end if;
+                  if Cur_Frame + 1 >= Max_Frames then
+                     Note_At ("call depth exceeded", PC);
+                     return Bad_Stack;
+                  end if;
+                  declare
+                     Base : constant Natural := Locals_Used;
+                  begin
+                     if Base + Img.Procs (Callee).Frame_Slots > Max_VM_Locals
+                     then
+                        Note_At ("frame pool exhausted", PC);
+                        return Bad_Stack;
+                     end if;
+                     for K in reverse 0 .. Img.Procs (Callee).NParams - 1 loop
+                        Locals (Base + K) := Pop;
+                     end loop;
+                     Return_PC (Cur_Frame) := PC + 5;
+                     Cur_Frame := Cur_Frame + 1;
+                     Frame_Base (Cur_Frame) := Base;
+                     Frame_Slots (Cur_Frame) := Img.Procs (Callee).Frame_Slots;
+                     Locals_Used := Base + Img.Procs (Callee).Frame_Slots;
+                  end;
+                  PC := Target;
+               end;
+
+            when Op_Ret =>
+               if Cur_Frame = 0 or else SP = 0 then
+                  return Bad_Stack;
+               end if;
+               declare
+                  Result : constant U64 := Pop;
+               begin
+                  Locals_Used := Frame_Base (Cur_Frame);
+                  Cur_Frame := Cur_Frame - 1;
+                  PC := Return_PC (Cur_Frame);
+                  Push (Result);
+               end;
+
+            when Op_Ret_Void =>
+               if Cur_Frame = 0 then
+                  return Bad_Stack;
+               end if;
+               Locals_Used := Frame_Base (Cur_Frame);
+               Cur_Frame := Cur_Frame - 1;
+               PC := Return_PC (Cur_Frame);
+
             when others =>
                Note_At ("opcode not implemented in this slice", PC);
                return Not_Implemented;
