@@ -109,7 +109,9 @@ put("badjump.obc", bytes(b), "jump target")
 b = bytearray(base)
 n_procs = struct.unpack_from("<I", b, code_off)[0]
 body = code_off + 4 + n_procs * 24                        # first instruction
-b[body] = 0x1D                     # LOAD_IDX_I: defined, not implemented
+b[body] = 0xF1    # a reserved opcode: never implemented, so this contract
+                  # cannot be retired by a feature the way LOAD_IDX_I and the
+                  # REAL literal program were.
 put("notimpl.obc", bytes(b), "not implemented")
 
 #  native arity mismatch: CALL_NATIVE Out.Ln with one argument
