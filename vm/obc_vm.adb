@@ -923,7 +923,7 @@ package body OBC_VM is
       --  precisely.  Each word is still validated as an arena object before
       --  being followed, so a scalar that happens to look like an address can
       --  only retain an object, never free a live one.
-      Globals : array (0 .. Max_Globals - 1) of U64 := (others => 0);
+      Globals : constant U64_Array_Access := new U64_Array (0 .. Max_Globals - 1);
       SP      : Natural := 0;
       PC      : Natural := Img.Body_Off;
 
