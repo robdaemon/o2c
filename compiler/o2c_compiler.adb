@@ -1907,6 +1907,32 @@ package body O2c_Compiler is
                  & "writable array, not a value ARRAY OF parameter (line "
                  & Natural'Image (Cur.Line) & ")";
             end if;
+            if O2c_BC.Bytecode_Mode then
+               declare
+                  Nm  : constant String := Cur.Text (1 .. Cur.Len);
+                  Sl  : constant Integer := O2c_BC.Local_Slot (Ada_Id (Nm));
+               begin
+                  if Syms (Id).Open_Arr and then Sl >= 0 then
+                     --  Forwarding an ARRAY OF formal: it already carries
+                     --  its address and length in its own two slots.
+                     O2c_BC.Load_Local (Natural (Sl));
+                     O2c_BC.Load_Local (Natural (Sl) + 1);
+                  elsif Syms (Id).Open_Arr then
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & "forwarding a global ARRAY OF parameter is not yet "
+                       & "supported";
+                  elsif Sl >= 0 then
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & "an ARRAY OF actual that is a local array is not yet "
+                       & "supported";
+                  else
+                     --  A fixed array: its address, and a length the
+                     --  emitter knows because the declaration fixed it.
+                     O2c_BC.Load_Addr_G (O2c_BC.Global (Ada_Id (Nm)));
+                     O2c_BC.Push_Int (UTypes (Syms (Id).UT).Arr_Len);
+                  end if;
+               end;
+            end if;
             A.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
             Next;
             return A;
@@ -3368,11 +3394,45 @@ package body O2c_Compiler is
                   end if;
                   Expect (Lex.Tok_LBracket, "'[' to index an array");
                   Next;
+                  if O2c_BC.Bytecode_Mode then
+                     --  An open array's address is in the parameter's own
+                     --  slot, not in a global run, so the base is a local
+                     --  load rather than a global address.
+                     O2c_BC.Load_Local
+                       (Natural (O2c_BC.Local_Slot (Ada_Id (Nm))));
+                  end if;
                   declare
                      Ix : Expr_Rec := Parse_Expr;
                   begin
                      if Ix.Typ /= T_Int then
                         raise O2c_Error with "array index must be INTEGER";
+                     end if;
+                     if O2c_BC.Bytecode_Mode then
+                        --  Bound against the length that travelled with the
+                        --  array.  A fixed array's bound is a constant the
+                        --  emitter knows; an open one's is a runtime value,
+                        --  which is why the spec calls LOAD_IDX bounds
+                        --  checked rather than leaving it to the caller.
+                        declare
+                           L_Ok : constant Natural := New_Bc_Label;
+                           L_In : constant Natural := New_Bc_Label;
+                           Len  : constant Natural :=
+                             Natural (O2c_BC.Local_Slot (Ada_Id (Nm))) + 1;
+                        begin
+                           O2c_BC.Dup_Top;
+                           O2c_BC.Push_Int (0);
+                           O2c_BC.Bin (O2c_BC.Ge);
+                           O2c_BC.Jump (O2c_BC.Jnz, L_In);
+                           O2c_BC.Trap (0);
+                           O2c_BC.Mark (L_In);
+                           O2c_BC.Dup_Top;
+                           O2c_BC.Load_Local (Len);
+                           O2c_BC.Bin (O2c_BC.Lt);
+                           O2c_BC.Jump (O2c_BC.Jnz, L_Ok);
+                           O2c_BC.Trap (0);
+                           O2c_BC.Mark (L_Ok);
+                           O2c_BC.Bin (O2c_BC.Load_Idx_I);
+                        end;
                      end if;
                      R.Text := To_Unbounded_String (Nm) & " ("
                        & Ix.Text & ")";
@@ -4132,7 +4192,12 @@ package body O2c_Compiler is
       --  parameters (which Begin_Proc interned first, in order).  They are
       --  interned here, at the declaration, rather than on first use, so a
       --  name that was never declared local cannot quietly become one.
-      if O2c_BC.Bytecode_Mode and then In_Proc then
+      --  Gated on the *emitter's* procedure state rather than on In_Proc,
+      --  which is set at the body's BEGIN: a procedure's declarations come
+      --  before that, so the interning never ran for them and every local
+      --  silently resolved to a global.  Proc_Open is true from Begin_Proc,
+      --  which runs at the header, through End_Proc.
+      if O2c_BC.Bytecode_Mode and then O2c_BC.Proc_Open then
          for I in 1 .. N loop
             declare
                Slot : constant Natural :=
