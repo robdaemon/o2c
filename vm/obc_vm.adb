@@ -969,8 +969,13 @@ package body OBC_VM is
       --  never arrives.
       Frame_Base  : constant Natural_Array_Access :=
         new Natural_Array'(0 .. Max_Frames - 1 => 0);
-      Frame_Slots : constant Natural_Array_Access := new Natural_Array (0 .. Max_Frames - 1);
-      Return_PC   : array (0 .. Max_Frames - 1) of Natural := (others => 0);
+      --  Written for frame 0 before any read, so the default never
+      --  mattered here - but it is spelled out anyway, since the same
+      --  omission made Frame_Base read an uninitialised slot.
+      Frame_Slots : constant Natural_Array_Access :=
+        new Natural_Array'(0 .. Max_Frames - 1 => 0);
+      Return_PC   : constant Natural_Array_Access :=
+        new Natural_Array'(0 .. Max_Frames - 1 => 0);
       Cur_Frame   : Natural := 0;
       Locals_Used : Natural := 0;
 
