@@ -969,20 +969,20 @@ package body OBC_VM is
       --  at the current top of the locals pool, so slot i of the current
       --  frame lives at Locals (Frame_Base (Cur_Frame) + i), and the callee's
       --  parameter slots are the lowest slots of its frame.
-      Locals      : constant U64_Array_Access := new U64_Array (0 .. Max_VM_Locals - 1);
+      Locals      : U64_Array_Access := new U64_Array (0 .. Max_VM_Locals - 1);
       --  Frame 0's base is only written when a CALL pushes a frame, so a
       --  program with no calls reads it before any store.  The old local
       --  array got zero from its initialiser; an access does not, so the
       --  aggregate is spelled out rather than relying on a default that
       --  never arrives.
-      Frame_Base  : constant Natural_Array_Access :=
+      Frame_Base  : Natural_Array_Access :=
         new Natural_Array'(0 .. Max_Frames - 1 => 0);
       --  Written for frame 0 before any read, so the default never
       --  mattered here - but it is spelled out anyway, since the same
       --  omission made Frame_Base read an uninitialised slot.
-      Frame_Slots : constant Natural_Array_Access :=
+      Frame_Slots : Natural_Array_Access :=
         new Natural_Array'(0 .. Max_Frames - 1 => 0);
-      Return_PC   : constant Natural_Array_Access :=
+      Return_PC   : Natural_Array_Access :=
         new Natural_Array'(0 .. Max_Frames - 1 => 0);
       Cur_Frame   : Natural := 0;
       Locals_Used : Natural := 0;
@@ -995,13 +995,43 @@ package body OBC_VM is
       function Push_Frame (Callee : Natural) return Boolean is
          Base : constant Natural := Locals_Used;
       begin
-         if Cur_Frame + 1 >= Max_Frames then
-            Note_At ("call depth exceeded", PC);
-            return False;
+         if Cur_Frame + 1 >= Frame_Slots'Length then
+            --  Grow rather than refuse.  Call depth is the program's own
+            --  business, and all three arrays are indexed by frame number so
+            --  they grow together.
+            declare
+               Cap       : constant Natural := Frame_Slots'Length * 2;
+               Old       : constant Natural := Frame_Slots'Length;
+               New_Base  : constant Natural_Array_Access :=
+                 new Natural_Array'(0 .. Cap - 1 => 0);
+               New_Slots : constant Natural_Array_Access :=
+                 new Natural_Array'(0 .. Cap - 1 => 0);
+               New_PC    : constant Natural_Array_Access :=
+                 new Natural_Array'(0 .. Cap - 1 => 0);
+            begin
+               New_Base  (0 .. Old - 1) := Frame_Base.all;
+               New_Slots (0 .. Old - 1) := Frame_Slots.all;
+               New_PC    (0 .. Old - 1) := Return_PC.all;
+               Frame_Base  := New_Base;
+               Frame_Slots := New_Slots;
+               Return_PC   := New_PC;
+            end;
          end if;
-         if Base + Img.Procs (Callee).Frame_Slots > Max_VM_Locals then
-            Note_At ("frame pool exhausted", PC);
-            return False;
+         if Base + Img.Procs (Callee).Frame_Slots > Locals'Length then
+            --  The pool is sized by the call chain, so grow it too.  Existing
+            --  frames keep their slots, which is why the copy starts at zero.
+            declare
+               Cap   : Natural := Locals'Length;
+               Old   : constant Natural := Locals'Length;
+               Newer : U64_Array_Access;
+            begin
+               while Cap < Base + Img.Procs (Callee).Frame_Slots loop
+                  Cap := Cap * 2;
+               end loop;
+               Newer := new U64_Array (0 .. Cap - 1);
+               Newer (0 .. Old - 1) := Locals.all;
+               Locals := Newer;
+            end;
          end if;
          for K in reverse 0 .. Img.Procs (Callee).NParams - 1 loop
             Locals (Base + K) := Pop;
