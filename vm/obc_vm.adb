@@ -1177,7 +1177,10 @@ package body OBC_VM is
             else
                Tag := Natural (Heap (Slot));
                Len := Object_Slots (Img, Tag);
-               if not Marked_At (Slot) then
+               --  The mark records the body slot, which is the address it
+               --  was handed, so the tag slot is one below.  Testing Slot
+               --  here reads a bit the mark never sets and frees everything.
+               if not Marked_At (Slot + 1) then
                   if Slot + Len < Heap_Next
                     and then Heap (Slot + Len) = Free_Sentinel
                   then
