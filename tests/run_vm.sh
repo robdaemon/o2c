@@ -101,10 +101,15 @@ i = find_code(bytes([0xA1]))                              # JZ
 struct.pack_into("<I", b, i + 1, 0xFFFFFF)
 put("badjump.obc", bytes(b), "jump target")
 
-#  an opcode the slice does not implement: rewrite a NOP-ish byte to CALL
+#  An opcode the slice does not implement: rewrite the HALT to CALL.  The
+#  search must start after the procedure table, because the table's own
+#  n_procs is 1 - searching from the payload start patched the table and
+#  relied on the loader rejecting a bogus procedure count, which is a
+#  malformed image (Bad_Size) rather than an unimplemented opcode.
 b = bytearray(base)
-i = find_code(bytes([0x01]))                              # HALT
-b[i] = 0xC0                                               # -> CALL
+n_procs = struct.unpack_from("<I", b, code_off)[0]
+body = code_off + 4 + n_procs * 24                        # first instruction
+b[body] = 0x1D                     # LOAD_IDX_I: defined, not implemented
 put("notimpl.obc", bytes(b), "not implemented")
 
 #  native arity mismatch: CALL_NATIVE Out.Ln with one argument

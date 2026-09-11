@@ -65,6 +65,9 @@ package body OBC_VM is
       return R;
    end LE64;
 
+   function LE16 (B : Byte_Array; Off : Natural) return Natural is
+     (Natural (B (Off)) + Natural (B (Off + 1)) * 256);
+
    function To_I64 is new Ada.Unchecked_Conversion (U64, I64);
    function To_U64 is new Ada.Unchecked_Conversion (I64, U64);
 
@@ -107,6 +110,22 @@ package body OBC_VM is
    Native_Pops : constant array (0 .. Max_Natives - 1) of Natural :=
      (2, 1, 0);
 
+   --  Sizing note (project rule on fixed tables): how many procedures the
+   --  loader will accept from an image.  Exceeding it is a rejected image,
+   --  never a partial load, and the bound is generous relative to what the
+   --  emitter produces.
+   Max_Procs   : constant := 256;
+
+   type Proc_Info is record
+      Code_Off    : Natural := 0;   --  payload-relative, table included
+      Frame_Slots : Natural := 0;
+      NParams     : Natural := 0;
+      NResults    : Natural := 0;
+      Stack_Max   : Natural := 0;
+   end record;
+
+   type Proc_Table is array (1 .. Max_Procs) of Proc_Info;
+
    --  ---- decoded image --------------------------------------------------
    type Image_Info is record
       Entry_Off   : Natural := 0;
@@ -118,6 +137,9 @@ package body OBC_VM is
       Consts_Len  : Natural := 0;
       Code_Off    : Natural := 0;
       Code_Len    : Natural := 0;
+      N_Procs     : Natural := 0;
+      Body_Proc   : Natural := 0;   --  the one the entry offset names
+      Procs       : Proc_Table;
       --  The CODE and CONST payloads as 0-based heap copies, shared by the
       --  verifier and the interpreter (see the note in Decode).
       Code        : Byte_Array_Access := null;
@@ -256,21 +278,51 @@ package body OBC_VM is
          Code : Byte_Array renames Img.Code.all;
          N_Procs : constant Natural := Natural (LE32 (Code, 0));
       begin
-         if N_Procs /= 1 then
-            --  the slice runs the module body only
-            return Not_Implemented;
+         if N_Procs = 0 or else N_Procs > Max_Procs then
+            return Bad_Section;
          end if;
-         Img.Body_Off := 4 + Proc_Rec;
-         --  record: code_off u32, frame_slots u32, nparams u16,
-         --  nresults u16, stack_max u32, stackmap_off u32, line_ref u32
-         --  so stack_max sits at record offset 12 == payload 4 + 12.
-         Img.Stack_Max := Natural (LE32 (Code, 4 + 12));
-         if Img.Entry_Off /= Img.Body_Off then
-            return Bad_Target;
-         end if;
-         if Img.Stack_Max = 0 or else Img.Stack_Max > Max_Stack then
+         if Img.Code_Len < 4 + N_Procs * Proc_Rec then
             return Bad_Size;
          end if;
+
+         --  One record per procedure: code_off u32, frame_slots u32,
+         --  nparams u16, nresults u16, stack_max u32, stackmap_off u32,
+         --  line_ref u32.  Code offsets are relative to the start of this
+         --  payload, the table included (docs/obc-image.md).
+         Img.N_Procs := N_Procs;
+         Img.Stack_Max := 0;
+         Img.Body_Proc := 0;
+         for P in 1 .. N_Procs loop
+            declare
+               Rec : constant Natural := 4 + (P - 1) * Proc_Rec;
+            begin
+               Img.Procs (P) :=
+                 (Code_Off    => Natural (LE32 (Code, Rec)),
+                  Frame_Slots => Natural (LE32 (Code, Rec + 4)),
+                  NParams     => LE16 (Code, Rec + 8),
+                  NResults    => LE16 (Code, Rec + 10),
+                  Stack_Max   => Natural (LE32 (Code, Rec + 12)));
+            end;
+            if Img.Procs (P).Code_Off > Img.Code_Len then
+               return Bad_Target;
+            end if;
+            if Img.Procs (P).Stack_Max = 0
+              or else Img.Procs (P).Stack_Max > Max_Stack
+            then
+               return Bad_Size;
+            end if;
+            if Img.Procs (P).Stack_Max > Img.Stack_Max then
+               Img.Stack_Max := Img.Procs (P).Stack_Max;
+            end if;
+            if Img.Procs (P).Code_Off = Img.Entry_Off then
+               Img.Body_Proc := P;
+            end if;
+         end loop;
+         if Img.Body_Proc = 0 then
+            --  entry has to name a real procedure: the module body.
+            return Bad_Target;
+         end if;
+         Img.Body_Off := Img.Entry_Off;
       end;
       return Ok;
    end Decode;
