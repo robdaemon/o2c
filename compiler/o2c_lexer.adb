@@ -90,6 +90,7 @@ package body O2c_Lexer is
          when Tok_False     => return "keyword FALSE";
          when Tok_Nil       => return "keyword NIL";
          when Tok_Is        => return "keyword IS";
+         when Tok_Extern    => return "keyword EXTERN";
          when Tok_With      => return "keyword WITH";
          when Tok_In        => return "keyword IN";
          when Tok_Div       => return "keyword DIV";
@@ -163,6 +164,12 @@ package body O2c_Lexer is
       elsif Folded = "FALSE" then return Tok_False;
       elsif Folded = "NIL" then return Tok_Nil;
       elsif Folded = "IS" then return Tok_Is;
+      --  EXTERN marks a declaration as foreign: a procedure bound to a C
+      --  symbol, and later a record laid out the way C would.  It is its own
+      --  keyword rather than overloading IS, which already means type
+      --  identity, so a reader or a tool can tell foreignness without
+      --  parsing the surrounding context.
+      elsif Folded = "EXTERN" then return Tok_Extern;
       elsif Folded = "WITH" then return Tok_With;
       elsif Folded = "IN" then
          --  M45: the Oakwood basic module is named `In`.  Keywords

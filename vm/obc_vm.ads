@@ -42,4 +42,10 @@ package OBC_VM is
 
    --  Human-readable status text, for the driver's exit diagnostic.
    function Image (S : Status) return String;
+
+   --  The native id bound to a C symbol, or 0 when the VM does not know it.
+   --  A stub module names the symbol it means, so the compiler asks here and
+   --  a typo is a build error naming the symbol rather than a call to the
+   --  wrong function.
+   function Native_Id (Sym : String) return Natural;
 end OBC_VM;

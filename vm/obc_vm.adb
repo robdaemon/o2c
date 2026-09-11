@@ -251,8 +251,30 @@ package body OBC_VM is
    --  Out.String's pointer is an offset into the CONST payload (strings
    --  live in the image, which is why the GC can treat image data as
    --  static roots later).
-   Native_Pops : constant array (0 .. Max_Natives - 1) of Natural :=
-     (2, 1, 0, 2, 1);
+   --  Foreign functions the VM can call, by the C symbol a stub module
+   --  names.  Named rather than numbered: a wrong number would call the
+   --  wrong function and nobody would notice, where a wrong name is a build
+   --  error with the name in it.  Ids continue after the builtins, so the
+   --  two tables cannot collide and neither needs renumbering to grow.
+   Max_Foreign : constant := 32;
+   type Sym_Access is access constant String;
+   type Foreign_Rec is record
+      Sym  : Sym_Access := null;
+      Pops : Natural := 0;
+   end record;
+   Foreign : constant array (1 .. Max_Foreign) of Foreign_Rec :=
+     (1 => (Sym => new String'("labs"), Pops => 1),
+      others => (Sym => null, Pops => 0));
+
+   Native_Count : constant := Max_Natives + Max_Foreign;
+
+   --  How many operands each native takes.  The verifier enforces this per
+   --  id, so a stub that gets the arity wrong fails at load rather than
+   --  unbalancing the operand stack at run time.
+   Native_Pops : constant array (0 .. Native_Count - 1) of Natural :=
+     (0 => 2, 1 => 1, 2 => 0, 3 => 2, 4 => 1,
+      5 => 1,     --  labs
+      others => 0);
 
    --  Arguments handed to a native, leftmost first.  The table above gives
    --  the arity per id and the verifier enforces it, so this is only the
@@ -329,6 +351,16 @@ package body OBC_VM is
          end if;
       end loop;
    end Finalize;
+
+   function Native_Id (Sym : String) return Natural is
+   begin
+      for I in Foreign'Range loop
+         if Foreign (I).Sym /= null and then Foreign (I).Sym.all = Sym then
+            return Max_Natives + I;
+         end if;
+      end loop;
+      return 0;
+   end Native_Id;
 
    function Tag_At (Obj : U64) return Natural is
       W : U64 with Address =>

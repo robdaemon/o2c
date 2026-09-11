@@ -19,7 +19,7 @@ package O2c_Lexer is
       Tok_If, Tok_Then, Tok_Elsif, Tok_Else,
       Tok_While, Tok_Do, Tok_Repeat, Tok_Until,
       Tok_For, Tok_To, Tok_By, Tok_Loop, Tok_Exit, Tok_Return,
-      Tok_True, Tok_False, Tok_Nil, Tok_Is,
+      Tok_True, Tok_False, Tok_Nil, Tok_Is, Tok_Extern,
       Tok_With, Tok_In,
       Tok_Div, Tok_Mod, Tok_And, Tok_Or, Tok_Not,
       --  symbols
