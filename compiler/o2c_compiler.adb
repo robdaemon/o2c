@@ -2051,17 +2051,32 @@ package body O2c_Compiler is
             R.Lit := True;
             Next;
          when Lex.Tok_String =>
-            R.Text := To_Unbounded_String
-              (Ada_String_Literal (Cur.Text (1 .. Cur.Len)));
-            R.Typ := T_Str;
-            if O2c_BC.Bytecode_Mode then
-               --  Cur.Text holds the literal's bytes with no quotes (the
-               --  Ada text is quoted separately by Ada_String_Literal), so
-               --  the whole token is the string.  The pool word holds its
-               --  offset in the CONST payload.
-               O2c_BC.Push_Str (Cur.Text (1 .. Cur.Len));
+            if Cur.Len = 1 then
+               --  A one-character literal is a CHAR, not a string.  In this
+               --  VM a char is an integer in an 8-byte slot, and every
+               --  one-character literal in the corpus is used as a char, so
+               --  promoting it to a string would put a pointer where a code
+               --  belongs - and cost a pool word for the privilege.
+               R.Text := To_Unbounded_String
+                 ("'" & Cur.Text (1 .. 1) & "'");
+               R.Typ := T_Char;
+               if O2c_BC.Bytecode_Mode then
+                  O2c_BC.Push_Char (Character'Pos (Cur.Text (1)));
+               end if;
+               Next;
+            else
+               R.Text := To_Unbounded_String
+                 (Ada_String_Literal (Cur.Text (1 .. Cur.Len)));
+               R.Typ := T_Str;
+               if O2c_BC.Bytecode_Mode then
+                  --  Cur.Text holds the literal's bytes with no quotes (the
+                  --  Ada text is quoted separately by Ada_String_Literal), so
+                  --  the whole token is the string.  The pool word holds its
+                  --  offset in the CONST payload.
+                  O2c_BC.Push_Str (Cur.Text (1 .. Cur.Len));
+               end if;
+               Next;
             end if;
-            Next;
          when Lex.Tok_True =>
             R.Text := To_Unbounded_String ("True");
             R.Typ := T_Bool;
