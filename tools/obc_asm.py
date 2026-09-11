@@ -24,6 +24,8 @@ OPS = {
     "BTEST": (0x68, 0), "ORD": (0x70, 0), "CHR": (0x71, 0),
     "JMP": (0xA0, 4), "JZ": (0xA1, 4), "JNZ": (0xA2, 4),
     "CALL_NATIVE": (0xC3, 3),
+    "LOAD_L": (0x10, 2), "STORE_L": (0x11, 2),
+    "CALL": (0xC0, 4), "RET": (0xC1, 0), "RET_VOID": (0xC2, 0),
 }
 PROC_REC = 24
 CONST_SLOT = 8
@@ -33,6 +35,13 @@ def assemble(text):
     words, strings = [], []          # pool words, string bytes
     pool_names, labels = {}, {}
     globals_n, maxstack, entry = 0, 0, None
+    #  PROC name slots nparams nresults: a procedure.  The module body is the
+    #  last one (ENTRY names it); with no PROC at all the whole program is the
+    #  body, which keeps single-procedure images byte-identical.
+    n_procs = sum(1 for l in text.splitlines()
+                  if l.split("#")[0].strip().upper().startswith("PROC "))
+    procs = []
+    table = 4 + max(n_procs, 1) * PROC_REC
     code = bytearray()
     pending = []                     # (index-in-code, name) fixups
     for raw in text.splitlines():
@@ -42,7 +51,7 @@ def assemble(text):
         parts = line.replace(":", ": ").split()
         if ":" in parts[0]:          # label definition
             name = parts[0][:-1]
-            labels[name] = 4 + PROC_REC + len(code)
+            labels[name] = table + len(code)
             parts = parts[1:]
             if not parts:
                 continue
@@ -53,6 +62,15 @@ def assemble(text):
             maxstack = int(parts[1]); continue
         if op == "ENTRY":
             entry = parts[1]; continue
+        if op == "PROC":
+            #  name frame_slots nparams nresults
+            if len(parts) != 5:
+                raise SystemExit("obc_asm: PROC wants name slots nparams "
+                                 "nresults")
+            labels[parts[1]] = table + len(code)
+            procs.append((labels[parts[1]], int(parts[2]), int(parts[3]),
+                          int(parts[4])))
+            continue
         if op in ("POOL", "STR"):
             #  POOL name value      -> a pool word
             #  STR  name "text"     -> a NUL-terminated string in CONST plus
@@ -90,11 +108,17 @@ def assemble(text):
                     vals.append(a)          # a code label: fix up later
             if op == "CALL_NATIVE":
                 code += struct.pack("<HB", vals[0], vals[1])
-            elif op in ("JMP", "JZ", "JNZ") and isinstance(vals[0], str):
+            elif op in ("JMP", "JZ", "JNZ", "CALL") \
+                    and isinstance(vals[0], str):
                 pending.append((len(code), vals[0]))
                 code += b"\x00" * 4
             else:
-                code += struct.pack("<I", vals[0] & 0xFFFFFFFF)
+                if nbytes == 2:
+                    code += struct.pack("<H", vals[0] & 0xFFFF)
+                elif nbytes == 1:
+                    code += struct.pack("<B", vals[0] & 0xFF)
+                else:
+                    code += struct.pack("<I", vals[0] & 0xFFFFFFFF)
     # patch jumps now that all labels are known
     for at, name in pending:
         if name not in labels:
@@ -118,8 +142,14 @@ def assemble(text):
     if entry is None:
         entry = 0
     entry_off = labels.get(entry, 0)
-    code_payload = (struct.pack("<I", 1) + struct.pack("<IIHHIII", entry_off, 0,
-                     0, 0, maxstack, 0, 0) + bytes(code))
+    recs = b""
+    if procs:
+        for off, slots, nparams, nresults in procs:
+            recs += struct.pack("<IIHHIII", off, slots, nparams, nresults,
+                                maxstack, 0, 0)
+    else:
+        recs = struct.pack("<IIHHIII", entry_off, 0, 0, 0, maxstack, 0, 0)
+    code_payload = struct.pack("<I", max(n_procs, 1)) + recs + bytes(code)
     while len(code_payload) % 8:
         code_payload += b"\x00"
     #  section sizes include their alignment padding: the VM slices the
