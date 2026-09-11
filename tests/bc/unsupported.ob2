@@ -1,8 +1,8 @@
 module Unsup;
 import Out;
-type Pt = record x: integer end;
-var p: Pt;
+type Line = array 8 of char;
+var s: Line;
 begin
-  p.x := 1;
+  s[0] := 'a';
   Out.Ln
 end Unsup.

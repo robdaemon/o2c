@@ -1333,13 +1333,14 @@ package body O2c_Compiler is
 
    --  expressions -------------------------------------------------
 
-   type Desig_Kind is (D_Scalar, D_Ptr, D_Str, D_Index);
+   type Desig_Kind is (D_Scalar, D_Ptr, D_Str, D_Index, D_Field);
 
    type Desig is record
       Text : Unbounded_String;
       K    : Desig_Kind := D_Scalar;
       Sc   : EType := T_Int;      --  scalar type when D_Scalar
       UT   : Natural := 0;        --  pointer user type when D_Ptr
+      Off  : Natural := 0;        --  field byte offset when D_Field
    end record;
 
    type VK_Kind is (V_Rec, V_Ptr, V_Arr);
@@ -1438,8 +1439,28 @@ package body O2c_Compiler is
                D.Text := D.Text & "."
                  & Ada_Id (To_String (UTypes (FO).F (F).Name));
                if UTypes (FO).F (F).UT = 0 then
-                  D.K := D_Scalar;
                   D.Sc := UTypes (FO).F (F).Typ;
+                  if O2c_BC.Bytecode_Mode then
+                     --  A record is a run of scalar slots and the descriptor
+                     --  fixes each field's offset, so a field needs no bound
+                     --  check - what makes that safe is that the emitter can
+                     --  only name an offset the descriptor defined.  Only a
+                     --  whole record variable for now: a chain of records
+                     --  would need the offsets composed, and an extension's
+                     --  layout is shared with its parent.
+                     if D.Sc /= T_Int or else UT /= Base_UT then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "only INTEGER fields reached directly from a "
+                          & "record variable are supported";
+                     end if;
+                     D.Off := (F - 1) * 8;
+                     D.K := D_Field;
+                     O2c_BC.Load_Addr_G
+                       (O2c_BC.Global_Array (Base_Name,
+                                             UTypes (FO).N_F));
+                  else
+                     D.K := D_Scalar;
+                  end if;
                   Next;           --  past the field name
                   return D;
                end if;
@@ -2619,6 +2640,10 @@ package body O2c_Compiler is
                                        --  [base, index]: load the element.
                                        R.Typ := D.Sc;
                                        O2c_BC.Bin (O2c_BC.Load_Idx_I);
+                                    elsif D.K = D_Field then
+                                       --  [record]: the field at a known offset.
+                                       R.Typ := D.Sc;
+                                       O2c_BC.Load_Fld (D.Off);
                                     elsif D.K = D_Scalar then
                                        R.Typ := D.Sc;
                                     elsif D.K = D_Ptr then
@@ -3016,6 +3041,10 @@ package body O2c_Compiler is
                         --  [base, index]: load the element.
                         R.Typ := D.Sc;
                         O2c_BC.Bin (O2c_BC.Load_Idx_I);
+                     elsif D.K = D_Field then
+                        --  [record]: the field at a known offset.
+                        R.Typ := D.Sc;
+                        O2c_BC.Load_Fld (D.Off);
                      elsif D.K = D_Scalar then
                         R.Typ := D.Sc;
                      elsif D.K = D_Ptr then
@@ -3877,12 +3906,28 @@ package body O2c_Compiler is
             --  subscript was silently dropped and the variable treated as a
             --  scalar.  Refusing here catches every such variable, since all
             --  of them come through this declaration.
-            if O2c_BC.Bytecode_Mode
-              and then (UTypes (UT).Arr_Len = 0
-                        or else UTypes (UT).Elem /= T_Int)
-            then
-               raise O2c_BC.Wrong_Construct with "bytecode backend: records, "
-                 & "pointers and non-INTEGER arrays are not yet supported";
+            if O2c_BC.Bytecode_Mode then
+               declare
+                  Ok_Arr : constant Boolean :=
+                    UTypes (UT).Arr_Len > 0
+                    and then UTypes (UT).Elem = T_Int;
+                  Ok_Rec : constant Boolean :=
+                    UTypes (UT).Is_Rec
+                    and then not UTypes (UT).Is_Ptr
+                    and then not UTypes (UT).Is_Ext
+                    and then UTypes (UT).Arr_Len = 0
+                    and then UTypes (UT).N_F > 0
+                    and then (for all J in 1 .. UTypes (UT).N_F =>
+                                UTypes (UT).F (J).UT = 0
+                                and then UTypes (UT).F (J).Typ = T_Int);
+               begin
+                  if not (Ok_Arr or else Ok_Rec) then
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & "pointers, non-INTEGER arrays, record extensions "
+                       & "and records with non-INTEGER or user-typed fields "
+                       & "are not yet supported";
+                  end if;
+               end;
             end if;
             if UTypes (UT).Is_Ptr then
                Init_Txt := Init_Txt & "null";
@@ -6060,6 +6105,13 @@ package body O2c_Compiler is
                                  begin
                                     O2c_BC.Bin (O2c_BC.Store_Idx_I);
                                  end;
+                              elsif D.K = D_Field then
+                                 --  [record]: evaluate the value, store it in the field.
+                                 declare
+                                    V : Expr_Rec := Parse_Expr;
+                                 begin
+                                    O2c_BC.Store_Fld (D.Off);
+                                 end;
                               elsif D.K = D_Scalar then
                                  if D.Sc = T_Char
                                    and then Cur.Kind = Lex.Tok_String
@@ -6342,6 +6394,13 @@ package body O2c_Compiler is
                               V : Expr_Rec := Parse_Expr;
                            begin
                               O2c_BC.Bin (O2c_BC.Store_Idx_I);
+                           end;
+                        elsif D.K = D_Field then
+                           --  [record]: evaluate the value, store it in the field.
+                           declare
+                              V : Expr_Rec := Parse_Expr;
+                           begin
+                              O2c_BC.Store_Fld (D.Off);
                            end;
                         elsif D.K = D_Scalar then
                            if D.Sc = T_Char and then Cur.Kind = Lex.Tok_String
