@@ -86,6 +86,31 @@ else
    bad "gclive.ob2 did not compile: $(cat "$WORK/glive.compile")"
 fi
 
+#  ---- foreign modules: EXTERN binds, and an unknown symbol is rejected ---
+#  A foreign module is an ordinary Oberon module - it has a body - whose
+#  procedures bind to C symbols instead of having Oberon bodies.
+if timeout 120 "$FRONT" "$ROOT/tests/bc/stubok.ob2" "$WORK/stubok.obc" \
+   >"$WORK/stubok.log" 2>&1
+then
+   note "positive: stubok.ob2 (EXTERN binding) compiles"
+else
+   bad "stubok.ob2 did not compile: $(cat "$WORK/stubok.log")"
+fi
+
+#  A symbol the VM does not know must be a build error naming it, not a call
+#  to whatever native id happens to sit nearby.
+if timeout 120 "$FRONT" "$ROOT/tests/bc/stubbad.ob2" "$WORK/stubbad.obc" \
+   >"$WORK/stubbad.log" 2>&1
+then
+   bad "stubbad.ob2 compiled, but its symbol is not a VM foreign function"
+else
+   if grep -aq 'no foreign function named' "$WORK/stubbad.log"; then
+      note "negative: unknown EXTERN symbol rejected by name"
+   else
+      bad "stubbad.ob2 failed without naming the symbol: $(cat "$WORK/stubbad.log")"
+   fi
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_bc: FAIL ($fails)" >&2
    exit 1

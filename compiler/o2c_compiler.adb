@@ -5474,7 +5474,9 @@ package body O2c_Compiler is
               & ") has no RECORD declaration in procedure " & Name;
          end if;
       end loop;
-      if Cur.Kind /= Lex.Tok_Begin then
+      if Cur.Kind /= Lex.Tok_Begin
+        and then Length (Foreign_Sym) = 0
+      then
          raise O2c_Error with "procedure " & Name
            & " needs a BEGIN body after its declarations (line "
            & Natural'Image (Cur.Line) & ")";
