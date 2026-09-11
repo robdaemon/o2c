@@ -1,8 +1,7 @@
 module Unsup;
 import Out;
-var r: real;
+var a: array 4 of integer;
 begin
-  r := 1.5;
-  Out.Real(r, 0);
+  a[0] := 1;
   Out.Ln
 end Unsup.
