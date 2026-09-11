@@ -4797,9 +4797,14 @@ package body O2c_Compiler is
    end Parse_While;
 
    procedure Parse_Repeat is
-      Cond : Expr_Rec;
+      Cond  : Expr_Rec;
+      L_Top : Natural := 0;
    begin
       Next;                          --  REPEAT
+      if O2c_BC.Bytecode_Mode then
+         L_Top := New_Bc_Label;
+         O2c_BC.Mark (L_Top);
+      end if;
       Append_Body ("      loop");
       declare
          Before : constant Natural := Length (Body_Buf);
@@ -4817,6 +4822,12 @@ package body O2c_Compiler is
       if Cond.Typ /= T_Bool then
          raise O2c_Error with "UNTIL condition must be BOOLEAN (line "
            & Natural'Image (Cur.Line) & ")";
+      end if;
+      if O2c_BC.Bytecode_Mode then
+         --  The Ada body exits when the condition holds, so the bytecode
+         --  jumps back to the top when it does NOT: JZ is the mirror of
+         --  WHILE's exit test.
+         O2c_BC.Jump (O2c_BC.Jz, L_Top);
       end if;
       Append_Body ("      exit when " & To_String (Cond.Text) & ";");
       Append_Body ("      end loop;");

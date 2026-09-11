@@ -1,11 +1,11 @@
-MODULE Proc;
-IMPORT Out;
+module Proc;
+import Out;
 
-PROCEDURE Add(x: INTEGER; y: INTEGER);
-BEGIN
+procedure Add(x: integer; y: integer);
+begin
   Out.Int(x + y, 0); Out.Ln
-END Add;
+end Add;
 
-BEGIN
+begin
   Add(40, 2)
-END Proc.
+end Proc.

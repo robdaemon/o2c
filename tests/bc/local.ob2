@@ -1,13 +1,13 @@
-MODULE Local;
-IMPORT Out;
+module Local;
+import Out;
 
-PROCEDURE Sum3(x: INTEGER);
-VAR t: INTEGER;
-BEGIN
+procedure Sum3(x: integer);
+var t: integer;
+begin
   t := x + 1;
   Out.Int(t, 0); Out.Ln
-END Sum3;
+end Sum3;
 
-BEGIN
+begin
   Sum3(41)
-END Local.
+end Local.
