@@ -55,6 +55,11 @@ package O2c_BC is
    --  initialisers are not yet carried into the image.
    function Global (Ada_Name : String) return Natural;
    function Global_Count return Natural;
+   --  Intern a module-level array: it occupies a run of scalar slots, one per
+   --  element, and the result is the slot of its first element.  The name is
+   --  recorded so a later lookup finds it.
+   function Global_Array (Ada_Name : String; Elements : Natural)
+                          return Natural;
 
    --  ---- emission -------------------------------------------------------
    --  Each call appends one instruction and updates the stack model, so

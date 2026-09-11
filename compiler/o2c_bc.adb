@@ -192,6 +192,32 @@ package body O2c_BC is
       return N_Globals - 1;
    end Global;
 
+   function Global_Array (Ada_Name : String; Elements : Natural)
+                          return Natural is
+      Base : Natural;
+   begin
+      if not Bytecode_Mode then
+         raise Wrong_Construct with "bytecode backend: Global_Array before "
+           & "Begin_Mode";
+      end if;
+      if Elements = 0 then
+         raise Wrong_Construct with "bytecode backend: an array needs a "
+           & "non-zero length";
+      end if;
+      for I in 1 .. N_Globals loop
+         if To_String (Globals (I).Name) = Ada_Name then
+            return I - 1;
+         end if;
+      end loop;
+      if N_Globals + Elements > Max_Globals then
+         raise Wrong_Construct with "bytecode backend: too many globals";
+      end if;
+      Base := N_Globals;
+      N_Globals := N_Globals + Elements;
+      Globals (Base + 1).Name := To_Unbounded_String (Ada_Name);
+      return Base;
+   end Global_Array;
+
    function Global_Count return Natural is
      (N_Globals);
 
