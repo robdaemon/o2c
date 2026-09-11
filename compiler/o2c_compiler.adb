@@ -5615,8 +5615,23 @@ package body O2c_Compiler is
       G_Rec (G_N) := GT;
       declare
          Before : constant Natural := Length (Body_Buf);
+         L_End  : constant Natural := New_Bc_Label;
       begin
+         if O2c_BC.Bytecode_Mode then
+            --  Oberon's WITH runs the body only if the object's dynamic type
+            --  is the guard's, or an extension of it, and *skips* it when
+            --  not - which is why this is a test and a branch rather than
+            --  GUARD, whose trap belongs to the v(T) form.  Without it the
+            --  body ran regardless: it printed the right answer for a
+            --  matching object and the wrong one silently for any other.
+            Bc_Load (VName (1 .. V_Len));
+            O2c_BC.Type_Test (Desc_For (GT));
+            O2c_BC.Jump (O2c_BC.Jz, L_End);
+         end if;
          Statement_Seq;              --  until END
+         if O2c_BC.Bytecode_Mode then
+            O2c_BC.Mark (L_End);
+         end if;
          if Length (Body_Buf) = Before then
             Append_Body ("         null;");
          end if;
