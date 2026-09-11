@@ -112,6 +112,9 @@ package O2c_BC is
    --  TYPE_TEST: leaves whether the pointer on top has that dynamic type,
    --  or an extension of it.
    procedure Type_Test (Ref : Natural);
+   --  GUARD: leaves the pointer if its dynamic type is that one or an
+   --  extension, and traps (kind 2) if not.  NIL passes.
+   procedure Guard (Ref : Natural);
    --  Allocate a zeroed object of the descriptor's size and push its address.
    procedure Alloc_New (Desc_Ref : Natural);
    procedure Store_Fld (Off : Natural);

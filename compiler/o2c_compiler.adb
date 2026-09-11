@@ -1603,6 +1603,43 @@ package body O2c_Compiler is
                raise O2c_Error with "internal: deref of an unresolved "
                  & "POINTER TO (line " & Natural'Image (Cur.Line) & ")";
             end if;
+         elsif Cur.Kind = Lex.Tok_LParen then
+            --  v(T): a type guard, Oberon's way of narrowing a pointer to a type
+            --  it may not have.  Unlike WITH, which skips its body when the guard
+            --  fails, this *traps* - GUARD's kind 2 - because there is no body to
+            --  skip and the value would otherwise be used as a type it is not.
+            if VK /= V_Ptr or else D.Text /= To_Unbounded_String (Base_Name) then
+               raise O2c_Error with "'(' is a type guard and needs a POINTER "
+                 & "designated by the variable itself (line "
+                 & Natural'Image (Cur.Line) & ")";
+            end if;
+            Next;
+            Expect (Lex.Tok_Ident, "a record type in the type guard");
+            declare
+               GT : constant Natural := Find_UT (Cur.Text (1 .. Cur.Len));
+               Trc : constant Natural := UTypes (UT).Ptr_Tgt;
+            begin
+               if GT = 0 or else not UTypes (GT).Is_Rec
+                 or else not Rec_Descends (GT, Trc)
+               then
+                  raise O2c_Error with "'" & Cur.Text (1 .. Cur.Len)
+                    & "' is not an extension of the POINTER's record type "
+                    & To_String (UTypes (Trc).Name) & " (line "
+                    & Natural'Image (Cur.Line) & ")";
+               end if;
+               if O2c_BC.Bytecode_Mode then
+                  O2c_BC.Guard (Desc_For (GT));
+               end if;
+               --  past the type name; without this the RParen check saw it
+               Next;
+               Expect (Lex.Tok_RParen, "')' closing the type guard");
+               Next;
+               D.Text := To_Unbounded_String
+                 (To_String (UTypes (GT).Name) & " ("
+                  & To_String (D.Text) & ".all)");
+               UT := GT;
+               VK := V_Rec;
+            end;
          elsif Cur.Kind = Lex.Tok_Dot then
             if VK /= V_Rec then
                if VK = V_Ptr then

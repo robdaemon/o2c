@@ -432,6 +432,16 @@ package body O2c_BC is
       Pushed;
    end Type_Test;
 
+   procedure Guard (Ref : Natural) is
+   begin
+      Put_Byte (16#E0#);          --  GUARD
+      Put_U32 (U32 (Ref));
+      N_Insns := N_Insns + 1;
+      --  A pointer in, a pointer out.
+      Popped;
+      Pushed;
+   end Guard;
+
    procedure Alloc_New (Desc_Ref : Natural) is
    begin
       Put_Byte (16#2A#);          --  ALLOC_NEW
