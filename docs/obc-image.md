@@ -86,10 +86,22 @@ kind-specific tail:
 - **RECORD** — field list: repeated `{ name_ref, field_desc, offset }`;
   terminated by a zero name_ref.  `base` (u32) points at the base record
   descriptor for an extension (0 = none), and `methods` (u32) points at the
-  method table (exports only).
+  method table (exports only).  **A descriptor reference is the descriptor's
+  byte offset plus one, and 0 means none**: the outermost descriptor of
+  anything sits at offset 0, so an unbiased offset could not be told from the
+  absence of one.  `ALLOC_NEW`, `GUARD` and `TYPE_TEST` all take a reference
+  in this form, and so does a descriptor's `base`.
 - **POINTER** — `target_desc` (u32); `NIL` is a distinguished null target.
 - **PROCEDURE** — parameter/result signature refs (for type guards and for
   the native-module bridge).
+
+An object carries its descriptor's offset in a **word immediately before
+it**, written by `ALLOC_NEW` and never visible to field or indexed access:
+the allocated address is past the tag, so a record's first field is still at
+its own address + 0.  `DESC_OF` reads it, and `TYPE_TEST`/`GUARD` walk the
+`base` chain from it, which is what makes a test for an ancestor succeed.
+Objects allocated before this existed have no tag, so an image that allocates
+must be built by an emitter that writes one.
 
 **`flags` bit0 (`has_ptrs`) is load-bearing:** it tells the VM whether objects
 of this type may contain pointers.  It drives (a) which allocation call an
@@ -200,7 +212,7 @@ guard failure, 3 = division by zero, 4 = `CASE` with no matching label
 | 0x27 | `STORE_FLD_R` | u16 | `[rec,v] -> []` | |
 | 0x28 | `STORE_FLD_P` | u16 | `[rec,ptr] -> []` | |
 | 0x29 | `ARRAY_LEN` | — | `[arr] -> [len]` | open arrays |
-| 0x2A | `ALLOC_NEW` | u32 desc ref | `[] -> [ptr]` | zeroed object; `has_ptrs` picks GC_malloc vs atomic |
+| 0x2A | `ALLOC_NEW` | u32 desc ref | `[] -> [ptr]` | zeroed object; `has_ptrs` picks GC_malloc vs atomic. Reserves one word *before* the object for its type tag and returns the address past it, so field offsets are unaffected |
 | 0x2B | `ALLOC_NEW_ARR` | u32 desc ref | `[len] -> [ptr]` | open array |
 | 0x2C | `LOAD_CONST_P` | u32 pool idx | `[] -> [ptr]` | `NIL` |
 | 0x2D | `LOAD_CONST_R` | u32 pool idx | `[] -> [v]` | REAL/LONGREAL literal |

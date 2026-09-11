@@ -295,6 +295,36 @@ else
    bad "charout.asm did not run: $(cat "$WORK/charout.err" 2>/dev/null)"
 fi
 
+#  ---- positive: hand-assembled type tests ----------------------------------
+#  Exercises the tag word and the descriptor chain independently of the
+#  emitter: child extends base, so an object allocated as child must test true
+#  for base and one allocated as base must test false for child.
+if python3 "$ASM" "$ROOT/tests/vm/typetest.asm" "$WORK/typetest.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/typetest.obc" >"$WORK/typetest.out" 2>"$WORK/typetest.err"; then
+   if diff -u "$ROOT/tests/vm/typetest.out" "$WORK/typetest.out"; then
+      note "positive: typetest.asm (TYPE_TEST) matches the golden output"
+   else
+      bad "typetest.asm output differs from tests/vm/typetest.out"
+   fi
+else
+   bad "typetest.asm did not run: $(cat "$WORK/typetest.err" 2>/dev/null)"
+fi
+
+#  ---- negative: GUARD refuses the wrong dynamic type -----------------------
+#  An object of the base type guarded as its extension: the guard must trap
+#  rather than hand back a pointer it cannot promise.
+if python3 "$ASM" "$ROOT/tests/vm/guardbad.asm" "$WORK/guardbad.obc" >/dev/null 2>&1; then
+   if timeout 60 "$VM" "$WORK/guardbad.obc" >/dev/null 2>"$WORK/guardbad.err"; then
+      bad "guardbad.asm ran, but the guard should have trapped"
+   elif grep -aq "type guard failed" "$WORK/guardbad.err"; then
+      note "negative: guardbad rejected (type guard failed)"
+   else
+      bad "guardbad.asm failed for the wrong reason: $(cat "$WORK/guardbad.err")"
+   fi
+else
+   bad "guardbad.asm did not assemble"
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_vm: FAIL ($fails)" >&2
    exit 1

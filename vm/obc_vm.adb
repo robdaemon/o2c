@@ -116,6 +116,9 @@ package body OBC_VM is
    Op_Load_Idx_I   : constant := 16#1D#;
    Op_Load_Fld_I   : constant := 16#23#;
    Op_Load_Const_P : constant := 16#2C#;
+   Op_Guard        : constant := 16#E0#;
+   Op_Type_Test    : constant := 16#E1#;
+   Op_Desc_Of      : constant := 16#E3#;
    Op_Alloc_New    : constant := 16#2A#;
    Op_Load_Fld_R   : constant := 16#24#;
    Op_Load_Fld_P   : constant := 16#25#;
@@ -217,6 +220,40 @@ package body OBC_VM is
       Consts_Copy : Byte_Array_Access := null;
       Types       : Byte_Array_Access := null;   --  0-based TYPES copy
    end record;
+
+   --  An object's type tag sits in the word before it: the descriptor's byte
+   --  offset in TYPES, written by ALLOC_NEW.
+   function Tag_At (Obj : U64) return Natural is
+      W : U64 with Address =>
+        System.Storage_Elements.To_Address
+          (System.Storage_Elements.Integer_Address (Obj)
+           - System.Storage_Elements.Integer_Address (8));
+   begin
+      return Natural (W mod 16#1_0000_0000#);
+   end Tag_At;
+
+   --  Whether an object tagged Tag has dynamic type Ref, or an extension of
+   --  it.  The descriptor's base is at +12, after kind, flags, size,
+   --  name_ref and the field-list terminator, and walking it is what makes a
+   --  test for an ancestor succeed.
+   function Descends_From (Img : Image_Info; Tag : Natural;
+                           Ref : Natural) return Boolean is
+      Cur : Natural := Tag;
+   begin
+      while Cur /= 0 loop
+         if Cur = Ref then
+            return True;
+         end if;
+         if Cur + 15 > Img.Types_Len then
+            return False;
+         end if;
+         --  Cur is a biased reference, so the descriptor starts one byte
+         --  earlier than the number suggests; the base it holds is biased
+         --  the same way, and zero still means no base.
+         Cur := Natural (LE32 (Img.Types.all, Cur - 1 + 12));
+      end loop;
+      return False;
+   end Descends_From;
 
    --  ---- diagnostics ----------------------------------------------------
    procedure Note (Msg : String) is
@@ -596,6 +633,16 @@ package body OBC_VM is
                   return Bad_Stack;
                end if;
                Depth := Depth - 2;
+               PC := PC + 1;
+            when Op_Type_Test | Op_Guard =>
+               if not Fits (PC + 1, 4) then
+                  return Bad_Code;
+               end if;
+               if Natural (LE32 (Code, PC + 1)) + 4 > Img.Types_Len then
+                  return Bad_Code;
+               end if;
+               PC := PC + 5;
+            when Op_Desc_Of =>
                PC := PC + 1;
             when Op_Alloc_New =>
                if not Fits (PC + 1, 4) then
@@ -1097,28 +1144,76 @@ package body OBC_VM is
                end;
                PC := PC + 1;
 
+            when Op_Type_Test =>
+               declare
+                  Obj : constant U64 := Pop;
+                  Ref : constant Natural :=
+                    Natural (LE32 (Code, PC + 1));
+               begin
+                  --  NIL has no dynamic type.  Oberon leaves the result
+                  --  undefined and most implementations trap; false is the
+                  --  total answer, and GUARD checks NIL itself so it never
+                  --  depends on this.
+                  Push ((if Obj = 0 then 0
+                         else (if Descends_From (Img, Tag_At (Obj), Ref)
+                               then 1 else 0)));
+               end;
+               PC := PC + 5;
+            when Op_Guard =>
+               declare
+                  Obj : constant U64 := Pop;
+                  Ref : constant Natural :=
+                    Natural (LE32 (Code, PC + 1));
+               begin
+                  if Obj = 0 then
+                     Push (0);          --  NIL passes, per the spec
+                  elsif Descends_From (Img, Tag_At (Obj), Ref) then
+                     Push (Obj);        --  the pointer itself, not the tag
+                  else
+                     Note ("type guard failed");
+                     return Trap_Guard;
+                  end if;
+               end;
+               PC := PC + 5;
+            when Op_Desc_Of =>
+               declare
+                  Obj : constant U64 := Pop;
+               begin
+                  Push (U64 (System.Storage_Elements.To_Integer
+                               (Img.Types (Tag_At (Obj) - 1)'Address)));
+               end;
+               PC := PC + 1;
             when Op_Alloc_New =>
                --  A zeroed body from the arena, sized by the TYPES descriptor the
                --  operand names.  The push is the address the field and indexed
                --  accesses already know how to use, so an allocated record behaves
                --  exactly like one on the globals run.
                declare
-                  Ref   : constant Natural := Natural (LE32 (Code, PC + 1));
+                  --  References are the descriptor's offset plus one, so 0
+                  --  can mean none; the offset is what indexes TYPES.
+                  Ref   : constant Natural :=
+                    Natural (LE32 (Code, PC + 1)) - 1;
                   Size  : constant Natural := LE16 (Img.Types.all, Ref + 2);
                   Words : constant Natural := (Size + 7) / 8;
                begin
-                  if Heap_Next + Words > Heap_Words then
+                  if Heap_Next + Words + 1 > Heap_Words then
                      --  A distinct status would say more, but Bad_Code plus
                      --  the note is what the current status set can report.
                      Note ("heap exhausted");
                      return Bad_Code;
                   end if;
-                  for K in 0 .. Words - 1 loop
+                  --  One word before the body holds the type tag, so a record
+                  --  still has its first field at its own address + 0 and
+                  --  nothing in the access paths has to know the tag exists.
+                  --  The tag holds a biased reference, the form the walk
+                  --  compares against, while `Ref` indexes TYPES directly.
+                  Heap (Heap_Next) := U64 (Ref + 1);
+                  for K in 1 .. Words loop
                      Heap (Heap_Next + K) := 0;
                   end loop;
                   Push (U64 (System.Storage_Elements.To_Integer
-                               (Heap (Heap_Next)'Address)));
-                  Heap_Next := Heap_Next + Words;
+                               (Heap (Heap_Next + 1)'Address)));
+                  Heap_Next := Heap_Next + Words + 1;
                end;
                PC := PC + 5;
             when Op_Load_Fld_I | Op_Load_Fld_R | Op_Load_Fld_P =>

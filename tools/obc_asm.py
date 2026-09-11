@@ -33,6 +33,7 @@ OPS = {
     "SET_SYMDIFF": (0x40, 0), "SET_EQ": (0x41, 0), "SET_NE": (0x42, 0),
     "SET_IN": (0x43, 0), "SET_SINGLE": (0x44, 0),
     "LOAD_ADDR_G": (0x16, 4), "LOAD_FLD_I": (0x23, 2), "LOAD_FLD_R": (0x24, 2), "STORE_FLD_R": (0x27, 2), "LOAD_FLD_P": (0x25, 2), "STORE_FLD_P": (0x28, 2), "LOAD_CONST_P": (0x2C, 4), "ALLOC_NEW": (0x2A, 4), "STORE_FLD_I": (0x26, 2), "LOAD_IDX_I": (0x1D, 0), "STORE_IDX_I": (0x20, 0),
+    "GUARD": (0xE0, 4), "TYPE_TEST": (0xE1, 4), "DESC_OF": (0xE3, 0),
     "LOAD_CONST_R": (0x2D, 4),
     "RADD": (0x80, 0), "RSUB": (0x81, 0), "RMUL": (0x82, 0), "RDIV": (0x83, 0),
     "RNEG": (0x84, 0), "RABS": (0x85, 0), "REQ": (0x86, 0), "RNE": (0x87, 0),
@@ -91,12 +92,16 @@ def assemble(text):
             #  DESC_REC name size: a RECORD descriptor with no pointer
             #  fields.  kind 3 (RECORD), flags 0, size, name_ref 0, an empty
             #  field list (a zero name_ref terminates it), base 0, methods 0.
-            if len(parts) != 3:
-                raise SystemExit("obc_asm: DESC_REC wants name size")
-            desc_names[parts[1]] = len(types)
+            if len(parts) not in (3, 4):
+                raise SystemExit("obc_asm: DESC_REC wants name size [base]")
+            #  A reference is the offset plus one, so 0 can mean none: the
+            #  first descriptor sits at offset 0.  `base` is stored raw and
+            #  biased back by whoever walks it.
+            base = desc_names[parts[3]] if len(parts) == 4 else 0
+            desc_names[parts[1]] = len(types) + 1
             types += struct.pack("<BBHI", 3, 0, int(parts[2]), 0)
             types += struct.pack("<I", 0)      # end of the field list
-            types += struct.pack("<II", 0, 0)  # base, methods
+            types += struct.pack("<II", base, 0)   # base, methods
             continue
         if op == "POOL_R":
             #  a REAL literal: its IEEE pattern goes in the word pool
