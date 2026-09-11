@@ -6585,7 +6585,8 @@ package body O2c_Compiler is
                                end if;
                            end;
                         elsif D.K = D_Scalar then
-                           if D.Sc = T_Char and then Cur.Kind = Lex.Tok_String
+                           if not O2c_BC.Bytecode_Mode
+                             and then (D.Sc = T_Char and then Cur.Kind = Lex.Tok_String)
                              and then Cur.Len = 1
                            then
                               Append_Body ("      " & To_String (D.Text)
@@ -6664,7 +6665,9 @@ package body O2c_Compiler is
                   Next;
                   if Syms (Idx).Typ = T_Char then
                      --  string element: CHAR, Ada index i + 1
-                     if Cur.Kind = Lex.Tok_String and then Cur.Len = 1 then
+                     if Cur.Kind = Lex.Tok_String and then Cur.Len = 1
+                       and then not O2c_BC.Bytecode_Mode
+                     then
                         Append_Body ("      " & Head (1 .. H_Len) & " ("
                                      & To_String (Ix.Text) & " + 1) := '"
                                      & Cur.Text (1 .. 1) & "';");
@@ -7017,7 +7020,8 @@ package body O2c_Compiler is
                      end if;
                      Append_Body ("      Aegir_User.Console.Put_Line ("""");");
                   elsif Member = "String" or else Member = "Int"
-                    or else Member = "Real" or else Member = "LongReal"
+                    or else Member = "Char" or else Member = "Real"
+                    or else Member = "LongReal"
                   then
                      Expect (Lex.Tok_LParen, "'(' after Out." & Member);
                      Next;
@@ -7054,6 +7058,17 @@ package body O2c_Compiler is
                               M := A.Text;
                               CArg := A.CStr;
                            end if;
+                        end;
+                     elsif Member = "Char" then
+                        declare
+                           A : Expr_Rec := Parse_Expr;
+                        begin
+                           if A.Typ /= T_Char then
+                              raise O2c_Error
+                                with "Out.Char needs a CHAR argument";
+                           end if;
+                           M := A.Text;
+                           CArg := False;
                         end;
                      elsif Member = "Int" then
                         declare
@@ -7128,6 +7143,11 @@ package body O2c_Compiler is
                               O2c_BC.Push_Int (0);
                            end if;
                            O2c_BC.Native_Call (3, 2);
+                        elsif Member = "Char" then
+                           --  The factor already pushed the character's
+                           --  code and the native takes one argument, so
+                           --  there is nothing to convert here.
+                           O2c_BC.Native_Call (4, 1);
                         else
                            raise O2c_BC.Wrong_Construct with
                              "bytecode backend: Out." & Member
@@ -7143,6 +7163,13 @@ package body O2c_Compiler is
                            Append_Body ("      Aegir_User.Console.Put ("
                                         & To_String (M) & ");");
                         end if;
+                     elsif Member = "Char" then
+                        --  Ada prints a one-character string: Console.Put
+                        --  already takes one, so no runtime helper is needed
+                        --  and the RTS is untouched.
+                        Append_Body ("      Aegir_User.Console.Put "
+                                     & "(String'(1 => " & To_String (M)
+                                     & "));");
                      elsif Member = "Int" then
                         Append_Body ("      O2c_Put_Int (" & To_String (M)
                                      & ");");
@@ -7155,7 +7182,8 @@ package body O2c_Compiler is
                      end if;
                   else
                      raise O2c_Error with "Out supports String/Int/Real/"
-                       & "LongReal/Ln only (found Out." & Member & ")";
+                       & "LongReal/Char/Ln only (found Out." & Member
+                       & ")";
                   end if;
                end;
             elsif Cur.Kind = Lex.Tok_LParen then
@@ -7227,6 +7255,7 @@ package body O2c_Compiler is
                Next;
                if Syms (Idx).Typ = T_Char
                  and then Cur.Kind = Lex.Tok_String and then Cur.Len = 1
+                 and then not O2c_BC.Bytecode_Mode
                then
                   Append_Body ("      " & Head (1 .. H_Len) & " := '"
                                & Cur.Text (1 .. 1) & "';");

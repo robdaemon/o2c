@@ -52,7 +52,7 @@ package body OBC_VM is
    Max_Frames     : constant := 64;
    Max_VM_Locals  : constant := 1024;
    Max_Globals : constant := 4096;
-   Max_Natives : constant := 4;
+   Max_Natives : constant := 5;
 
    Const_Slot : constant := 8;      --  pool words are 8 bytes
    Proc_Rec   : constant := 24;     --  bytes per procedure table record
@@ -177,7 +177,7 @@ package body OBC_VM is
    --  live in the image, which is why the GC can treat image data as
    --  static roots later).
    Native_Pops : constant array (0 .. Max_Natives - 1) of Natural :=
-     (2, 1, 0, 2);
+     (2, 1, 0, 2, 1);
 
    --  Sizing note (project rule on fixed tables): how many procedures the
    --  loader will accept from an image.  Exceeding it is a rejected image,
@@ -753,6 +753,19 @@ package body OBC_VM is
                Put (Character'Val (48 + Integer (FR / 100)));
                Put (Character'Val (48 + Integer ((FR / 10) mod 10)));
                Put (Character'Val (48 + Integer (FR mod 10)));
+               return Ok;
+            end;
+         when 4 =>
+            --  Out.Char: one character.  A char is an integer code here, so
+            --  a value outside 0 .. 255 is a runtime error rather than a
+            --  silently masked byte.
+            declare
+               V : constant I64 := To_I64 (Arg1);
+            begin
+               if V < 0 or else V > 255 then
+                  return Trap_Range;
+               end if;
+               Put (Character'Val (Integer (V)));
                return Ok;
             end;
          when 2 =>

@@ -281,6 +281,20 @@ else
    bad "recr.asm did not run: $(cat "$WORK/recr.err" 2>/dev/null)"
 fi
 
+#  ---- positive: hand-assembled Out.Char ------------------------------------
+#  Exercises native 4 independently of the emitter: two character codes go to
+#  the native, which prints the characters themselves.
+if python3 "$ASM" "$ROOT/tests/vm/charout.asm" "$WORK/charout.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/charout.obc" >"$WORK/charout.out" 2>"$WORK/charout.err"; then
+   if diff -u "$ROOT/tests/vm/charout.out" "$WORK/charout.out"; then
+      note "positive: charout.asm (Out.Char) matches the golden output"
+   else
+      bad "charout.asm output differs from tests/vm/charout.out"
+   fi
+else
+   bad "charout.asm did not run: $(cat "$WORK/charout.err" 2>/dev/null)"
+fi
+
 if [ "$fails" -gt 0 ]; then
    echo "run_vm: FAIL ($fails)" >&2
    exit 1
