@@ -1135,7 +1135,11 @@ package body OBC_VM is
          while Mark_Count > 0 and then Mark_Done loop
             Mark_Count := Mark_Count - 1;
             Slot := Mark_Stack (Mark_Count);
-            Tag  := Tag_At (Heap (Slot));
+            --  The tag is simply the slot before the body, and Slot is
+            --  already an arena index, so read it directly.  Going through
+            --  Tag_At means converting a slot back to an address and then
+            --  subtracting 8, which is work the walk does not need.
+            Tag  := Natural (Heap (Slot - 1));
             Off  := Tag - 1;
             if Off + 4 <= Img.Types_Len
               and then Img.Types.all (Off + 1) mod 2 = 1
