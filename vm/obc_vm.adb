@@ -6,6 +6,7 @@
 --  records) but this slice expects exactly one record - the module
 --  body - and executes no user procedures.
 with Ada.Exceptions;
+with Ada.Finalization;
 with Ada.Text_IO;
 with Interfaces;
 with Ada.Unchecked_Conversion;
@@ -169,20 +170,30 @@ package body OBC_VM is
    end record;
    type Context_Access is access Context;
 
-   --  A run of operand state that a collection must treat as roots.  The set
-   --  is a registry rather than three fixed loops because a thread will
-   --  contribute its own stack and frames, and the collector should not have
-   --  to know how many there are or where they come from.
-   type Root_Region is record
-      Data : U64_Array_Access := null;
-      Len  : Natural := 0;
-   end record;
+   --  The interpreter contexts that are live right now.  A collection walks
+   --  all of them, because interpretation nests: a C callback calling back
+   --  into Oberon runs an inner Execute whose caller's frames are still
+   --  roots.  A thread will contribute one of these too.
+   Max_Contexts : constant := 16;
+   type Context_Table is array (1 .. Max_Contexts) of Context_Access;
+   Live_Contexts : Context_Table := (others => null);
+   N_Contexts    : Natural := 0;
 
-   --  One per thread plus the shared globals, with room to spare.  Exceeding
-   --  it is not truncated silently: Add_Roots gives up on the collection
-   --  instead, because a missing root means freeing a live object.
-   Max_Root_Regions : constant := 16;
-   type Root_Registry is array (1 .. Max_Root_Regions) of Root_Region;
+   --  Set when a context could not be registered.  Its roots would be
+   --  invisible to the next collection, which might then free a live object,
+   --  so marking is abandoned instead - the same give-up-safely path the
+   --  worklist uses.
+   Roots_Refused : Boolean := False;
+
+   --  Registers a context for the duration of one Execute call.  Finalization
+   --  is what makes this right: Execute returns early from dozens of places
+   --  and deliberately turns internal errors into statuses, so a pop written
+   --  by hand on every path would be missed, and the failure would be silent
+   --  - a mark that cannot see roots frees the objects they point at.
+   type Context_Scope (Ctx : Context_Access) is
+     limited new Ada.Finalization.Limited_Controlled with null record;
+   overriding procedure Initialize (S : in out Context_Scope);
+   overriding procedure Finalize (S : in out Context_Scope);
    type Natural_Array is array (Natural range <>) of Natural;
    type Natural_Array_Access is access Natural_Array;
    Heap       : array (0 .. Heap_Words - 1) of aliased U64;
@@ -288,6 +299,31 @@ package body OBC_VM is
 
    --  An object's type tag sits in the word before it: the descriptor's byte
    --  offset in TYPES, written by ALLOC_NEW.
+   overriding procedure Initialize (S : in out Context_Scope) is
+   begin
+      if N_Contexts = Max_Contexts then
+         Roots_Refused := True;
+         return;
+      end if;
+      N_Contexts := N_Contexts + 1;
+      Live_Contexts (N_Contexts) := S.Ctx;
+   end Initialize;
+
+   overriding procedure Finalize (S : in out Context_Scope) is
+   begin
+      --  Removed by identity rather than by popping, so it stays correct even
+      --  if scopes were ever finalized out of order.
+      for I in 1 .. N_Contexts loop
+         if Live_Contexts (I) = S.Ctx then
+            for J in I .. N_Contexts - 1 loop
+               Live_Contexts (J) := Live_Contexts (J + 1);
+            end loop;
+            N_Contexts := N_Contexts - 1;
+            return;
+         end if;
+      end loop;
+   end Finalize;
+
    function Tag_At (Obj : U64) return Natural is
       W : U64 with Address =>
         System.Storage_Elements.To_Address
@@ -1019,6 +1055,10 @@ package body OBC_VM is
         new Natural_Array'(0 .. Max_Frames - 1 => 0);
       Return_PC   : Natural_Array_Access :=
         new Natural_Array'(0 .. Max_Frames - 1 => 0);
+      --  Registers this call's context for as long as it runs, by
+      --  finalization rather than by hand at each return.
+      Scope       : Context_Scope (Ctx);
+      pragma Unreferenced (Scope);   --  its whole effect is finalization
       Cur_Frame   : Natural := 0;
       Locals_Used : Natural renames Ctx.Pool_Used;
 
@@ -1096,23 +1136,7 @@ package body OBC_VM is
       Mark_Stack : array (0 .. 255) of Natural := (others => 0);
       Mark_Count : Natural := 0;
 
-      Roots   : Root_Registry := (others => (Data => null, Len => 0));
-      N_Roots : Natural := 0;
 
-      procedure Add_Roots (Data : U64_Array_Access; Len : Natural) is
-      begin
-         if Len = 0 then
-            return;
-         end if;
-         if N_Roots = Max_Root_Regions then
-            --  A root we cannot record is a live object we might free, so
-            --  abandon this collection rather than risk it.
-            Mark_Done := False;
-            return;
-         end if;
-         N_Roots := N_Roots + 1;
-         Roots (N_Roots) := (Data => Data, Len => Len);
-      end Add_Roots;
 
       function Marked_At (Slot : Natural) return Boolean is
         ((Marked (Slot / 64) and U64 (2 ** (Slot mod 64))) /= 0);
@@ -1170,15 +1194,25 @@ package body OBC_VM is
       begin
          Marked     := (others => 0);
          Mark_Count := 0;
-         Mark_Done  := True;
-         N_Roots := 0;
-         Add_Roots (Stack, SP);
-         Add_Roots (Locals, Locals_Used);
-         Add_Roots (Globals, Img.N_Globals);
-         for R in 1 .. N_Roots loop
-            for K in 0 .. Roots (R).Len - 1 loop
-               Mark_Word (Roots (R).Data (K));
-            end loop;
+         Mark_Done  := not Roots_Refused;
+         --  Every live context, innermost last.  The lengths are read from
+         --  each context now rather than frozen when it registered, which is
+         --  what makes an outer frame's SP correct while an inner Execute
+         --  runs.
+         for I in 1 .. N_Contexts loop
+            declare
+               C : Context renames Live_Contexts (I).all;
+            begin
+               for K in 0 .. C.SP - 1 loop
+                  Mark_Word (C.Stack (K));
+               end loop;
+               for K in 0 .. C.Pool_Used - 1 loop
+                  Mark_Word (C.Locals (K));
+               end loop;
+               for K in 0 .. Img.N_Globals - 1 loop
+                  Mark_Word (C.Globals (K));
+               end loop;
+            end;
          end loop;
          while Mark_Count > 0 and then Mark_Done loop
             Mark_Count := Mark_Count - 1;
