@@ -11989,7 +11989,16 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Builtin (Oak_Files_Src, Scoped => True);
+      --  Files is NOT scoped, and the reason is measured rather than
+      --  cautious: a call into a scoped module does not work.  Files.Old/New/
+      --  Read/Write/Close are the point of 3d, and reaching them from a user
+      --  program needs a cross-module call whose id, target and arity are all
+      --  correct, whose argument provably arrives, and which nevertheless comes
+      --  back with a wrong value (u5/u6/e3 in docs/RESUME.md 3d).  Every
+      --  equivalent LOCAL shape works.  Until that is fixed, scoping a module
+      --  would only convert a loud refusal into a silent wrong answer - the
+      --  hazard the Math entry above describes.
+      Compile_Builtin (Oak_Files_Src, Scoped => False);
       if Emits ("Files") then
          --  Files: parsed above in every case, emitted
          --  only when something imports it (see Emits).

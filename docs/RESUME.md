@@ -260,6 +260,60 @@ Coverage finds what no test reaches; the differential finds what a test reaches
 but the VM gets wrong. **Neither alone is enough** — that is the whole finding,
 and it is argued at length in `docs/bytecode-gaps.md`.
 
+### 3d. RE-SIZED — measured, and the sizing above is WRONG
+
+The section below says this item was "declared **sized** rather than open".  That
+sizing is disproved, and this note is its correction - the deliverable of the
+attempt, not a fix.
+
+**What the item actually requires.**  A user program must be able to CALL
+`Files.Old`/`New`/`Read`/`Write`/`Close` - procedures of an imported module.  That
+is a **cross-module call**, and bytecode has never had one:
+
+- before this attempt, a call into an imported module was refused
+  (`X.y is not yet supported`), which is why nothing in the corpus - 48 fixtures,
+  all main modules with local procedures - ever exercised it;
+- making the callee's code exist in the image (scoping the module) is necessary
+  but NOT sufficient.  The call is emitted, its id/target/arity are all correct
+  (3t), the argument provably ARRIVES (u5), and the value comes back WRONG (u6) -
+  while every equivalent LOCAL shape works (e1/e2/e3: field offsets 0 and 64, via
+  parameter, via return, `new`, `len`, `ARRAY OF CHAR` indexing).
+
+So the gap is **how a value crosses a module boundary**.  It is not
+Files-specific: it would bite any imported call.
+
+**Sizing, honestly.**  This is the same class as the record/type coverage that
+`samples/hello.ob2` refuses at - 530 lines, 18 imports, refused at its `type`
+block - i.e. **milestone** work, not wiring.  The mistake was treating it as
+wiring and working it probe by probe; the correct output of that discovery was
+this note, on the first day.
+
+**Reproductions, kept here because no harness can hold them.**
+`bytecode_gaps.sh` records constructs that REFUSE; this one compiles and answers
+wrongly, so nothing machine-checked can pin it.  Three small main modules:
+
+    (* u5: is the argument even received?  Old on a missing path stores -1,
+       New stores 0.  SAME Length for both => the argument is ignored. *)
+    f1 := Files.Old("/tmp/o2c_u5_absent.txt");
+    f2 := Files.New("/tmp/o2c_u5_created.txt");
+    n1 := Files.Length(f1); n2 := Files.Length(f2);   (* measured: different -> arrives *)
+
+    (* u6: the values themselves.  Correct is -1 and 0. *)
+    (* measured: n1 NONNEGATIVE, n2 NONZERO - both wrong, and they differ *)
+
+    (* e3: the field is NOT at offset 0.  FileDesc = record name: A64;
+       size: longint end, so size is at 64 - and every earlier probe put its
+       field first, which is why this case was never covered.  Measured: ok. *)
+
+**State now.**  `Files` is NOT scoped (`Compiled_Builtin (... Scoped => False)`
+with the reason in the source), so a user call refuses LOUDLY rather than
+answering wrongly - the hazard that scoping otherwise creates, as the Math entry
+above describes.  Everything the attempt fixed stays landed and gated: the
+body-frame balance, the `R.Typ` clobber, the argument double-push, `LEN`, and
+`ARRAY OF CHAR` indexing - five real bytecode gaps, with `lenopen` as a new
+fixture and 48 fixtures corroborated by both backends.
+
+
 ### 3d. `Files.Old` / `Read` / `Write` / `Close` / `New`
 
 Deferred, and it was declared **sized** rather than open. Measuring it corrected
