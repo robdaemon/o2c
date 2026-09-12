@@ -477,6 +477,17 @@ package body O2c_Compiler is
       return False;
    end Imported_Mod;
 
+   --  True for the builtin modules whose members are FFI primitives - the
+   --  ones with a native implementation on the Aegir side and nothing in this
+   --  compiler.  A call to one of their exported procedures reaches the
+   --  imported-module path, which builds Ada text; in bytecode mode that text
+   --  is discarded, so the call compiled, ran and silently did nothing.
+   --  Their sibling builtins (Strings, Texts, Math...) are real modules and
+   --  are not listed here.
+   function Is_FFI_Mod (Nm : String) return Boolean is
+     (Nm = "Convert" or else Nm = "Env" or else Nm = "Args"
+      or else Nm = "Files" or else Nm = "XYplane" or else Nm = "In");
+
    --  Catalog index of the exported member Mem of library module Mod.
    function Find_X (Owner : String; Mem : String) return Natural is
    begin
@@ -7090,12 +7101,33 @@ package body O2c_Compiler is
                               Call := Call & Args (I);
                            end loop;
                            Call := Call & ");";
+                           if O2c_BC.Bytecode_Mode
+                             and then Is_FFI_Mod (MNm)
+                           then
+                              --  Refused rather than appended and discarded:
+                              --  this is an FFI primitive with no bytecode
+                              --  emission, so the program would compile, run
+                              --  and silently do nothing.
+                              raise O2c_BC.Wrong_Construct with
+                                "bytecode backend: " & MNm & "."
+                                & To_String (MName)
+                                & " is an FFI primitive and is not yet "
+                                & "supported";
+                           end if;
                            Append_Body ("      " & To_String (Call));
                         end;
                      else
                         if Xs (XI).Params /= 0 then
                            raise O2c_Error with "'" & MNm & "."
                              & To_String (MName) & "' needs arguments";
+                        end if;
+                        if O2c_BC.Bytecode_Mode
+                          and then Is_FFI_Mod (MNm)
+                        then
+                           raise O2c_BC.Wrong_Construct with
+                             "bytecode backend: " & MNm & "."
+                             & To_String (MName)
+                             & " is an FFI primitive and is not yet supported";
                         end if;
                         Append_Body ("      " & Ada_Id (MNm) & "."
                                      & Ada_Id (To_String (MName)) & ";");
