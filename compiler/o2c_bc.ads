@@ -142,6 +142,9 @@ package O2c_BC is
    --  Start a thread on the procedure id on top of the stack, consuming it.
    --  The entry point is a procedure value, so it may come from a variable.
    procedure Spawn;
+   --  Wait for the thread whose handle is on top of the stack, consuming it.
+   --  Parks the calling thread rather than spinning.
+   procedure Join;
 
    --  Push a procedure id: what a PROCEDURE-typed value is.  One slot, and
    --  the VM already numbers procedures, so a procedure value needs no

@@ -7592,42 +7592,69 @@ package body O2c_Compiler is
                --  must not fall through into it.
                Next;                        --  past '.'
                Expect (Lex.Tok_Ident, "a member name after '.'");
-               if Cur.Text (1 .. Cur.Len) /= "Start" then
-                  raise O2c_Error with "Threads provides only Start (found '"
-                    & Cur.Text (1 .. Cur.Len) & "')";
-               end if;
                if not O2c_BC.Bytecode_Mode then
                   raise O2c_Error with "Threads needs the bytecode backend "
                     & "(the Ada backend has no threads)";
                end if;
-               Next;                        --  past Start -> '('
-               Expect (Lex.Tok_LParen, "'(' after Threads.Start");
-               Next;
-               Expect (Lex.Tok_Ident, "a procedure or a PROCEDURE-typed "
-                       & "variable");
                declare
-                  Arg : constant String := Cur.Text (1 .. Cur.Len);
-                  AI  : constant Natural := Find (Arg);
+                  Member : constant String := Cur.Text (1 .. Cur.Len);
                begin
-                  Next;                     --  past the argument
-                  Expect (Lex.Tok_RParen, "')' after Threads.Start");
-                  Next;
-                  if AI > 0
-                    and then Syms (AI).Kind = S_Proc
-                    and then not Syms (AI).Ret
-                    and then Syms (AI).Bc_Proc /= 0
-                  then
-                     O2c_BC.Push_BC_Proc (Syms (AI).Bc_Proc);
-                  elsif AI > 0 and then Syms (AI).UT > 0
-                    and then UTypes (Syms (AI).UT).Is_Proc
-                  then
-                     Bc_Load (Arg);
+                  if Member = "Start" then
+                     Next;                     --  past Start -> '('
+                     Expect (Lex.Tok_LParen, "'(' after Threads.Start");
+                     Next;
+                     Expect (Lex.Tok_Ident, "a procedure or a "
+                             & "PROCEDURE-typed variable");
+                     declare
+                        Arg : constant String := Cur.Text (1 .. Cur.Len);
+                        AI  : constant Natural := Find (Arg);
+                     begin
+                        Next;                  --  past the argument
+                        Expect (Lex.Tok_RParen, "')' after Threads.Start");
+                        Next;
+                        if AI > 0
+                          and then Syms (AI).Kind = S_Proc
+                          and then not Syms (AI).Ret
+                          and then Syms (AI).Bc_Proc /= 0
+                        then
+                           O2c_BC.Push_BC_Proc (Syms (AI).Bc_Proc);
+                        elsif AI > 0 and then Syms (AI).UT > 0
+                          and then UTypes (Syms (AI).UT).Is_Proc
+                        then
+                           Bc_Load (Arg);
+                        else
+                           raise O2c_Error with "Threads.Start needs a "
+                             & "parameterless procedure or a PROCEDURE-typed "
+                             & "variable (found '" & Arg & "')";
+                        end if;
+                        O2c_BC.Spawn;
+                        --  A statement discards the handle.  Capturing it
+                        --  needs Start as an expression, which is not there
+                        --  yet - so leaving it on the stack would silently
+                        --  unbalance every program that starts a thread.
+                        O2c_BC.Drop;
+                     end;
+                  elsif Member = "Join" then
+                     --  Threads.Join (h): wait for a thread.  The handle is
+                     --  whatever the program kept from the spawn, so it is
+                     --  loaded as an ordinary value.
+                     Next;                     --  past Join -> '('
+                     Expect (Lex.Tok_LParen, "'(' after Threads.Join");
+                     Next;
+                     Expect (Lex.Tok_Ident, "a thread handle");
+                     declare
+                        Arg : constant String := Cur.Text (1 .. Cur.Len);
+                     begin
+                        Next;                  --  past the argument
+                        Expect (Lex.Tok_RParen, "')' after Threads.Join");
+                        Next;
+                        Bc_Load (Arg);
+                        O2c_BC.Join;
+                     end;
                   else
-                     raise O2c_Error with "Threads.Start needs a "
-                       & "parameterless procedure or a PROCEDURE-typed "
-                       & "variable (found '" & Arg & "')";
+                     raise O2c_Error with "Threads provides Start and Join "
+                       & "(found '" & Member & "')";
                   end if;
-                  O2c_BC.Spawn;
                end;
             elsif Cur.Kind = Lex.Tok_Dot then
                --  Out.String / Out.Int / Out.Ln

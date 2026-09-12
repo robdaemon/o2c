@@ -607,6 +607,12 @@ package body O2c_BC is
       N_Insns := N_Insns + 1;
    end Spawn;
 
+   procedure Join is
+   begin
+      Put_Byte (16#E7#);
+      N_Insns := N_Insns + 1;
+   end Join;
+
    --  ---- procedures and frames -----------------------------------------
    function Begin_Proc (NParams : Natural; NResults : Natural) return Natural is
    begin
