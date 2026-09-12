@@ -386,6 +386,7 @@ package body OBC_VM is
       3 => (Sym => new String'("o2c_conv_fromint"), Pops => 2),
       4 => (Sym => new String'("o2c_conv_toreal"), Pops => 3),
       5 => (Sym => new String'("o2c_fdel"), Pops => 1),
+      6 => (Sym => new String'("o2c_frename"), Pops => 2),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -400,6 +401,7 @@ package body OBC_VM is
       7 => 2,     --  o2c_conv_fromint: x (value), var str
       8 => 3,     --  o2c_conv_toreal: str, var x (REAL), var res
       9 => 1,     --  o2c_fdel: the file name's address
+      10 => 2,    --  o2c_frename: the two name addresses
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -1214,6 +1216,40 @@ package body OBC_VM is
       end Put_Str;
    begin
       case Idx is
+         when Max_Natives + 5 =>
+            --  o2c_frename: id 10, foreign slot 6.  Void, two arguments: the
+            --  addresses of the two names.
+            declare
+               function Byte_At (A : U64; N : Natural) return Byte is
+                  B : Byte with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A)
+                       + System.Storage_Elements.Integer_Address (N));
+               begin
+                  return B;
+               end Byte_At;
+               function Name_At (A : U64; Buf : out String) return Natural is
+                  N : Natural := 0;
+                  B : Byte;
+               begin
+                  loop
+                     B := Byte_At (A, N);
+                     exit when B = 0 or else N = Buf'Last;
+                     N := N + 1;
+                     Buf (N) := Character'Val (Natural (B));
+                  end loop;
+                  return N;
+               end Name_At;
+               From_B : String (1 .. 64);
+               To_B   : String (1 .. 64);
+               NF : constant Natural := Name_At (Args (0), From_B);
+               NT : constant Natural := Name_At (Args (1), To_B);
+            begin
+               if NF > 0 and then NT > 0 then
+                  VM_Platform.Rename_File (From_B (1 .. NF), To_B (1 .. NT));
+               end if;
+               return Ok;
+            end;
          when Max_Natives + 4 =>
             --  o2c_fdel: id 9, foreign slot 5.  Void, one argument: the
             --  address of the file name, NUL-terminated as all strings here

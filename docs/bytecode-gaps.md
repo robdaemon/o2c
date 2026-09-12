@@ -386,6 +386,26 @@ form taking addresses, `Convert.FromInt` the mixed value/address form. The
 four value-returning ones here (`FStat`, `FRead`, `FWrite`, `FClose`) are a
 third: a native that returns a result, which is what `labs` already does.
 
+**Which of these can be inlined as a native, and which cannot.** Read from the
+bodies: a procedure whose body is *exactly one primitive call* is inline-able at
+its call site, and nothing else is.
+
+    Delete (name)        -> FDel (name)                      inline-able  DONE
+    Rename (from, dst)   -> FRename (from, dst)              inline-able  DONE
+
+    Old (name)           -> new(f); f^.size := FStat(name);  NOT inline-able
+                            <copy up to 64 name chars>; return f
+    Read / Write / Close / New                               NOT inline-able
+
+`Old` is the clearest case: it allocates, calls the primitive, copies the name
+into a fixed 64-byte field and returns the record. That is real logic, not a
+primitive, so inlining it would mean reimplementing the module in the compiler.
+The rest of `Files` is the same shape.
+
+So the cherry-pick approach reaches exactly two procedures in this module.
+Beyond them, `Files` needs its own source compiled to bytecode - the design
+question deferred earlier, not a fourth call-site emission.
+
 **What has to be wired is the CALL SITE via M19, not the FFI statement branch.**
 The branches fire while compiling the module itself, and the module is compiled
 in Ada mode before `Begin_Mode` - so they stay unreachable, and the route user

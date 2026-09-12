@@ -132,6 +132,34 @@ else
    bad "Files.Delete no longer compiles: $(tail -1 "$WORK/del.log")"
 fi
 
+#  Files.Rename, same contract: asserted by its effect.
+RFROM="$WORK/o2c_from.txt"
+RTO="$WORK/o2c_to.txt"
+printf 'payload\n' > "$RFROM"
+rm -f "$RTO"
+cat > "$WORK/ren.ob2" <<EOB
+module Ren;
+import Files, Out;
+var a: array 64 of char;
+    b: array 64 of char;
+begin
+  a := "$RFROM";
+  b := "$RTO";
+  Files.Rename(a, b);
+  Out.Int(1, 0); Out.Ln
+end Ren.
+EOB
+if timeout 60 "$FRONT" "$WORK/ren.ob2" "$WORK/ren.obc" >"$WORK/ren.log" 2>&1; then
+   got="$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/ren.obc" 2>/dev/null | tr -d '\n\r')"
+   if [ "$got" = "1" ] && [ ! -e "$RFROM" ] && [ -e "$RTO" ]; then
+      note "  ok  Files.Rename moved the file (effect verified)"
+   else
+      bad "Files.Rename did not move the file (from:$([ -e "$RFROM" ] && echo y || echo n) to:$([ -e "$RTO" ] && echo y || echo n))"
+   fi
+else
+   bad "Files.Rename no longer compiles: $(tail -1 "$WORK/ren.log")"
+fi
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0

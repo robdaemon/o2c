@@ -39,4 +39,8 @@ package VM_Platform is
    --  procedure rather than a function returning a code.
    procedure Delete_File (Path : String);
 
+   --  Rename within a volume.  Same shape and same reasoning as Delete_File:
+   --  no status to report, so a procedure.
+   procedure Rename_File (From, To : String);
+
 end VM_Platform;

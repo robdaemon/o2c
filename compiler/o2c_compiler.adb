@@ -7217,6 +7217,36 @@ package body O2c_Compiler is
                                  end;
                                  --  Native id 9: foreign entry 5.
                                  O2c_BC.Native_Call (9, 1);
+                              elsif Eq_No_Case (MNm, "Files")
+                                and then Eq_No_Case
+                                  (To_String (MName), "Rename")
+                                and then N_A = 2
+                              then
+                                 --  Files.Rename (from, to): the exported
+                                 --  form of FRename.  Two names, no result.
+                                 for K in 1 .. 2 loop
+                                    declare
+                                       ANm : constant String :=
+                                         To_String (Arg_R (K).Text);
+                                       AId : constant Natural := Find (ANm);
+                                    begin
+                                       if AId = 0
+                                         or else Syms (AId).UT = 0
+                                       then
+                                          raise O2c_BC.Wrong_Construct with
+                                            "bytecode backend: Files.Rename "
+                                            & "needs declared ARRAY OF CHAR "
+                                            & "variables";
+                                       end if;
+                                       O2c_BC.Load_Addr_G
+                                         (O2c_BC.Global_Array
+                                            (Ada_Id (ANm),
+                                             Total_Slots
+                                               (Syms (AId).UT)));
+                                    end;
+                                 end loop;
+                                 --  Native id 10: foreign entry 6.
+                                 O2c_BC.Native_Call (10, 2);
                               else
                                  raise O2c_BC.Wrong_Construct with
                                    "bytecode backend: " & MNm & "."

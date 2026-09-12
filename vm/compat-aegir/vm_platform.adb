@@ -69,6 +69,14 @@ package body VM_Platform is
       null;
    end Delete_File;
 
+   procedure Rename_File (From, To : String) is
+      Status : constant Aegir_User.Files.U64 :=
+        Aegir_User.Files.Rename (From, To);
+      pragma Unreferenced (Status);
+   begin
+      null;
+   end Rename_File;
+
    procedure Exit_With (Ok : Boolean) is
    begin
       if Ok then

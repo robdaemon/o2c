@@ -49,6 +49,14 @@ package body VM_Platform is
          null;
    end Delete_File;
 
+   procedure Rename_File (From, To : String) is
+   begin
+      Ada.Directories.Rename (From, To);
+   exception
+      when others =>
+         null;
+   end Rename_File;
+
    procedure Exit_With (Ok : Boolean) is
    begin
       if Ok then
