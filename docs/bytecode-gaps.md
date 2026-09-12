@@ -348,6 +348,29 @@ guesses at the condition were wrong.
 `tests/bc/ffi.ob2` holds the golden, and `tests/bytecode_gaps.sh` asserts the
 converted value rather than merely that it compiles.
 
+**The FFI surface, by which primitives the embedded sources actually call.**
+Measured by searching each `Oak_*_Src` body for `Name (` - the CALL, not the
+declaration, which is a distinction this file got wrong once already:
+
+    Files     FDel FRename FStat FRead FWrite FClose
+    Env       EnvGet EnvSet
+    Args      ArgGet
+    XYplane   PlaneOpen PlaneDot
+    In        InName
+
+Two corrections to the earlier "ten FFI helpers" list. `XYplane.PlaneClear` and
+`In.InReset`/`InWord` are **not called by their own module sources**, so the
+statement branches that recognise them are unreachable and there is nothing to
+implement for them. Conversely `Files` reaches six primitives, not two, and four
+of those six were never on the list.
+
+`Files.FDel` is reachable as a primitive but is **not an exported procedure** of
+`module Files` - a program saying `Files.FDel (n)` gets "not exported by module
+Files". So implementing it means implementing the primitive for the module's own
+use, not exposing a new entry point. That is the same shape as Convert, where
+the exported name differs from the primitive (`ToInt` vs `ConvToInt`), and it is
+why probing by the primitive name is misleading.
+
 This is the first demonstration of the silent no-op rather than an argument that
 it must exist, and it needs no change to `Begin_Mode`, no new sources and no new
 harness. It is upstream of the fork below only in the sense that it is the thing
