@@ -139,6 +139,13 @@ package body OBC_VM is
    --  Operand-free: the procedure type is parameterless and resultless by
    --  definition, so the stack effect is fixed - pop the id and call it.
    Op_Call_Indirect : constant := 16#E5#;
+
+   --  Instructions a thread may run before the VM takes the machine back.
+   --  This is what makes scheduling preemptive: a thread that never calls
+   --  YIELD still cannot freeze the others, so a busy worker cannot stall a
+   --  user interface.  YIELD is the same mechanism, asked for voluntarily -
+   --  which is why preemption needs no opcode of its own.
+   Budget_Quantum : constant := 10_000;
    Op_Dispatch     : constant := 16#E2#;
    Op_Alloc_New    : constant := 16#2A#;
    Op_Load_Fld_R   : constant := 16#24#;
@@ -189,6 +196,10 @@ package body OBC_VM is
       Frame_Base  : Natural_Array_Access := null;
       Frame_Slots : Natural_Array_Access := null;
       Return_PC   : Natural_Array_Access := null;
+      --  Instructions left before the VM forces a switch.  Per thread,
+      --  because it is precisely what a thread must not be able to spend
+      --  without giving the others a turn.
+      Budget      : Natural := 0;
    end record;
    type Context_Access is access Context;
 
@@ -1472,6 +1483,13 @@ package body OBC_VM is
             Note_At ("ran past the end of the code payload", PC);
             return Bad_Code;
          end if;
+         --  Preemption.  Checked before the instruction, never inside one, so
+         --  the budget is exactly the number of instructions between switches
+         --  and resuming always lands on an instruction boundary.
+         if Ctx.Budget = 0 then
+            return Yielded;
+         end if;
+         Ctx.Budget := Ctx.Budget - 1;
          Op := Code (PC);
          case Op is
             when Op_Nop =>
@@ -2170,6 +2188,9 @@ package body OBC_VM is
       Resuming : Boolean := False;
    begin
       loop
+         --  Refill at each turn: a thread that yields voluntarily gets a
+         --  fresh quantum, so YIELD and preemption cost the same.
+         Ctx.Budget := Budget_Quantum;
          St := Execute (Data, Img, Ctx, Resuming);
          exit when St /= Yielded;
          Resuming := True;
@@ -2205,6 +2226,7 @@ package body OBC_VM is
                         new U64_Array
                           (0 .. Natural'Max (Img.N_Globals, 1) - 1),
                       PC          => Img.Body_Off,
+                      Budget      => Budget_Quantum,
                       Which_Frame => 0,
                       Frame_Base  =>
                         new Natural_Array'(0 .. Max_Frames - 1 => 0),
