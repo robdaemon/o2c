@@ -619,6 +619,13 @@ package body O2c_BC is
       N_Insns := N_Insns + 1;
    end Thread_Yield;
 
+   procedure Thread_Id is
+   begin
+      Put_Byte (16#EA#);
+      N_Insns := N_Insns + 1;
+      Pushed;
+   end Thread_Id;
+
    procedure Mutex_Lock (Slot : Natural) is
    begin
       Put_Byte (16#E8#);

@@ -2640,9 +2640,26 @@ package body O2c_Compiler is
                Expect (Lex.Tok_Dot, "'.' after Threads");
                Next;
                Expect (Lex.Tok_Ident, "a member name after '.'");
+               if Cur.Text (1 .. Cur.Len) = "Id" then
+                  --  Threads.Id: this thread's own id, so a program can name
+                  --  itself the way a spawn names others.
+                  Next;                       --  past Id
+                  Expect (Lex.Tok_LParen, "'(' after Threads.Id");
+                  Next;
+                  Expect (Lex.Tok_RParen, "')' after Threads.Id");
+                  Next;
+                  if not O2c_BC.Bytecode_Mode then
+                     raise O2c_Error with "Threads needs the bytecode "
+                       & "backend";
+                  end if;
+                  O2c_BC.Thread_Id;
+                  R.Typ := T_Int;
+                  R.Text := Null_Unbounded_String;
+                  return R;
+               end if;
                if Cur.Text (1 .. Cur.Len) /= "Start" then
-                  raise O2c_Error with "Threads.Start is the only Threads "
-                    & "call that yields a value (found '"
+                  raise O2c_Error with "Threads.Start and Threads.Id are the "
+                    & "Threads calls that yield a value (found '"
                     & Cur.Text (1 .. Cur.Len) & "')";
                end if;
                if not O2c_BC.Bytecode_Mode then

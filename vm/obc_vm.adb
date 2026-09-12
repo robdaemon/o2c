@@ -151,6 +151,9 @@ package body OBC_VM is
    --  the state is where the program can see it.
    Op_Mutex_Lock    : constant := 16#E8#;
    Op_Mutex_Unlock  : constant := 16#E9#;
+   --  The calling thread's own id - the same handle a spawn hands back, so a
+   --  program can name itself the way others name it.
+   Op_Thread_Id     : constant := 16#EA#;
 
    --  Instructions a thread may run before the VM takes the machine back.
    --  This is what makes scheduling preemptive: a thread that never calls
@@ -989,6 +992,9 @@ package body OBC_VM is
                --  handle.  Net zero, but stated as the two steps because that
                --  is what happens.
                Depth := Depth + 0;
+               PC := PC + 1;
+            when Op_Thread_Id =>
+               Depth := Depth + 1;
                PC := PC + 1;
             when Op_Mutex_Lock | Op_Mutex_Unlock =>
                if not Fits (PC + 1, 4) then
@@ -2018,6 +2024,9 @@ package body OBC_VM is
                      Push (U64 (T.Thread_Id));
                   end;
                end;
+               PC := PC + 1;
+            when Op_Thread_Id =>
+               Push (U64 (Ctx.Thread_Id));
                PC := PC + 1;
             when Op_Mutex_Lock =>
                if PC + 4 >= Code'Length then
