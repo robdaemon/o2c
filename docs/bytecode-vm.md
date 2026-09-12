@@ -402,8 +402,8 @@ backend's regression still passes **and** the new VM path is exercised.
     image data the collector never reclaims.  It matters the moment an arena
     address becomes passable, because the failure - a native reading freed
     memory - is one that hides.
-  - **Remaining:** the first producer of `Wants_More` plus the park, which
-    waits on threads; and the libressl stub itself.
+  - **Remaining:** the first producer of `Wants_More` — the park it needs now
+    exists, since threads landed as M62 — and the libressl stub itself.
   - **Decided:** foreign structs stay opaque for now — libressl is used through
     handles (`SSL_CTX*`, `SSL*`) that the caller never dereferences, and o2c
     records are one 8-byte slot per field with no padding, so they are *not* C
@@ -438,6 +438,51 @@ backend's regression still passes **and** the new VM path is exercised.
   performance degradations (the suite runs under `timeout` for exactly this),
   and README/doc updates replacing "no automatic collection" with the VM's
   precise story (and keeping the Ada backend's arena caveat).
+
+- **M62 — threads.** Green threads scheduled by the VM itself, with a minimal
+  procedure type as the enabling feature.
+  - **Landed:** `TYPE Body = PROCEDURE;` — parameterless and resultless, so a
+    value is a procedure id with no environment: no closures, nothing for the
+    collector, and the VM already numbers procedures.  Assigning
+    (`b := Worker`), calling through (`b()` via `CALL_INDIRECT`), starting
+    (`Threads.Start`), waiting (`Threads.Join`), and mutual exclusion
+    (`Threads.Init`/`Lock`/`Unlock`).  `SPAWN` takes the procedure from the
+    stack, so the thread body may be chosen at run time.  A thread's entry
+    procedure returning ends it; finished threads are released, so a program
+    may start more over its life than the table holds.  A thread may start a
+    thread.  Verified by `tests/bc/threadstart.ob2`, `threadname.ob2`,
+    `threadjoin.ob2`, `threadmutex.ob2`, and `tests/vm/spawn.asm`, `join.asm`,
+    `release.asm`, `nested.asm`, `mutex.asm`, `mutexwait.asm`.
+  - **Decided:** scheduling is **preemptive**, with an instruction budget per
+    context checked between instructions.  A thread that never yields must not
+    be able to freeze a user interface, which is why cooperative scheduling was
+    rejected — and why this is cheap for us and cost Go a signal-based
+    mechanism: the interpreter sees every bytecode boundary, so safepoints are
+    free.  `YIELD` is the same mechanism asked for voluntarily, so preemption
+    needed no opcode of its own.  M:N remains a later extension, not a
+    redesign.  Globals stay **shared** and races are the programmer's problem,
+    documented rather than defended against.  A mutex is an **INTEGER the
+    program owns** (0 free, otherwise the holder's id) rather than a VM
+    resource, so there is no table to size and the state is where the program
+    can see it; locking one you already hold is refused rather than allowed
+    recursively.  Procedure types are deliberately minimal: parameter lists are
+    refused by name, because parameters are where structural versus nominal
+    matching and `VAR` interact, and that deserves its own pass.
+  - **Known:** `Wants_More` still has no producer, but its park now has
+    something to wait on — the threads M58 recorded as missing.  `Next_Thread_Id`
+    grows without bound (a number, not a slot).  A blocking lock leaves PC on
+    the instruction so the resume acquires it, while a join must advance because
+    it pops — the rule is whether the instruction has a stack effect, and
+    getting it backwards in either direction is silent until it is violent.
+  - **Found and fixed:** a parameterless procedure call — `P;`, the form Oberon
+    uses for a procedure that takes no arguments — emitted the call for the Ada
+    backend and **nothing** for bytecode.  The statement was parsed, accepted,
+    and silently never called.  It predates this milestone, and the suites never
+    caught it because every fixture calls procedures indirectly, passes them as
+    values, or uses built-ins; not one wrote a bare `P;`.  Found by
+    disassembling the image, not by reading code: several rounds of reasoning
+    about the call target were wrong, and one dump settled it.  `callplain.ob2`
+    and `localprocv.ob2` pin it.
 
 ## Risks
 
