@@ -2058,7 +2058,11 @@ package body OBC_VM is
                      --  it, so this one deliberately does not advance - the
                      --  instruction has no stack effect, so re-running it is
                      --  safe, unlike a join, which pops.
-                     Ctx.Waiting_Mutex := Slot;
+                     --  Slot 0 is a real slot, so the "not waiting on a
+                     --  mutex" value cannot also be 0 - otherwise every
+                     --  unlock of slot 0 wakes every thread blocked on
+                     --  anything at all.
+                     Ctx.Waiting_Mutex := Slot + 1;
                      Ctx.State := Thread_Blocked;
                      return Yielded;
                   end if;
@@ -2082,7 +2086,7 @@ package body OBC_VM is
                   for K in 1 .. N_Contexts loop
                      if Live_Contexts (K) /= null
                        and then Live_Contexts (K).State = Thread_Blocked
-                       and then Live_Contexts (K).Waiting_Mutex = Slot
+                       and then Live_Contexts (K).Waiting_Mutex = Slot + 1
                      then
                         Live_Contexts (K).State := Thread_Runnable;
                         Live_Contexts (K).Waiting_Mutex := 0;
@@ -2128,12 +2132,15 @@ package body OBC_VM is
                   elsif Target.State /= Thread_Done then
                      --  Park rather than spin.  The scheduler wakes this
                      --  thread when the one it waits for finishes.
+                     --  Park, and put the handle back so the resume can
+                     --  re-run this instruction and re-check.  Advancing PC
+                     --  instead would resume *past* the join, so a wake that
+                     --  turned out to be premature - and a mutex unlock can
+                     --  produce one - would let the thread run on without the
+                     --  thread it was waiting for.
+                     Push (U64 (Handle));
                      Ctx.Waiting_For := Handle;
                      Ctx.State := Thread_Blocked;
-                     --  Advance past the join *before* yielding.  The resume
-                     --  lands here, so leaving PC on the join would re-run it
-                     --  and pop a handle that is no longer on the stack.
-                     PC := PC + 1;
                      return Yielded;
                   end if;
                end;

@@ -318,7 +318,7 @@ if python3 "$ASM" "$ROOT/tests/vm/nested.asm" "$WORK/nested.obc" >/dev/null \
    && timeout 60 "$VM" "$WORK/nested.obc" >"$WORK/nested.out" 2>"$WORK/nested.err"
 then
    if diff -u "$ROOT/tests/vm/nested.out" "$WORK/nested.out"; then
-      note "positive: nested.asm spawns a thread from inside a thread"
+      note "positive: nested.asm spawns and waits from inside a thread"
    else
       bad "nested.asm output differs from tests/vm/nested.out"
    fi
@@ -375,7 +375,7 @@ fi
 if python3 "$ASM" "$ROOT/tests/vm/join.asm" "$WORK/join.obc" >/dev/null \
    && timeout 60 "$VM" "$WORK/join.obc" >"$WORK/join.out" 2>"$WORK/join.err"; then
    if diff -u "$ROOT/tests/vm/join.out" "$WORK/join.out"; then
-      note "positive: join.asm (JOIN) waits for the thread before continuing"
+      note "positive: join.asm (JOIN) waits before reading the shared value"
    else
       bad "join.asm output differs from tests/vm/join.out"
    fi
