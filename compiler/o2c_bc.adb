@@ -401,7 +401,8 @@ package body O2c_BC is
         when Rge        => 16#8B#,
         when I2R        => 16#8C#,
         when R2I_Round  => 16#8D#,
-        when R2I_Trunc  => 16#8E#);
+        when R2I_Trunc  => 16#8E#,
+        when Call_Indirect => 16#E5#);
 
    function Desc_Rec (Size : Natural; Base : Natural; Methods : Natural;
                       Has_Ptrs : Boolean) return Natural is
@@ -593,6 +594,12 @@ package body O2c_BC is
    begin
       Push_Int (Integer (Proc_Id));
    end Push_BC_Proc;
+
+   procedure Call_Indirect is
+   begin
+      Put_Byte (16#E5#);
+      N_Insns := N_Insns + 1;
+   end Call_Indirect;
 
    --  ---- procedures and frames -----------------------------------------
    function Begin_Proc (NParams : Natural; NResults : Natural) return Natural is

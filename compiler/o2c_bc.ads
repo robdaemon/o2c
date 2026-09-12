@@ -37,7 +37,10 @@ package O2c_BC is
       Set_Union, Set_Intersect, Set_Diff, Set_Symdiff,
       Set_Eq, Set_Ne, Set_In, Set_Single,
       Radd, Rsub, Rmul, Rdiv, Rneg, Rabs,
-      Req, Rne, Rlt, Rle, Rgt, Rge, I2R, R2I_Round, R2I_Trunc);
+      Req, Rne, Rlt, Rle, Rgt, Rge, I2R, R2I_Round, R2I_Trunc,
+      --  Calling through a procedure value.  Appended for the same reason
+      --  everything else here is: the enum's order is fixed.
+      Call_Indirect);
 
    --  ---- mode ------------------------------------------------------------
    --  True while the front end should feed this package.  Only the hook
@@ -131,6 +134,11 @@ package O2c_BC is
    procedure Store_Fld (Off : Natural);
    procedure Un (O : Op);
    procedure Native_Call (Idx : Natural; NArgs : Natural);
+   --  Call the procedure whose id is on top of the stack, consuming it.  The
+   --  callee is only known at run time - which is what a PROCEDURE-typed
+   --  value holds - and the type guarantees it takes no arguments and
+   --  returns no result.
+   procedure Call_Indirect;
 
    --  Push a procedure id: what a PROCEDURE-typed value is.  One slot, and
    --  the VM already numbers procedures, so a procedure value needs no
