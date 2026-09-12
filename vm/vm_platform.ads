@@ -52,4 +52,10 @@ package VM_Platform is
    function Get_Env (Name : String) return String;
    procedure Set_Env (Name, Value : String);
 
+   --  The N-th argument of the INTERPRETED PROGRAM, 1-based, copied into Buf
+   --  without a terminator.  Returns its length, or -1 when N is out of range.
+   --  Numbering is the platform's business: the host's own argument 1 is the
+   --  image so it offsets, while the guest's arguments are the program's own.
+   function Arg_Get (N : Natural; Buf : out String) return Integer;
+
 end VM_Platform;

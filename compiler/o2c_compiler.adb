@@ -7285,6 +7285,50 @@ package body O2c_Compiler is
                                    ((if Eq_No_Case (To_String (MName),
                                                     "Get")
                                      then 11 else 12), 2);
+                              elsif Eq_No_Case (MNm, "Args")
+                                and then Eq_No_Case
+                                  (To_String (MName), "Get")
+                                and then N_A = 3
+                              then
+                                 --  Args.Get (n, var arg, var res): n is a
+                                 --  value, the other two are out slots.
+                                 declare
+                                    BN  : constant String :=
+                                      To_String (Arg_R (2).Text);
+                                    RN  : constant String :=
+                                      To_String (Arg_R (3).Text);
+                                    BID : constant Natural := Find (BN);
+                                 begin
+                                    if BID = 0
+                                      or else Syms (BID).UT = 0
+                                    then
+                                       raise O2c_BC.Wrong_Construct with
+                                         "bytecode backend: Args.Get needs a "
+                                         & "declared ARRAY OF CHAR variable";
+                                    end if;
+                                    --  The value argument: a literal
+                                    --  pushes its constant, anything else
+                                    --  loads by name.  Bc_Load alone would
+                                    --  look up a global called "1".
+                                    if Arg_R (1).Lit
+                                      and then Arg_R (1).Typ = T_Int
+                                      and then Arg_R (1).Folds
+                                    then
+                                       O2c_BC.Push_Int (Arg_R (1).Val);
+                                    else
+                                       Bc_Load
+                                         (Ada_Id
+                                            (To_String (Arg_R (1).Text)));
+                                    end if;
+                                    O2c_BC.Load_Addr_G
+                                      (O2c_BC.Global_Array
+                                         (Ada_Id (BN),
+                                          Total_Slots (Syms (BID).UT)));
+                                    O2c_BC.Load_Addr_G
+                                      (O2c_BC.Global (Ada_Id (RN)));
+                                    --  Native id 13: foreign entry 9.
+                                    O2c_BC.Native_Call (13, 3);
+                                 end;
                               else
                                  raise O2c_BC.Wrong_Construct with
                                    "bytecode backend: " & MNm & "."

@@ -70,6 +70,27 @@ package body VM_Platform is
          null;
    end Set_Env;
 
+   function Arg_Get (N : Natural; Buf : out String) return Integer is
+      Count : constant Natural :=
+        (if Ada.Command_Line.Argument_Count >= 1
+         then Ada.Command_Line.Argument_Count - 1 else 0);
+   begin
+      if N < 1 or else N > Count then
+         return -1;
+      end if;
+      declare
+         A : constant String := Ada.Command_Line.Argument (N + 1);
+         L : Natural := 0;
+      begin
+         for C of A loop
+            exit when L = Buf'Last;
+            L := L + 1;
+            Buf (L) := C;
+         end loop;
+         return L;
+      end;
+   end Arg_Get;
+
    procedure Exit_With (Ok : Boolean) is
    begin
       if Ok then

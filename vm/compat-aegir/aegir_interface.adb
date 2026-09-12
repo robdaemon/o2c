@@ -23,6 +23,8 @@ package body Aegir_Interface is
      return File_Code;
    type Del_P     is access function (Name : String) return File_Code;
    type Ren_P     is access function (From, To : String) return File_Code;
+   type ArgCnt_P  is access function return Natural;
+   type ArgAt_P   is access function (Index : Positive) return String;
 
    Unused_Init : constant Init_P    := Aegir_User.CLI.Init'Access;
    Get_Env     : constant Get_Env_P := Aegir_User.CLI.Get_Env'Access;
@@ -30,7 +32,10 @@ package body Aegir_Interface is
    Stat        : constant Stat_P    := Aegir_User.Files.Stat'Access;
    Delete      : constant Del_P     := Aegir_User.Files.Delete'Access;
    Rename      : constant Ren_P     := Aegir_User.Files.Rename'Access;
-   pragma Unreferenced (Unused_Init, Get_Env, Set_Env, Stat, Delete, Rename);
+   Arg_Count   : constant ArgCnt_P  := Aegir_User.CLI.Arg_Count'Access;
+   Argument    : constant ArgAt_P   := Aegir_User.CLI.Argument'Access;
+   pragma Unreferenced (Unused_Init, Get_Env, Set_Env, Stat, Delete, Rename,
+                       Arg_Count, Argument);
    pragma Unreferenced (Cli_Ok, Cli_Fail, File_Ok);
 
    procedure Touch is

@@ -90,6 +90,25 @@ package body VM_Platform is
       null;
    end Set_Env;
 
+   function Arg_Get (N : Natural; Buf : out String) return Integer is
+   begin
+      --  No offset: a guest program's arguments are its own.
+      if N < 1 or else N > Aegir_User.CLI.Arg_Count then
+         return -1;
+      end if;
+      declare
+         A : constant String := Aegir_User.CLI.Argument (Positive (N));
+         L : Natural := 0;
+      begin
+         for C of A loop
+            exit when L = Buf'Last;
+            L := L + 1;
+            Buf (L) := C;
+         end loop;
+         return L;
+      end;
+   end Arg_Get;
+
    procedure Exit_With (Ok : Boolean) is
    begin
       if Ok then

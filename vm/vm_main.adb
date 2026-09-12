@@ -20,12 +20,10 @@ procedure VM_Main is
 begin
    VM_Platform.Init;
    OBC_VM.Set_Quantum (VM_Platform.Quantum_Override);
-   if Argument_Count > 1 then
-      Ada.Text_IO.Put_Line
-        (Ada.Text_IO.Standard_Error, "usage: vm [image.obc]");
-      VM_Platform.Exit_With (False);
-      return;
-   end if;
+   --  Anything after the image is the interpreted program's own argument
+   --  list, which VM_Platform.Arg_Get exposes as Arg N.  Without it the only
+   --  argument a program could see was the image path, so Args.Get - a helper
+   --  whose whole job is reading arguments - could not be exercised at all.
    declare
       Full : constant String := VM_Platform.Resolve_Path (Path);
       St   : OBC_VM.Status;

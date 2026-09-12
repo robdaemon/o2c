@@ -193,6 +193,33 @@ else
    bad "Env.Get/Set no longer compiles: $(tail -1 "$WORK/env.log")"
 fi
 
+#  Args.Get.  Needs the driver to forward a program argument, which is why
+#  vm_main now accepts anything after the image.  Both directions are asserted:
+#  a real argument is read, and an index past the end reports -1.
+cat > "$WORK/args.ob2" <<'EOB'
+module ArgsT;
+import Args, Out;
+var b: array 64 of char;
+    r: integer;
+begin
+  Args.Get(1, b, r);
+  Out.String(b); Out.Int(r, 0); Out.Ln;
+  Args.Get(9, b, r);
+  Out.Int(r, 0); Out.Ln
+end ArgsT.
+EOB
+if timeout 60 "$FRONT" "$WORK/args.ob2" "$WORK/args.obc" >"$WORK/args.log" 2>&1; then
+   got="$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/args.obc" hello 2>/dev/null \
+            | tr -d '\n\r')"
+   if [ "$got" = "hello0-1" ]; then
+      note "  ok  Args.Get reads a forwarded argument and rejects a bad index"
+   else
+      bad "Args.Get printed '$got', expected hello0-1"
+   fi
+else
+   bad "Args.Get no longer compiles: $(tail -1 "$WORK/args.log")"
+fi
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0

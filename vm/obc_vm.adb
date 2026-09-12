@@ -389,6 +389,7 @@ package body OBC_VM is
       6 => (Sym => new String'("o2c_frename"), Pops => 2),
       7 => (Sym => new String'("o2c_envget"), Pops => 2),
       8 => (Sym => new String'("o2c_envset"), Pops => 2),
+      9 => (Sym => new String'("o2c_argget"), Pops => 3),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -406,6 +407,7 @@ package body OBC_VM is
       10 => 2,    --  o2c_frename: the two name addresses
       11 => 2,    --  o2c_envget: name address, value address (out)
       12 => 2,    --  o2c_envset: name address, value address
+      13 => 3,    --  o2c_argget: n (value), buf address, res address
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -1220,6 +1222,46 @@ package body OBC_VM is
       end Put_Str;
    begin
       case Idx is
+         when Max_Natives + 8 =>
+            --  o2c_argget: id 13, foreign slot 9.  Void, three arguments:
+            --  n as a VALUE, then the buffer and the result as addresses -
+            --  the only helper that mixes a value with two out slots.
+            declare
+               procedure Put_CStr (A : U64; S : String) is
+                  procedure Put_Byte (N : Natural; V : Byte) is
+                     B : Byte with Address =>
+                       System.Storage_Elements.To_Address
+                         (System.Storage_Elements.Integer_Address (A)
+                          + System.Storage_Elements.Integer_Address (N));
+                  begin
+                     B := V;
+                  end Put_Byte;
+               begin
+                  for I in S'Range loop
+                     Put_Byte (I - S'First, Byte (Character'Pos (S (I))));
+                  end loop;
+                  Put_Byte (S'Length, 0);
+               end Put_CStr;
+               procedure Park (A : U64; V : I64) is
+                  X : I64 with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A));
+               begin
+                  X := V;
+               end Park;
+               Buf : String (1 .. 256);
+               N   : constant Natural := Natural (To_I64 (Args (0)));
+               L   : Integer;
+            begin
+               L := VM_Platform.Arg_Get (N, Buf);
+               if L < 0 then
+                  Park (Args (2), -1);
+               else
+                  Put_CStr (Args (1), Buf (1 .. L));
+                  Park (Args (2), 0);
+               end if;
+               return Ok;
+            end;
          when Max_Natives + 6 | Max_Natives + 7 =>
             --  o2c_envget (id 11, slot 7) and o2c_envset (id 12, slot 8).
             --  Both void, both two addresses.  They differ only in direction:
