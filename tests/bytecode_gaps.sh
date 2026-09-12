@@ -395,12 +395,20 @@ note "--- record fields, and the two that were refused by OMISSION ---"
 check "array field through a pointer"  ok 'module G43; type A = array 4 of char; type R = record s: A; n: integer end; type P = pointer to R; var p: P; i: integer; begin new(p); i := 0; while i < 2 do p^.s[i] := CHR(65 + i); i := i + 1 end end G43.'
 check "LONGINT record field"           ok 'module G44; type R = record n: longint; k: integer end; type P = pointer to R; var p: P; begin new(p); p^.n := 5; p^.k := 1 end G44.'
 
-note "--- still refused: the NEXT wall behind Files ---"
-#  Files' own bodies assign to a POINTER field: `r.f := f` in Open.  That is
-#  the "assigning through a pointer designator" refusal, and it is the next
-#  thing 3d has to clear after the two above.  Listed so the sequence is
-#  visible rather than discovered again.
-check "assignment to a POINTER field"  blocked 'module G45; type R = record n: integer end; type P = pointer to R; type H = record p: P end; var h: H; q: P; begin h.p := q end G45.'
+note "--- pointer FIELDS, and the spelling that was unusable ---"
+#  A field declared with a NAMED pointer type (`p: Ptr`, which is what Files'
+#  `f: File` is) was refused, while the self-referential spelling (`next: Ptr`
+#  inside the record it points at) worked.  One construct, two spellings, one
+#  of them unusable: `h.p := q` said "assigning through a pointer designator
+#  is not yet supported" and `h.p^.n` said nothing at all, because the walk
+#  classified the whole designator as a bare pointer.
+#
+#  tests/bc/ptrfield.ob2 holds the behaviour by value.  These entries assert
+#  the shapes compile, and that the self-referential spelling - which the
+#  corpus depends on - still does.
+check "pointer field: assignment"     ok 'module G45; type R = record n: integer end; type P = pointer to R; type H = record p: P end; var h: H; q: P; begin new(q); h.p := q end G45.'
+check "pointer field: read through it" ok 'module G46; type R = record n: integer end; type P = pointer to R; type H = record p: P end; var h: H; q: P; k: integer; begin new(q); h.p := q; k := h.p^.n end G46.'
+check "pointer field: the linked-list spelling still works" ok 'module G47; type Node = record v: integer; next: Node end; type P = pointer to Node; var p, q: P; begin new(p); new(q); q^.next := p; p^.v := 1 end G47.'
 
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"

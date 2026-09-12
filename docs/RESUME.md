@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         301
-    fixtures        70 in tests/bc/
+    commits         302
+    fixtures        71 in tests/bc/
     foreign natives 21 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -283,13 +283,15 @@ intrinsics (`FStat`/`FRead`/`FWrite`/`FClose`/`FDel`/`FRename`, `EnvGet`/`EnvSet
 as bytecode native calls — several counterpart natives already exist from the FFI
 work; (3) the ordering change below.
 
-**The next wall is now known and recorded**, so it is not rediscovered:
-`Files.Open` does `r.f := f` — an assignment to a **pointer field** — which is the
-"assigning through a pointer designator" refusal. `bytecode_gaps.sh` pins it as
-`blocked`.
+**The next wall was** `Files.Open`'s `r.f := f` — an assignment to a **pointer
+field** — which said "assigning through a pointer designator is not yet
+supported". **That is now fixed too (3h)**, and the measurement has moved on:
+`Files` gets past its types and its statements and stops at **LONGINT**, which is
+where step 2 of the sequence starts (the ~12 intrinsics, several of which compute
+in LONGINT).
 
 And one thing the sizing missed entirely: **no fixture consumes any of it yet.**
-The first two items above were worth fixing on their own merits (they are
+The three data gaps above were worth fixing on their own merits (all three are
 user-visible), but the rest of 3d is capability with no caller.
 
 The original sizing, kept for the record:
@@ -420,6 +422,65 @@ Two small process notes, both the same shape as earlier ones: the recorded list
 gained its first commentary and the reader immediately parsed the comments as
 fixtures named `# CASE is the cause ...` (now skipped), and `digits` is an Ada
 reserved word.
+
+### 3h. DONE — pointer fields, and the spelling that was unusable
+
+The third and last of the data gaps in front of `Files`, and the one with the
+most in it. **There are two spellings of a pointer field and only one was
+recognised:**
+
+    next: Node     a field whose type names its OWN record - the linked-list
+                   idiom.  Nothing names the pointer, so the field carries the
+                   RECORD's user type rather than a pointer's.
+    f: File        a field declared with a NAMED pointer type.  This is what
+                   Files uses, and it was not recognised as a leaf at all.
+
+So `q^.next := p` worked while `r.f := f` and `h.p := q` were refused - one
+construct, two spellings, one of them unusable. With no match the walk fell
+through to the post-loop "the view is a pointer" case, which classifies the whole
+designator as a bare pointer and hands it to the assignment path that refuses
+designators by design - hence a message about *designators* for what is really a
+missing leaf case.
+
+**Four places had to agree, and the third is why this was not a one-line fix:**
+
+1. The **leaf condition** must accept both spellings (a predicate,
+   `Ptr_Field_Of`, now used in both places that ask the question).
+2. `D.Ptr_Field` must be set for both, or the store uses the integer opcode on
+   an address.
+3. The **intermediate** case - walking *into* a pointer field - must load the
+   pointer for both spellings.  Skipping it for the named one is not a refusal
+   but a **wrong address**, so fixing only the leaf would have converted a
+   refusal into a silent wrong answer, which is the trade this backend exists to
+   refuse.  Fixing it then exposed a second bug in the same block: `Load_Fld_P`
+   reads *from* the address on the stack, and a **record variable** base had
+   never pushed one (a pointer base does, at the top of the chain), so `h.p^.n`
+   came out as `operand-stack depth violation` until the base push was mirrored
+   there.
+4. The Ada-mode classification of a pointer leaf had to stay `D_Scalar` for the
+   self-referential spelling and become `D_Ptr` for the named one.  `D_Scalar`
+   carries no user type, so the named spelling needed `D_Ptr` - that is how
+   `Files.Base*`'s `return r.f` was failing as "a pointer with no type" - but
+   sending the self-referential spelling there instead turned list.ob2's
+   recorded ADA_BROKEN into a pointer-type mismatch, a fresh failure in a
+   fixture this change was not about.
+
+`tests/bc/ptrfield.ob2` pins it by value (write a pointer into a field, read
+through the field, NIL through it, re-point it) and both backends corroborate it.
+`bytecode_gaps.sh` asserts all three shapes compile, including the linked-list
+spelling the corpus depends on.
+
+**How it was actually found, since the reasoning did not.** Four theories died to
+measurement, in this order: the emitter blamed the array's length (wrong); the
+first fix broke `Files.Base*` with "RETURN value type mismatch" (no types named,
+so useless); naming the types said "a pointer with no type"; and a temporary
+raise inside the walk printed `kind=D_Scalar ptr_field=TRUE d_ut=3`, which
+located it exactly. The two RETURN messages now name the types they disagreed
+about, permanently, because "mismatch" alone cannot distinguish the value being
+the wrong shape from the TYPE having been recorded wrong. And
+`D.K := (if D.Ptr_Field and then UTypes (...) ...)` is load-bearing, not
+decoration: without `D.Ptr_Field and then` it indexes `UTypes (0)` and crashed on
+every record with an INTEGER in it.
 
 ## 4. Method — what worked, and what did not
 

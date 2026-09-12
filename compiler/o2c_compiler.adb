@@ -1229,6 +1229,26 @@ package body O2c_Compiler is
       return Desc_Cache (UT);
    end Desc_For;
 
+   --  Is a record field a POINTER?  There are two spellings and both are one
+   --  8-byte address, but only one was recognised:
+   --
+   --    next   a field whose type names its own record (Oberon's linked-list
+   --           idiom).  No pointer type names it, so the field carries the
+   --           RECORD's user type rather than a pointer's - hence the second
+   --           test, and hence D.UT being the record for that spelling.
+   --    f      a field declared with a NAMED pointer type (Files' `f: File`).
+   --           Its type is the pointer type, so the first test catches it.
+   --
+   --  Recognising only the first is what made `p^.next := q` work while
+   --  `r.f := f` and `h.p := q` were refused: with no match, the walk fell
+   --  through to the post-loop "the view is a pointer" case, which classifies
+   --  the whole designator as a bare pointer and hands it to the assignment
+   --  path that refuses designators.
+   function Ptr_Field_Of (Field_UT : Natural; Owner_UT : Natural)
+                          return Boolean is
+     (Field_UT /= 0
+      and then (UTypes (Field_UT).Is_Ptr or else Field_UT = Owner_UT));
+
    function Field_Offset (Base_UT : Natural; FO : Natural; F : Natural)
                           return Natural is
       N : Natural := 0;
@@ -1825,23 +1845,23 @@ package body O2c_Compiler is
                D.Text := D.Text & "."
                  & Ada_Id (To_String (UTypes (FO).F (F).Name));
                if UTypes (FO).F (F).UT = 0
-                 or else (UTypes (FO).F (F).UT = FO
-                          --  A field naming the record it sits in, and one
-                          --  that nothing selects from, is a terminal leaf
-                          --  holding a pointer.  Peek because Cur is still
-                          --  the field name here: the selector has not been
-                          --  read yet, so Cur cannot answer this.
+                 or else (Ptr_Field_Of (UTypes (FO).F (F).UT, FO)
+                          --  A pointer field that nothing selects from is a
+                          --  terminal leaf holding a pointer.  Peek because
+                          --  Cur is still the field name here: the selector
+                          --  has not been read yet, so Cur cannot answer this.
                           and then Lex.Peek_Token.Kind /= Lex.Tok_Dot
                           and then Lex.Peek_Token.Kind /= Lex.Tok_Caret
                           and then Lex.Peek_Token.Kind /= Lex.Tok_LBracket)
                then
                   D.Sc := UTypes (FO).F (F).Typ;
-                  D.Ptr_Field := UTypes (FO).F (F).UT = FO;
+                  D.Ptr_Field := Ptr_Field_Of (UTypes (FO).F (F).UT, FO);
                   if D.Ptr_Field then
-                     --  A field that names its own record is a pointer, so
-                     --  it types as one: assignment stores a pointer and
-                     --  equality compares two addresses.  Its user type is
-                     --  the record's, since no pointer type names it.
+                     --  A pointer field is a pointer, so it types as one:
+                     --  assignment stores an address and equality compares
+                     --  two.  Its user type is the field's own, which is the
+                     --  RECORD for the self-referential spelling (nothing
+                     --  names the pointer) and the pointer type otherwise.
                      D.Sc := T_Ptr;
                      D.UT := UTypes (FO).F (F).UT;
                   end if;
@@ -1892,17 +1912,66 @@ package body O2c_Compiler is
                              (Base_Name, Total_Slots (Base_UT)));
                      end if;
                   else
-                     D.K := D_Scalar;
+                     --  Ada mode needs no offset, so a scalar leaf is just its
+                     --  name.  A POINTER leaf must NOT become D_Scalar, though:
+                     --  D_Scalar carries no user type, so every consumer reads
+                     --  D.Sc and drops D.UT - and `return r.f` of a pointer
+                     --  field then fails the return-type check as "a pointer
+                     --  with no type", which is how recognising the named
+                     --  spelling broke Files.Base* the first time.  D_Ptr is
+                     --  the kind that means "a pointer whose type is D.UT".
+                     --
+                     --  ONLY the named spelling needs D_Ptr, though.  For the
+                     --  self-referential one D.UT is the RECORD, and nothing
+                     --  declares a return type that way, so sending it to the
+                     --  pointer-assignment path is what turned list.ob2's
+                     --  recorded ADA_BROKEN into a pointer-type mismatch - a
+                     --  fresh failure in a fixture this change was not about.
+                     --
+                     --  `D.Ptr_Field and then` is not decoration: it is what
+                     --  keeps the UTypes index in range.  A plain scalar
+                     --  field has UT = 0, and D.Ptr_Field is the only thing
+                     --  that says the index is meaningful - without the guard
+                     --  this crashed with an index check on every record with
+                     --  an INTEGER in it.
+                     D.K := (if D.Ptr_Field
+                               and then UTypes (UTypes (FO).F (F).UT).Is_Ptr
+                             then D_Ptr
+                             else D_Scalar);
                   end if;
                   Next;           --  past the field name
                   return D;
                end if;
-               if UTypes (FO).F (F).UT = FO then
-                  --  An intermediate pointer field: what it holds is the
-                  --  next record, so load it and carry on chaining from
-                  --  there.  Its type is the record itself, so the walk below
-                  --  already reaches the right view.
+               if Ptr_Field_Of (UTypes (FO).F (F).UT, FO) then
+                  --  An intermediate pointer field: what it holds is the next
+                  --  record, so LOAD IT and carry on chaining from there.
+                  --  Both spellings need this: the self-referential one's type
+                  --  is the record itself, so the walk below already reaches
+                  --  the right view, and a named pointer type is followed by
+                  --  Ptr_Tgt further down.
+                  --
+                  --  Skipping it for the named spelling is not a refusal but a
+                  --  wrong ADDRESS - the outer record's would stay on the
+                  --  stack while the offset was applied to it - and that is
+                  --  why this is the one place the two spellings had to be
+                  --  unified rather than only the leaf above: fixing the leaf
+                  --  alone would have turned a refusal into a silently wrong
+                  --  answer, which is the trade this backend exists to refuse.
                   if O2c_BC.Bytecode_Mode then
+                     --  Load_Fld_P reads FROM the address on the stack, so the
+                     --  base must be there first.  A pointer base pushed it at
+                     --  the top of the chain; a RECORD variable did not, which
+                     --  is why `h.p^.n` was briefly non-terminating - the load
+                     --  had no operand and the image failed verification with
+                     --  "operand-stack depth violation".  The same question the
+                     --  leaf asks, asked here too.
+                     if not UTypes (Base_UT).Is_Ptr
+                       and then not D.Base_On_Stack
+                     then
+                        O2c_BC.Load_Addr_G
+                          (O2c_BC.Global_Array
+                             (Base_Name, Total_Slots (Base_UT)));
+                     end if;
                      O2c_BC.Load_Fld_P ((F - 1) * 8);
                      D.Base_On_Stack := True;
                   end if;
@@ -2469,14 +2538,17 @@ package body O2c_Compiler is
       if O2c_BC.Bytecode_Mode then
          --  The value is already on the stack: the RHS was parsed by
          --  Parse_Expr and NIL emits PUSH_NIL.  A pointer is one scalar slot,
-         --  so a whole variable is an ordinary store - but a designator like
-         --  p^.next would intern a global named after the Ada text, so it is
-         --  refused instead.
+         --  so a whole variable is an ordinary store - and a field is handled
+         --  by the designator path, which knows its offset.  What is left here
+         --  is a designator whose leaf is a whole POINTER VARIABLE reached
+         --  through something, which would intern a global named after the Ada
+         --  text; refuse it, and NAME it, so a reader can see which one.
          if (for some Ch of LHS =>
                Ch not in 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_')
          then
             raise O2c_BC.Wrong_Construct with "bytecode backend: assigning "
-              & "through a pointer designator is not yet supported";
+              & "through the pointer designator '" & LHS
+              & "' is not yet supported";
          end if;
          Bc_Store (LHS);
       elsif Conv then
@@ -6749,8 +6821,14 @@ package body O2c_Compiler is
                      if V.Typ /= T_Nil and then
                        (V.Typ /= T_Ptr or else V.Ptr_UT /= Cur_Ret_UT)
                      then
-                        raise O2c_Error with "RETURN value type mismatch "
-                          & "(line " & Natural'Image (Cur.Line) & ")";
+                        raise O2c_Error with "RETURN value type mismatch: the "
+                          & "function returns "
+                          & To_String (UTypes (Cur_Ret_UT).Name)
+                          & ", the value is "
+                          & (if V.Typ = T_Nil then "NIL"
+                             elsif V.Ptr_UT = 0 then "a pointer with no type"
+                             else To_String (UTypes (V.Ptr_UT).Name))
+                          & " (line " & Natural'Image (Cur.Line) & ")";
                      end if;
                   elsif Cur_Ret_Type = T_Long and then V.Typ = T_Int
                     and then V.Lit
@@ -6766,8 +6844,15 @@ package body O2c_Compiler is
                      V.Text := To_Unbounded_String
                        ("Long_Float (" & To_String (V.Text) & ")");
                   elsif V.Typ /= Cur_Ret_Type then
-                     raise O2c_Error with "RETURN value type mismatch (line "
-                       & Natural'Image (Cur.Line) & ")";
+                     --  Name both types: "mismatch" alone cannot distinguish
+                     --  "the value is the wrong shape" from "the value is the
+                     --  right shape and the TYPE was recorded wrong", and that
+                     --  distinction is the whole diagnosis when a change to the
+                     --  designator walk reclassifies a field.
+                     raise O2c_Error with "RETURN value type mismatch: "
+                       & "expected " & Ada_Type (Cur_Ret_Type)
+                       & ", got " & Ada_Type (V.Typ)
+                       & " (line " & Natural'Image (Cur.Line) & ")";
                   end if;
                   Append_Body ("      return " & To_String (V.Text) & ";");
                   if Ctrl_Depth = 0 then
