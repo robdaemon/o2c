@@ -172,11 +172,26 @@ but the verifier rejects it with a depth violation while the *emitter's* own
 depth tracker accepts it.  **The two disagree**, and that disagreement is the
 thing to understand next, not the loop.
 
-The likely cause, to check rather than assume: the verifier walks a linear depth
-and a loop has two paths into its exit label, so their depths must match.  The
-factor pushes the array address before this code runs, so one path reaches the
-exit with a leftover the other does not.  The fix is probably a single exit that
-drops it, or not pushing the address where it is not wanted.
+A hypothesis was recorded here and then **disproved by reading the tracker**:
+that the emitter tracked depth per statement while the verifier tracked it
+globally, so a push by the factor would be visible to one and not the other.
+It does not - `Pushed`/`Popped` maintain a single `Depth` counter reset only by
+`Reset`, once per program, which is the same scope the verifier uses.
+
+What the two runs actually say, which is more useful:
+
+- **with** a `Discard` for the address the factor is assumed to push, the
+  *emitter* raises `operand-stack underflow` - so the factor did **not** push
+  one, and the discard was wrong;
+- **without** it, everything compiles and the *verifier* rejects the result.
+
+So the two disagree about the loop itself, not about a leftover from the factor.
+Counting the emitted sequence by hand gives net zero per iteration with matching
+depths at both exits, which means the count is not the way to find this either.
+
+Next: dump the loop's bytes and the verifier's per-offset depth, and compare
+them position by position.  That is the move that settled the two previous
+CHAR bugs after reasoning had failed on both.
 
 ### 5. Inline (anonymous) array types
 
