@@ -299,17 +299,34 @@ with the names the embedded sources actually export changes the picture:
     Convert.FromInt (x, s)     same
     Files.FDel / Env.EnvGet    "is not exported" - those are the wrong names
 
-`Convert.ToInt` resolves through the M19 import path and the compiler emits an
-image the VM cannot load. A plain program through the same tool boots and prints
-normally, so the call is what breaks it. This is reachable TODAY, needs no
-change to `Begin_Mode`, and is a silent failure of exactly the kind this section
-exists to remove - the compiler reports success. My earlier names were guesses
-(`ConvToInt`); the embedded source's own are `ToInt`/`ToReal`/`FromInt`/
-`FromReal`, and the FFI branches match the *primitive* written in the body
-rather than the exported name.
+**Corrected again, and this time the failure is a parse error, not a bad image.**
+The image was never malformed: the compiler refused the source, wrote no file,
+and the VM's "cannot read image" was simply a missing file. That misreading came
+from running the compiler with its output discarded and believing the downstream
+symptom - the one thing the project's own rule forbids.
 
-So the concrete first task is smaller than the fork below suggests: make
-`Convert.ToInt` either work or be refused. The fork still decides how.
+Measured, by isolating one variable at a time:
+
+    import Convert;                       compiles (168 bytes)
+    import Convert; import Out;           FAILS
+    import Out;  then import Convert;     (same failure)
+    import Out; alone                     compiles
+    a plain program through the same tool boots and prints
+
+So the bug is not `Convert`, and not `Out`: it is importing a builtin FFI module
+**together with `Out`**. The error is `expected
+CONST/VAR/TYPE/PROCEDURE/BEGIN/END`, and `Out` is the one module with special
+handling (`Imported_Mod` returns False for it by construction), so the two import
+kinds are not composing.
+
+This is reachable TODAY, needs no change to `Begin_Mode`, and is a real
+reproducible defect with a one-line repro. It is the first thing to fix, and it
+is upstream of everything in the fork below: until a program can import an FFI
+module and `Out` in the same unit, no FFI helper can be exercised at all.
+
+My earlier names were guesses (`ConvToInt`); the embedded source's own are
+`ToInt`/`ToReal`/`FromInt`/`FromReal`, and the FFI branches match the *primitive*
+written in the body rather than the exported name.
 
 **This is a design choice, not a mechanical edit, and it should be made
 deliberately**: natives for the whole Oakwood surface (matching the comment, and
