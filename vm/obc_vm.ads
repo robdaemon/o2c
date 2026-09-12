@@ -48,4 +48,10 @@ package OBC_VM is
    --  a typo is a build error naming the symbol rather than a call to the
    --  wrong function.
    function Native_Id (Sym : String) return Natural;
+
+   --  Whether that native produces a value.  The interpreter learns this
+   --  from the native itself, but the emitter tracks operand-stack depth
+   --  statically and has to know in advance, or a call that pushes reads as
+   --  an imbalance and the next pop underflows.
+   function Native_Pushes_At (Idx : Natural) return Boolean;
 end OBC_VM;

@@ -582,6 +582,11 @@ package body O2c_BC is
       Put_Byte (U64 (NArgs));
       N_Insns := N_Insns + 1;
       Popped (NArgs);
+      --  A foreign call usually leaves a result where the builtins are all
+      --  void.  Tracking it here is what keeps a later pop from underflowing.
+      if Foreign_Pushes (Idx) then
+         Pushed;
+      end if;
    end Native_Call;
 
    --  ---- procedures and frames -----------------------------------------
@@ -1050,5 +1055,10 @@ package body O2c_BC is
    begin
       return OBC_VM.Native_Id (Sym);
    end Foreign_Id;
+
+   function Foreign_Pushes (Idx : Natural) return Boolean is
+   begin
+      return OBC_VM.Native_Pushes_At (Idx);
+   end Foreign_Pushes;
 
 end O2c_BC;

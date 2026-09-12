@@ -372,11 +372,18 @@ package body OBC_VM is
    begin
       for I in Foreign'Range loop
          if Foreign (I).Sym /= null and then Foreign (I).Sym.all = Sym then
-            return Max_Natives + I;
+            --  Foreign ids start at Max_Natives, so the first table entry is
+            --  id Max_Natives and not Max_Natives + 1.  Native_Pops and
+            --  Native_Pushes index the same space, so an off-by-one here
+            --  reads the wrong entry for both.
+            return Max_Natives + I - 1;
          end if;
       end loop;
       return 0;
    end Native_Id;
+
+   function Native_Pushes_At (Idx : Natural) return Boolean is
+     (Idx < Native_Count and then Native_Pushes (Idx));
 
    function Tag_At (Obj : U64) return Natural is
       W : U64 with Address =>

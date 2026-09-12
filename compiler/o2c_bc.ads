@@ -202,6 +202,11 @@ package O2c_BC is
    --  on this side of that line rather than as a second path to it.
    function Foreign_Id (Sym : String) return Natural;
 
+   --  Whether native Idx leaves a result on the stack, so Native_Call can
+   --  track depth correctly.  The builtins are all void; foreign functions
+   --  usually are not.
+   function Foreign_Pushes (Idx : Natural) return Boolean;
+
    --  Raised by Encode if a jump was never resolved, and by the front end
    --  when bytecode mode meets a construct this backend cannot express.
    Wrong_Construct : exception;
