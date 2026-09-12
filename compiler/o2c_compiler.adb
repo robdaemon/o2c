@@ -163,6 +163,12 @@ package body O2c_Compiler is
       P_Nm   : Nm_Array := (others => <>);
       Ret_Nm : Unbounded_String;
       VT_Nm  : Unbounded_String;   --  M20f: exported VARIABLE user type
+      --  The bytecode procedure id, when this procedure's code is IN the
+      --  image.  Zero means "not compiled to bytecode", and that IS the signal
+      --  a call site uses to choose between calling it and refusing: the id has
+      --  to travel with the export, because an importing module resolves an
+      --  imported procedure through this record and nothing else.
+      Bc     : Natural := 0;
    end record;
    Xs  : array (1 .. Max_X) of X_Entry := (others => <>);
    N_X : Natural := 0;
@@ -3561,17 +3567,31 @@ package body O2c_Compiler is
                                     Call := Call & Args (I);
                                  end loop;
                                  Call := Call & ")";
-                                 if O2c_BC.Bytecode_Mode
-                                   and then not (Eq_No_Case (FNm, "XYplane")
-                                                 and then Eq_No_Case
-                                                   (MName, "IsDot")
-                                                 and then N_A = 2)
-                                 then
-                                    --  MARKER_EXPR_REFUSAL: default refusal,
-                                    --  as on the statement paths.
-                                    raise O2c_BC.Wrong_Construct with
-                                      "bytecode backend: " & FNm & "."
-                                      & MName & " is not yet supported";
+                                 if O2c_BC.Bytecode_Mode then
+                                    if Xs (XI).Bc /= 0 then
+                                       --  The callee's code is in this image,
+                                       --  so this is an ordinary call: push the
+                                       --  slots the local call path pushes and
+                                       --  call the id the export carries.
+                                       for K in 1 .. N_A loop
+                                          Bc_Push_Arg (Arg_R (K));
+                                       end loop;
+                                       O2c_BC.Call_Proc (Xs (XI).Bc);
+                                       R.Typ := (if Xs (XI).Ret then Xs (XI).Typ
+                                                 else T_Int);
+                                       R.Lit := False;
+                                       R.Folds := False;
+                                    elsif not (Eq_No_Case (FNm, "XYplane")
+                                               and then Eq_No_Case (MName,
+                                                                    "IsDot")
+                                               and then N_A = 2)
+                                    then
+                                       --  MARKER_EXPR_REFUSAL: default
+                                       --  refusal, as on the statement paths.
+                                       raise O2c_BC.Wrong_Construct with
+                                         "bytecode backend: " & FNm & "."
+                                         & MName & " is not yet supported";
+                                    end if;
                                  end if;
                                  if O2c_BC.Bytecode_Mode
                                    and then Eq_No_Case (FNm, "XYplane")
@@ -5626,6 +5646,11 @@ package body O2c_Compiler is
       Hdr   : Unbounded_String;
       Impl_Nm : Unbounded_String;  --  generated Ada name (methods, M13)
       POpen : array (1 .. Max_Params) of Boolean := (others => False);
+      --  This procedure's OWN symbol index.  N_Sym advances while the heading
+      --  is parsed (a parameter interns a symbol), so the export below must not
+      --  read Syms (N_Sym): that is a DIFFERENT entry by then, and the bytecode
+      --  id it holds is 0 - which is exactly how this was first mis-diagnosed.
+      PSym : Natural := 0;
 
       --  Ada type name for formal parameter I (M12): open arrays map to
       --  the unconstrained String / shared numeric base; named user
@@ -5812,6 +5837,7 @@ package body O2c_Compiler is
       Next;
 
       N_Sym := N_Sym + 1;
+      PSym := N_Sym;
       Syms (N_Sym) := (Kind => S_Proc, Name => To_Unbounded_String (Name),
                        Params => N_Par, Typ => Ret_Typ, UT => Ret_UT,
                        Ret => Is_Function, Exp => Exported,
@@ -6025,6 +6051,7 @@ package body O2c_Compiler is
                E : X_Entry :=
                  (Kind => S_Proc, Typ => Ret_Typ, Params => N_Par,
                   Ret => Is_Function,
+                  Bc => Syms (PSym).Bc_Proc,
                   Name => To_Unbounded_String (Name), others => <>);
             begin
                for I in 1 .. N_Par loop
@@ -11883,6 +11910,22 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
               & "end O2c_Types;" & ASCII.LF));
       --  M38: compile the builtin Oakwood modules first so that user
       --  modules and the main can import them.
+      --
+      --  "SCOPED" MEANS THE MODULE'S CODE IS IN THIS IMAGE, and the standard is
+      --  not "it compiles".  A construct with no emission does not refuse - it
+      --  leaves whatever is on the stack and the callee runs WRONG, silently.
+      --  Math is the counter-example, and it took calling it to find: its sin is
+      --
+      --     procedure sin(x: real): real; begin return Sin(x) end sin;
+      --
+      --  and the builtin Sin(x) is emitted as Ada text only, so a scoped Math
+      --  returned its own argument - sin(1.5) printed as 1.500, no error
+      --  anywhere.  Six modules compile to bytecode cleanly; only Files has had
+      --  its bodies verified (tests/bc/filesintr.ob2 verifies the intrinsic
+      --  sites by effect), so only Files is scoped.  The rest stay Ada-only,
+      --  which costs nothing - every module is parsed and its Ada text emitted
+      --  either way - and a user call into one keeps its loud refusal instead of
+      --  becoming a silent wrong answer.
       if Bytecode_Requested then
          O2c_BC.Begin_Mode;
       end if;
@@ -11899,7 +11942,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Builtin (Oak_Texts_Src, Scoped => True);
+      Compile_Builtin (Oak_Texts_Src, Scoped => False);
       if Emits ("Texts") then
          --  Texts: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -11927,7 +11970,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  wins over the builtin (the dogfood demo used to own the
       --  name); otherwise Math is auto-provided like the others.
       if not Skip_Math then
-         Compile_Builtin (Oak_Math_Src, Scoped => True);
+         Compile_Builtin (Oak_Math_Src, Scoped => False);
          if Emits ("Math") then
             --  Math: parsed above in every case, emitted only when
             --  something imports it (see Emits).
@@ -11940,7 +11983,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
          Provided (N_Prov) := Mod_Name;
       end if;
 
-      Compile_Builtin (Oak_MathL_Src, Scoped => True);
+      Compile_Builtin (Oak_MathL_Src, Scoped => False);
       if Emits ("MathL") then
          --  MathL: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -11988,7 +12031,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Builtin (Oak_Err_Src, Scoped => True);
+      Compile_Builtin (Oak_Err_Src, Scoped => False);
       if Emits ("Err") then
          --  Err: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -12036,7 +12079,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Builtin (Oak_Term_Src, Scoped => True);
+      Compile_Builtin (Oak_Term_Src, Scoped => False);
       if Emits ("Term") then
          --  Term: parsed above in every case, emitted
          --  only when something imports it (see Emits).

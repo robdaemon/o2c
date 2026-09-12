@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         310
+    commits         311
     fixtures        76 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -722,6 +722,66 @@ qualified user call resolve to the procedure that is now IN the image, through
 the export record (`X_Entry`), which is where a bytecode id must travel between
 modules.  (`X_Entry` genuinely has no such field - it was the right fix, just
 not the cause of the regression.)
+
+### 3n. DONE — the bytecode id crosses the module boundary
+
+A qualified call to an imported procedure now resolves to the procedure that is
+in the image, and the piece that carries the id is the export record:
+
+    type X_Entry is record
+       ...
+       Bc : Natural := 0;      --  the bytecode procedure id, when the code is
+                               --  in the image (0 = not compiled to bytecode)
+
+`Bc /= 0` IS the signal a call site uses: the factor path pushes the actuals with
+`Bc_Push_Arg` and calls `O2c_BC.Call_Proc (Xs (XI).Bc)` when the id is there, and
+keeps its loud refusal when it is not.  `Files.Old` went from
+
+    bytecode backend: Files.Old is not yet supported
+
+to an actual call.
+
+**One trap here is worth its own line**: the export has to read the procedure's
+OWN symbol index, and `N_Sym` is NOT it by then - a parameter interns a symbol
+while the heading is parsed.  Reading `Syms (N_Sym).Bc_Proc` gave 0, and the
+trace of the two sides is what showed it:
+
+    TRC SET 'Old' n_sym= 1 id= 8      <- the id IS assigned, to symbol 1
+    TRC EXP 'Old' n_sym= 2 bc= 0      <- the export read symbol 2
+
+Hence the `PSym` local, set where the procedure's symbol is created.
+
+**And the finding that matters more than the feature:**
+
+    "COMPILES CLEANLY" IS NOT THE STANDARD FOR SCOPING A MODULE.
+
+Six modules compile to bytecode cleanly.  A construct with no emission does not
+refuse - it leaves whatever is on the stack, and the callee runs WRONG in
+silence.  Math is the counter-example, and only *calling* it found it:
+
+    procedure sin(x: real): real; begin return Sin(x) end sin;
+
+The builtin `Sin(x)` is emitted as Ada text only, so a scoped Math returned its
+own argument - `sin(1.5)` printed `1.500`, with no error anywhere.  Verified by
+making the call, before narrowing.
+
+So the scoped set is now **Files alone**: 3d needs it and it is the one whose
+bodies have been verified by effect (`tests/bc/filesintr.ob2`).  Everything else
+is `Scoped => False`, which costs nothing - every module is parsed and its Ada
+text emitted either way - and a user call into one keeps its loud refusal.
+`Math.sin` is back to `Math.sin is not yet supported` rather than a wrong number.
+
+**Verified**: `sum` compiles and runs correctly (`bc slice ok` / `406`); a user
+call to `Files.Old` emits a real call; `Math.sin` refuses loudly; all seven
+suites green, 47 corroborated, zero warnings.
+
+**What is left of 3d**: two things, both now named.  (1) A qualified user call to
+`Files.Old` is blocked one step past the call by an unrelated limit -
+`pointer type mismatch assigning f`, imported pointer-type identity - so the call
+cannot yet be verified by effect from a user module.  (2) The STATEMENT path
+(`Files.Read`/`Write`/`Close`/`Register`) still refuses; it needs the same
+treatment the factor path just got.
+
 
 ## 4. Method — what worked, and what did not
 
