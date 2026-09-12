@@ -379,6 +379,29 @@ note "--- BOOLEAN operators: the divergences that DO refuse ---"
 check "BOOLEAN or"  blocked 'module G40; import Out; var g: boolean; begin g := (1 = 1) or (2 = 3) end G40.'
 check "BOOLEAN &"   blocked 'module G41; import Out; var g: boolean; begin g := (1 = 1) & (2 = 3) end G41.'
 
+note "--- record fields, and the two that were refused by OMISSION ---"
+#  Both of these were refusals that named the wrong thing, which is why they
+#  lasted.  Fixed, and asserted here so they cannot come back:
+#
+#    p^.field[i]  used to say "an array needs a non-zero length".  The length
+#                 was fine; the index path pushed a GLOBALS slot for an object
+#                 that lives on the heap, and Total_Slots of a POINTER is 0.
+#    LONGINT      a record field of type LONGINT was refused because the
+#    fields       allowed-type list omitted it - and the message listed only
+#                 what WAS allowed, so the missing entry was invisible.
+#
+#  tests/bc/ptrfld.ob2 holds both by value.  These entries assert they compile
+#  at all, which is the part a golden cannot state.
+check "array field through a pointer"  ok 'module G43; type A = array 4 of char; type R = record s: A; n: integer end; type P = pointer to R; var p: P; i: integer; begin new(p); i := 0; while i < 2 do p^.s[i] := CHR(65 + i); i := i + 1 end end G43.'
+check "LONGINT record field"           ok 'module G44; type R = record n: longint; k: integer end; type P = pointer to R; var p: P; begin new(p); p^.n := 5; p^.k := 1 end G44.'
+
+note "--- still refused: the NEXT wall behind Files ---"
+#  Files' own bodies assign to a POINTER field: `r.f := f` in Open.  That is
+#  the "assigning through a pointer designator" refusal, and it is the next
+#  thing 3d has to clear after the two above.  Listed so the sequence is
+#  visible rather than discovered again.
+check "assignment to a POINTER field"  blocked 'module G45; type R = record n: integer end; type P = pointer to R; type H = record p: P end; var h: H; q: P; begin h.p := q end G45.'
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0

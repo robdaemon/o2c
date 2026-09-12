@@ -265,6 +265,20 @@ accepts wider than the text claims:
 
 Read the code, not the message. Correcting the text is outstanding work.
 
+There is a SECOND stale-message shape, the mirror of the first, and it is worse
+because the text is not at fault:
+
+  - "only INTEGER, CHAR, BOOLEAN, SET, REAL and LONGREAL record fields are
+    supported"  - accurate as written. The ALLOWED SET was wrong: it omitted
+    LONGINT, which is a 64-bit slot exactly like INTEGER, so a LONGINT record
+    field was refused for no reason. (Fixed; see 3g in RESUME.)
+
+A message that lists what IS allowed refuses BY OMISSION - the missing entry is
+invisible, so the diagnostic reads as a type limitation rather than as a gap, and
+it survived every reader. The first shape misleads about what works; this one
+hides what is missing. Both argue for the same discipline: enumerate from the
+code, and never treat a list inside a message as the specification.
+
 ### A.1 These refusals are NOT the whole gap - three constructs were SILENT
 
 Section A cannot be complete, and the way it was incomplete is worth recording

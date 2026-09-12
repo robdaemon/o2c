@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         300
-    fixtures        69 in tests/bc/
+    commits         301
+    fixtures        70 in tests/bc/
     foreign natives 21 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -262,7 +262,37 @@ and it is argued at length in `docs/bytecode-gaps.md`.
 
 ### 3d. `Files.Old` / `Read` / `Write` / `Close` / `New`
 
-Deferred, and now **sized** rather than open. Reading the bodies settled it:
+Deferred, and it was declared **sized** rather than open. Measuring it corrected
+the sizing in two places, and the correction is the useful part — the original
+claim is kept below the marker so the error is not repeated.
+
+**What the measurement changed.** The claim was "every statement in the module is
+already supported… the only non-bytecode parts are the FFI primitives". Two
+*data* gaps sat in front of the FFI wiring, and both are now fixed (3g):
+
+- **`p^.field[i]` — an array field reached through a pointer — was refused**, and
+  not only for `Files`: any program doing it failed. The message blamed the
+  array's length; the length was fine and the address was wrong.
+- **A `LONGINT` record field was refused**, because the allowed-type list omitted
+  it. `Files.FileDesc` is exactly `name: A64; size: longint`, so the module could
+  not even have its own types laid out.
+
+So the real sequence for 3d is: (1) those two — **done, see 3g**; (2) the ~12
+intrinsics (`FStat`/`FRead`/`FWrite`/`FClose`/`FDel`/`FRename`, `EnvGet`/`EnvSet`,
+`ArgGet`, `PlaneOpen`/`PlaneClear`/`PlaneDot`, `InReset`/`InString`/`InName`)
+as bytecode native calls — several counterpart natives already exist from the FFI
+work; (3) the ordering change below.
+
+**The next wall is now known and recorded**, so it is not rediscovered:
+`Files.Open` does `r.f := f` — an assignment to a **pointer field** — which is the
+"assigning through a pointer designator" refusal. `bytecode_gaps.sh` pins it as
+`blocked`.
+
+And one thing the sizing missed entirely: **no fixture consumes any of it yet.**
+The first two items above were worth fixing on their own merits (they are
+user-visible), but the rest of 3d is capability with no caller.
+
+The original sizing, kept for the record:
 
 - The types are ordinary (`File` = pointer to a record; `Rider` = a record).
 - **Every statement in the module is already supported** by the bytecode
@@ -338,6 +368,58 @@ iterations, documenting the semantics above), and an iteration count. Every
 descending case prints a wrong number rather than failing if the step arrives as
 positive or zero. `run_bc.sh` also asserts the two refusals, so the relaxation
 is shown not to be a free-for-all.
+
+### 3g. DONE — the two data gaps that blocked `Files`, both refused by omission
+
+Found by measuring 3d rather than by reading it: extract each scoped builtin out
+of the compiler and compile it **in bytecode mode**. `Env`, `Args`, `XYplane` and
+`In` failed on their intrinsics, as predicted — but `Files` failed *earlier*, on
+its own types.
+
+**1. An array field reached through a pointer — `p^.field[i]` — was refused.**
+Not a `Files` detail: any program doing it failed, with
+
+    bytecode error: an array needs a non-zero length
+
+and the length was never the problem. The index path pushed a **globals** slot
+while the object lives on the heap and its address was already on the stack;
+`Total_Slots` of a POINTER is `0`, and the globals path rejects a zero-length
+array, so the complaint landed on the array. Fixed by asking the question the
+field path two branches up already asks — pointer base means *add this field's
+byte offset to the address on the stack*, otherwise it is a run in the globals.
+The message pointed at the wrong thing, which is why it read like a type
+limitation and survived.
+
+**2. A `LONGINT` record field was refused** — the allowed-type list simply
+omitted `T_Long`. A list like that refuses **by omission**, and the diagnostic
+named only the types that *were* allowed, so the missing entry was invisible.
+That is the same mistake the assignment list had already been fixed for
+elsewhere, with the same reasoning: LONGINT is a 64-bit slot, exactly like
+INTEGER, so it needs no conversion and no new opcode. `Files.FileDesc` is
+`name: A64; size: longint`, so it could not have its own types laid out.
+
+`tests/bc/ptrfld.ob2` holds both by value (writes a byte-per-element array field
+through a pointer, reads it back, then reads a LONGINT field after it), and
+`bytecode_gaps.sh` asserts both compile at all — the part a golden cannot state.
+
+**The next wall is now recorded rather than rediscovered**: `Files.Open` does
+`r.f := f`, an assignment to a **pointer field**, which is the "assigning through
+a pointer designator" refusal. `bytecode_gaps.sh` pins it as `blocked`, so step 2
+of 3d starts from a known list.
+
+Worth noting how the differential behaved here. `ptrfld`'s first version tripped
+the Ada backend's case-collision bug (`type P` beside `var p` — Ada is
+case-insensitive, Oberon is not), so the gate FAILED the run: a new,
+non-corroborated fixture is exactly what it is for. That also fixed a **wrong
+diagnosis** in the recorded list, which had logged those three entries as bare
+name conflicts; they are now named as one category. The fixture was then renamed
+to `Ptr` so it can be corroborated at all — both backends print `AC91` — rather
+than adding a fourth instance of a known Ada-side limitation.
+
+Two small process notes, both the same shape as earlier ones: the recorded list
+gained its first commentary and the reader immediately parsed the comments as
+fixtures named `# CASE is the cause ...` (now skipped), and `digits` is an Ada
+reserved word.
 
 ## 4. Method — what worked, and what did not
 

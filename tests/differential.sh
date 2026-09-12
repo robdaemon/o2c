@@ -144,6 +144,13 @@ threadname	ADA_REFUSED	refuses: "Threads needs the bytecode backend"
 threadstart	ADA_REFUSED	refuses: procedure values as variables
 threadstress	ADA_REFUSED	refuses: "Threads needs the bytecode backend"
 threadyield	ADA_REFUSED	refuses: "Threads needs the bytecode backend"
+#  CASE is the cause of the three "conflicts with a declaration" entries, and
+#  it is worth naming because it is a category, not three coincidences: ADA
+#  identifiers are case-INSENSITIVE and Oberon's are not, so a module with
+#  `type P = pointer to R` and `var p: P` is fine in Oberon and a collision in
+#  the emitted Ada.  Every fixture whose types and variables differ only in
+#  case trips it.  Not fixed: it needs a per-scope rename table threaded through
+#  the Ada emitter, and the Ada backend is the one being retired.
 gcscalar	ADA_BROKEN	emits Ada that will not compile: "p" conflicts with a declaration
 recmix	ADA_BROKEN	emits Ada that will not compile: "r" conflicts with a declaration
 recreal	ADA_BROKEN	emits Ada that will not compile: "r" conflicts with a declaration
@@ -282,7 +289,11 @@ while IFS=$'\t' read -r nm cls; do
 done < "$WORK/seen.txt"
 
 while IFS=$'\t' read -r nm cls rest; do
-   [ -z "$nm" ] && continue
+   #  The recorded list is a heredoc with commentary in it, so a '#' line is
+   #  prose, not an entry.  Without this the comments are read as fixtures
+   #  named "# CASE is the cause ..." and every one of them is reported as a
+   #  stale entry - discovered when the list gained its first comment.
+   case "$nm" in '' | '#'*) continue ;; esac
    grep -q "^$nm	" "$WORK/seen.txt" || \
       bad "$nm is recorded as $cls but no longer behaves that way - remove the entry"
 done < "$WORK/recorded.txt"

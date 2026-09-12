@@ -1859,7 +1859,8 @@ package body O2c_Compiler is
                               or else D.Sc = T_Bool
                               or else D.Sc = T_Set
                               or else D.Sc = T_Real
-                              or else D.Sc = T_LReal)
+                              or else D.Sc = T_LReal
+                              or else D.Sc = T_Long)
                      then
                         --  Reachability of the owning record is Field_Offset's
                         --  business: it raises, with a message naming the
@@ -1867,9 +1868,19 @@ package body O2c_Compiler is
                         --  nested record's field is reached through one, so
                         --  testing the owner against the variable's type here
                         --  would refuse valid accesses.
+                        --
+                        --  LONGINT belongs in this list for the same reason the
+                        --  assignment list keeps it: it is a 64-bit slot,
+                        --  exactly like INTEGER, so a LONGINT field needs no
+                        --  conversion and no new opcode.  It was simply absent,
+                        --  and a list like this refuses by omission - which is
+                        --  how it cost every record with a file size in it
+                        --  (Files.FileDesc is `name: A64; size: longint`), and
+                        --  the message named only the types that WERE allowed,
+                        --  so the missing one was invisible.
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                            & "only INTEGER, CHAR, BOOLEAN, SET, REAL and "
-                            & "LONGREAL record fields are supported";
+                            & "only INTEGER, LONGINT, CHAR, BOOLEAN, SET, REAL "
+                            & "and LONGREAL record fields are supported";
                      end if;
                      D.Off := Nested + Field_Offset (UT, FO, F);
                      D.K := D_Field;
@@ -1936,13 +1947,37 @@ package body O2c_Compiler is
                --  reads [base, index] for the access the caller emits.  The
                --  chain cannot emit that access itself - it does not know
                --  whether the caller is reading or assigning.
-               --  The variable's whole run, at the slot the chain has
-               --  walked to: offsets are byte counts and the run is slots,
-               --  and every offset here is a multiple of eight.
-               O2c_BC.Load_Addr_G
-                 (O2c_BC.Global_Array
-                    (Base_Name, Total_Slots (Base_UT))
-                  + Nested / 8);
+               --
+               --  WHOSE address depends on where the array lives, and the
+               --  field case above already answers that question: a base
+               --  POINTER's value is on the stack and is the OBJECT's
+               --  address, so the field's offset is added to it; anything
+               --  else is a run in the module's globals.
+               --
+               --  This used to take the globals path unconditionally, which
+               --  refused every `p^.field[i]`: Total_Slots of a POINTER is
+               --  zero, and Global_Array rejects a zero-length array.  So the
+               --  diagnostic blamed the array's length - "an array needs a
+               --  non-zero length" - while the length was fine and the
+               --  address was a globals slot that does not exist.  A whole
+               --  class of programs was refused by a message that pointed at
+               --  the wrong thing, which is how it survived: it looked like a
+               --  type limitation rather than a missing address.
+               if not UTypes (Base_UT).Is_Ptr and then not D.Base_On_Stack
+               then
+                  --  The variable's whole run, at the slot the chain has
+                  --  walked to: offsets are byte counts and the run is slots,
+                  --  and every offset here is a multiple of eight.
+                  O2c_BC.Load_Addr_G
+                    (O2c_BC.Global_Array
+                       (Base_Name, Total_Slots (Base_UT))
+                     + Nested / 8);
+               elsif Nested > 0 then
+                  --  Already the object's address; step into it.  Byte
+                  --  arithmetic, like every other offset here.
+                  O2c_BC.Push_Int (Nested);
+                  O2c_BC.Bin (O2c_BC.Add);
+               end if;
             end if;
             declare
                Ix : Expr_Rec := Parse_Expr;
