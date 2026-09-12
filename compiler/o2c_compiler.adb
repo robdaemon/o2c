@@ -3378,6 +3378,18 @@ package body O2c_Compiler is
                                  end loop;
                                  Call := Call & ")";
                                  if O2c_BC.Bytecode_Mode
+                                   and then not (Eq_No_Case (FNm, "XYplane")
+                                                 and then Eq_No_Case
+                                                   (MName, "IsDot")
+                                                 and then N_A = 2)
+                                 then
+                                    --  MARKER_EXPR_REFUSAL: default refusal,
+                                    --  as on the statement paths.
+                                    raise O2c_BC.Wrong_Construct with
+                                      "bytecode backend: " & FNm & "."
+                                      & MName & " is not yet supported";
+                                 end if;
+                                 if O2c_BC.Bytecode_Mode
                                    and then Eq_No_Case (FNm, "XYplane")
                                    and then Eq_No_Case (MName, "IsDot")
                                    and then N_A = 2
@@ -3402,6 +3414,17 @@ package body O2c_Compiler is
                               raise O2c_Error with "'" & FNm & "." & MName
                                 & "' needs arguments";
                            else
+                              if O2c_BC.Bytecode_Mode
+                                and then not (Eq_No_Case (FNm, "XYplane")
+                                              and then Eq_No_Case (MName,
+                                                                   "Key"))
+                              then
+                                 --  MARKER_BARE_REFUSAL: a bare call with no
+                                 --  emission, same default as everywhere else.
+                                 raise O2c_BC.Wrong_Construct with
+                                   "bytecode backend: " & FNm & "."
+                                   & MName & " is not yet supported";
+                              end if;
                               --  A bare function call: XYplane.Key is the
                               --  one, and it returns a CHAR - the same
                               --  expression emission as IsDot with a
@@ -7156,8 +7179,8 @@ package body O2c_Compiler is
                               Call := Call & Args (I);
                            end loop;
                            Call := Call & ");";
+                           --  MARKER_DEFAULT_REFUSAL
                            if O2c_BC.Bytecode_Mode
-                             and then Is_FFI_Mod (MNm)
                            then
                               --  The FFI surface takes ADDRESSES: these are
                               --  written in terms of out parameters, so the
@@ -7472,7 +7495,6 @@ package body O2c_Compiler is
                              & To_String (MName) & "' needs arguments";
                         end if;
                         if O2c_BC.Bytecode_Mode
-                          and then Is_FFI_Mod (MNm)
                         then
                            if Eq_No_Case (MNm, "XYplane")
                              and then Eq_No_Case

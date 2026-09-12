@@ -298,6 +298,25 @@ else
    bad "In.Open/String/Name no longer compile: $(tail -1 "$WORK/in.log")"
 fi
 
+#  The default is refusal.  A module that is imported but has no bytecode
+#  emission must not compile: it used to build Ada text that bytecode
+#  discarded, so the call ran and quietly yielded nothing - Math.cos (0.0)
+#  printed 0.000 and Strings.Length ("abcd") printed 16.  Asserted for both an
+#  expression call and a statement call, since they are separate paths.
+for probe in 'Math.cos (0.0)|var x: real; begin x := Math.cos(0.0) end' \
+             'Strings.Length|var s: array 16 of char; n: integer; begin s := "abcd"; n := Strings.Length(s) end'; do
+   label="${probe%%|*}"; body="${probe#*|}"
+   mod="${label%%.*}"
+   printf 'module GapT; import %s, Out; %s GapT.\n' "$mod" "$body" > "$WORK/gap.ob2"
+   if timeout 60 "$FRONT" "$WORK/gap.ob2" "$WORK/gap.obc" >"$WORK/gap.log" 2>&1; then
+      bad "$label compiled - it has no bytecode emission and must refuse"
+   elif grep -q "is not yet supported" "$WORK/gap.log"; then
+      note "  ok  $label refuses rather than silently yielding nothing"
+   else
+      bad "$label failed for the wrong reason: $(tail -1 "$WORK/gap.log")"
+   fi
+done
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0
