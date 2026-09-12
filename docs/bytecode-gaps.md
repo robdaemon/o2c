@@ -242,9 +242,9 @@ LOUDLY. Regenerate with:
 
 ### A. Language constructs that refuse (loud, verified by construction)
 
-    &                      string concatenation
+    &                      string concatenation (this is NOT the BOOLEAN `&`,
+                           which emits BAND now - see 3k in RESUME)
     LONGINT literal        above INTEGER'Last (ARITHMETIC now works - see 3i)
-    BOOLEAN and/or         `&` and `or` on BOOLEAN values (NOT now works - A.1)
     mixed INTEGER/REAL     an operation needing an implicit I2R
     NEW of a ptr designator   SHARED with the front end: BOTH backends refuse
                               `new(p^.next)` with "NEW needs a POINTER value",
@@ -284,7 +284,7 @@ it survived every reader. The first shape misleads about what works; this one
 hides what is missing. Both argue for the same discipline: enumerate from the
 code, and never treat a list inside a message as the specification.
 
-### A.1 These refusals are NOT the whole gap - three constructs were SILENT
+### A.1 These refusals are NOT the whole gap - four constructs were SILENT
 
 Section A cannot be complete, and the way it was incomplete is worth recording
 because the generation command above is blind to it BY CONSTRUCTION. A construct
@@ -315,6 +315,22 @@ emit the back-jump and the exit target they were missing. tests/bc/unops.ob2
 and tests/bc/loopexit.ob2 lock all of them BY VALUE - and loopexit.ob2 is
 written so that a wrong EXIT target does not print a wrong number but fails to
 TERMINATE, which is why the fixtures are run under a timeout.
+
+### A.2 And TWO more sites emitted nothing, silently - found by the 3d work
+
+The same class, found later and by a different route: the four `Files`
+intrinsics `FStat`, `FRead`, `FWrite` and `FClose` set a type and emitted NO
+opcode. Their branches produce Ada text only, so a bytecode program compiled,
+ran, and used whatever happened to be on the stack - in practice the ADDRESS
+the argument had just pushed. Nothing refused, because these intrinsics are not
+imported-module CALLS (the default-refusal work covers those) but internal
+primitives of the builtin module.
+
+They now REFUSE loudly until they have natives to call. The lesson is the same
+as A.1 and worth stating twice: the guarantee cannot come from reading the
+refusals, and it cannot come from the default-refusal rule either - that rule
+covers one shape of call site, and this was another. What found it was compiling
+the real module and asking what the emitter had actually produced.
 
     REFUSAL COMPLETENESS and IMAGE CORRECTNESS are two different claims.
     Section A is evidence for the first only, and only up to what the grep can

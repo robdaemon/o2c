@@ -379,15 +379,22 @@ else
    bad "LONGINT unary minus no longer compiles: $(tail -1 "$WORK/ln.log")"
 fi
 
-note "--- BOOLEAN operators: the divergences that DO refuse ---"
-#  The real remaining gap at the operator site.  Both are accepted by the Ada
-#  backend and refused, loudly, here.
+note "--- BOOLEAN operators: both now emit, and were the last blocked pair ---"
+#  These were the two loud refusals at the operator site, recorded as `blocked`
+#  until the opcodes existed.  They do now: BAND and BOR, 0x72 and 0x73, taken
+#  from the block the spec reserved beside BEQ/BNE/BTEST (nothing renumbered).
+#  tests/bc/boolops.ob2 holds the behaviour by value; these entries assert the
+#  two shapes compile, which is the half a golden cannot state.
 #
-#  `or` on a SET is deliberately NOT listed: both backends reject it (the
-#  operand-type check runs before the mode test), so it is a front-end limit
-#  rather than a backend divergence, and a differential could never see it.
-check "BOOLEAN or"  blocked 'module G40; import Out; var g: boolean; begin g := (1 = 1) or (2 = 3) end G40.'
-check "BOOLEAN &"   blocked 'module G41; import Out; var g: boolean; begin g := (1 = 1) & (2 = 3) end G41.'
+#  `or` on a SET is deliberately NOT listed, and never was: both backends reject
+#  it (the operand-type check runs before the mode test), so it is a front-end
+#  limit rather than a backend divergence, and a differential could never see it.
+check "BOOLEAN or"  ok 'module G40; import Out; var g: boolean; begin g := (1 = 1) or (2 = 3) end G40.'
+check "BOOLEAN &"   ok 'module G41; import Out; var g: boolean; begin g := (1 = 1) & (2 = 3) end G41.'
+#  A module with NO statement part: legal, and what the builtin Files is.  The
+#  emitter assumed a body and crashed on this (an index check on the procedure
+#  table) rather than diagnosing anything.
+check "a module with no statement part"  ok 'module G42; type S = record v: integer end; var s: S; end G42.'
 
 note "--- record fields, and the two that were refused by OMISSION ---"
 #  Both of these were refusals that named the wrong thing, which is why they

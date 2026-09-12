@@ -83,8 +83,6 @@ known_gaps() {
 
 cat > "$WORK/known.txt" <<'EOB'
 TOK_AND
-TOK_AMP
-TOK_OR
 EOB
 
 while read -r kind; do
@@ -112,30 +110,38 @@ note "--- known gaps, pinned ---"
 
 #  `or` and `&` are accepted by the Ada backend and refused, loudly, by this
 #  one.  (Both need AND/OR opcodes; docs/obc-image.md has none.)
-cat > "$WORK/bor.ob2" <<'EOB'
-module BorG;
+#  BOOLEAN or / & used to be listed here as known gaps - they refused loudly
+#  ("BOOLEAN operators are not yet supported"), with no opcode in the spec to
+#  emit.  They now have one (BAND 0x72, BOR 0x73, taken from the block the
+#  spec reserved beside BEQ/BNE/BTEST), and tests/bc/boolops.ob2 is the value
+#  fixture that exercises both TOKEN KINDS - which is also why TOK_AMP and
+#  TOK_OR are no longer in the known-gap list above: coverage requires a
+#  fixture, and there is one.
+#
+#  Asserted here by compiling and RUNNING, because the interesting failure for
+#  this check is a token kind that is exercised but produces nothing.
+cat > "$WORK/bandor.ob2" <<'EOB'
+module BandOrG;
+import Out;
 var f: boolean;
-begin f := (1 = 1) or (2 = 3) end BorG.
+begin
+  f := (1 = 1) & (2 = 3);
+  if f then Out.Int(0, 0) else Out.Int(1, 0) end; Out.Ln;
+  f := (1 = 1) or (2 = 3);
+  if f then Out.Int(2, 0) else Out.Int(0, 0) end; Out.Ln
+end BandOrG.
 EOB
-if timeout 60 "$FRONT" "$WORK/bor.ob2" "$WORK/bor.obc" >"$WORK/bor.log" 2>&1; then
-   bad "BOOLEAN or compiled - it has no opcode and must refuse"
-elif grep -q "BOOLEAN operators are not yet supported" "$WORK/bor.log"; then
-   note "  ok  TOK_OR   BOOLEAN or refuses loudly"
+if timeout 60 "$FRONT" "$WORK/bandor.ob2" "$WORK/bandor.obc" \
+     >"$WORK/bandor.log" 2>&1; then
+   got="$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/bandor.obc" 2>/dev/null \
+            | tr -d '\n\r')"
+   if [ "$got" = "12" ]; then
+      note "  ok  BOOLEAN & and or emit and compute (1 then 2)"
+   else
+      bad "BOOLEAN &/or printed '$got', expected 12"
+   fi
 else
-   bad "TOK_OR failed for the wrong reason: $(tail -1 "$WORK/bor.log")"
-fi
-
-cat > "$WORK/band.ob2" <<'EOB'
-module BandG;
-var f: boolean;
-begin f := (1 = 1) & (2 = 3) end BandG.
-EOB
-if timeout 60 "$FRONT" "$WORK/band.ob2" "$WORK/band.obc" >"$WORK/band.log" 2>&1; then
-   bad "BOOLEAN & compiled - it has no opcode and must refuse"
-elif grep -q "is not yet supported" "$WORK/band.log"; then
-   note "  ok  TOK_AMP  BOOLEAN & refuses loudly"
-else
-   bad "TOK_AMP failed for the wrong reason: $(tail -1 "$WORK/band.log")"
+   bad "BOOLEAN &/or no longer compile: $(tail -1 "$WORK/bandor.log")"
 fi
 
 #  `AND` is reserved by the lexer but never parsed - Parse_Simple/Term handle

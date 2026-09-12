@@ -3067,6 +3067,19 @@ package body O2c_Compiler is
                                             "FCLOSE"))
             then
                --  M44 FFI: file I/O with a status result (builtin Files)
+               --
+               --  REFUSED in bytecode mode, for the same reason as FStat above:
+               --  this branch produces Ada text and no opcode, so a bytecode
+               --  program compiled and then used whatever was on the stack -
+               --  the argument's ADDRESS, in practice.  FRead and FWrite take
+               --  three arguments and FClose one, and all three need natives
+               --  that do not exist yet; the refusal is what keeps the module
+               --  honest until they do.
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "Files." & Cur.Text (1 .. Cur.Len)
+                    & " has no bytecode emission yet";
+               end if;
                declare
                   Nm   : constant String := Cur.Text (1 .. Cur.Len);
                   Two  : constant Boolean :=
@@ -3271,6 +3284,18 @@ package body O2c_Compiler is
               and then Eq_No_Case (Cur.Text (1 .. Cur.Len), "FSTAT")
             then
                --  M40 FFI: file size probe (builtin Files module only)
+               --
+               --  REFUSED in bytecode mode, and that is not a formality: the
+               --  branch below sets R.Typ and R.Text and emits NO opcode, so a
+               --  bytecode program compiled, ran, and used whatever was on the
+               --  stack - which is the ADDRESS the argument had just pushed. A
+               --  silent wrong image, and the reason the whole Files module is
+               --  refused until FStat has a native to call (it is one of the
+               --  four the 3d plan has to add).
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "Files.FStat has no bytecode emission yet";
+               end if;
                Next;              --  past FStat
                Expect (Lex.Tok_LParen, "'(' after FStat");
                Next;
@@ -4463,8 +4488,10 @@ package body O2c_Compiler is
                   raise O2c_Error with "'&' needs BOOLEAN operands";
                end if;
                if O2c_BC.Bytecode_Mode then
-                  raise O2c_BC.Wrong_Construct with
-                    "bytecode backend: '&' is not yet supported";
+                  --  `&` is Oberon's and.  Both operands are already on the
+                  --  stack and already evaluated: this is the strict operator,
+                  --  so there is nothing to short-circuit.
+                  O2c_BC.Bin (O2c_BC.Band);
                end if;
                R.Text := R.Text & " and " & X.Text;
                R.Lit := False;
@@ -4629,9 +4656,10 @@ package body O2c_Compiler is
                   raise O2c_Error with "OR needs BOOLEAN operands";
                end if;
                if O2c_BC.Bytecode_Mode then
-                  raise O2c_BC.Wrong_Construct with
-                    "bytecode backend: BOOLEAN operators are not yet "
-                    & "supported";
+                  --  BOOLEAN or.  As with `&` above, both operands are on the
+                  --  stack and already evaluated, so there is nothing to
+                  --  short-circuit.
+                  O2c_BC.Bin (O2c_BC.Bor);
                end if;
                R.Text := R.Text & " or " & X.Text;
                R.Lit := False;
@@ -9934,15 +9962,22 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  method-function dispatchers (M15), now that every method is known
       Emit_Dsp_Bodies;
 
+      --  The module body is the last procedure in the image, so it is opened
+      --  here: after every declared procedure has been emitted and closed,
+      --  which is exactly what the CODE procedure table assumes (and what the
+      --  header's entry points at).
+      --
+      --  It is opened even when the module has NO `begin`.  A module of
+      --  declarations only is legal - the builtin Files is one - and the image
+      --  still needs an entry, so a body with no statements is still a body.
+      --  Opening it conditionally left Body_Proc at 0 and crashed Encode with
+      --  an index check on the procedure table, which is what a missing
+      --  BEGIN did to every such module.
+      if O2c_BC.Bytecode_Mode then
+         O2c_BC.Begin_Body;
+      end if;
       if Cur.Kind = Lex.Tok_Begin then
          Next;
-         --  The module body is the last procedure in the image, so it is
-         --  opened here: after every declared procedure has been emitted and
-         --  closed, which is exactly what the CODE procedure table assumes
-         --  (and what the header's entry points at).
-         if O2c_BC.Bytecode_Mode then
-            O2c_BC.Begin_Body;
-         end if;
          Statement_Seq;
       end if;
 

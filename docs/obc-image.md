@@ -284,7 +284,18 @@ guard failure, 3 = division by zero, 4 = `CASE` with no matching label
 | 0x6F | `STR_COPY` | `[dst,src] -> []` | `COPY`, truncating + NUL-terminating |
 | 0x70 | `ORD` | `[c] -> [i]` | CHAR -> INTEGER |
 | 0x71 | `CHR` | `[i] -> [c]` | `TRAP` 5 outside 0..255 |
-| 0x72–0x7F | reserved | | |
+| 0x72 | `BAND` | `[a,b] -> [bool]` | BOOLEAN `&` — true iff both are true |
+| 0x73 | `BOR` | `[a,b] -> [bool]` | BOOLEAN `or` — true iff either is true |
+| 0x74–0x7F | reserved | | |
+
+`BAND` and `BOR` take the first two of the block this table used to reserve
+whole. Nothing is renumbered by that: the reserved bytes were allocated for
+exactly this and were unassigned, and a BOOLEAN operation now sits with the
+other BOOLEAN operations instead of at the end of the opcode space. The result
+is canonical 0/1, and the operands are tested against zero rather than against
+one, so a truthy value that is not 1 still answers correctly. Both are STRICT:
+the operands are already evaluated and on the stack, so there is nothing to
+short-circuit.
 
 ### `0x80–0x9F` — REAL / LONGREAL
 

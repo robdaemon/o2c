@@ -418,7 +418,11 @@ package body O2c_BC is
         when I2R        => 16#8C#,
         when R2I_Round  => 16#8D#,
         when R2I_Trunc  => 16#8E#,
-        when Call_Indirect => 16#E5#);
+        when Call_Indirect => 16#E5#,
+        --  docs/obc-image.md: the reserved 0x72-0x7F block in the BOOLEAN
+        --  group, taken from its start so that nothing is renumbered.
+        when Band       => 16#72#,
+        when Bor        => 16#73#);
 
    function Desc_Rec (Size : Natural; Base : Natural; Methods : Natural;
                       Has_Ptrs : Boolean) return Natural is

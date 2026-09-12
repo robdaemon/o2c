@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         304
-    fixtures        73 in tests/bc/
+    commits         305
+    fixtures        75 in tests/bc/
     foreign natives 21 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -558,6 +558,49 @@ stops at
 operator opcodes, then the four natives (`FStat`/`FRead`/`FWrite`/`FClose`),
 after which the module compiles and step 3 (the `Begin_Mode` ordering) is the
 last thing between it and a program that calls `Files.Old`.
+
+### 3k. DONE — BOOLEAN `&`/`or`, a crash on a module with no body, and the silent four
+
+Three things, in the order they surfaced.
+
+**BOOLEAN `&` and `or` had no opcode.** Both refused loudly (`'&' is not yet
+supported`, `BOOLEAN operators are not yet supported`) while the spec had
+reserved `0x72–0x7F` for exactly this, immediately after `BEQ`/`BNE`/`BTEST`.
+They take the first two of that block — `BAND` 0x72, `BOR` 0x73 — so nothing is
+renumbered and a BOOLEAN operation sits with the BOOLEAN operations. The `Op`
+enum member still goes at the **end** of the enum: that order is fixed and
+separate from the byte mapping, which is what makes the reserved block usable at
+all. The operands are tested against ZERO rather than against 1, so the answer is
+right for any truthy value, and the result is canonical 0/1. Both are strict —
+the operands are already evaluated, so there is nothing to short-circuit.
+`tests/bc/boolops.ob2` asserts seven cases by value, the last of which crosses
+this change with the earlier `not` fix (`not (a & b)`).
+
+**A module with no statement part crashed the emitter.** `Files` is written that
+way — declarations and `end Files.` — and `Begin_Body` was called only when a
+`BEGIN` was found. `Body_Proc` stayed 0 and `Encode` indexed the procedure table
+at 0: a `CONSTRAINT_ERROR` inside the emitter, not a diagnostic, on a construct
+the language allows. The body is now opened unconditionally, because a body with
+no statements is still a body and the image still needs an entry.
+`tests/bc/nobody.ob2` locks it, with an intentionally empty golden: what is being
+asserted is that it compiles and runs.
+
+**And then the discovery that matters most.** With those two fixed the whole
+`Files` module **compiled** — and that was wrong. Four of its intrinsics
+(`FStat`, `FRead`, `FWrite`, `FClose`) set a type and emitted **no opcode at
+all**, so a bytecode program would have compiled, run, and used whatever was on
+the stack — in practice the ADDRESS the argument had just pushed. Nothing
+refused, because the default-refusal rule covers imported-module *calls* and
+these are internal primitives of the builtin module: a different shape of call
+site. They now refuse loudly until they have natives to call, which is what
+`docs/bytecode-gaps.md` A.2 records. **A module compiling is not evidence that it
+is right**, and this is the second time that lesson has been paid for.
+
+**State of the path:** `Files` refuses at `Files.FStat` — the first of the four
+natives still missing (ids 26–29: `o2c_fstat`, `o2c_fread`, `o2c_fwrite`,
+`o2c_fclose`, each needing a `VM_Platform` seam function in the spec **and both
+bodies**, host and Aegir). After those, the module compiles, and step 3 (the
+`Begin_Mode` ordering) is what makes it callable.
 
 ## 4. Method — what worked, and what did not
 

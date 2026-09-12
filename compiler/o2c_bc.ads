@@ -43,7 +43,13 @@ package O2c_BC is
       Req, Rne, Rlt, Rle, Rgt, Rge, I2R, R2I_Round, R2I_Trunc,
       --  Calling through a procedure value.  Appended for the same reason
       --  everything else here is: the enum's order is fixed.
-      Call_Indirect);
+      Call_Indirect,
+      --  BOOLEAN `and` / `or`.  Appended for that same reason, even though the
+      --  BYTES they encode to are the two the spec reserved (0x72/0x73, beside
+      --  BEQ/BNE/BTEST): this enum's order is fixed, so a new member goes at
+      --  the end and Byte_Of decides where it lands.  Keeping the two orders
+      --  independent is what makes the reserved block usable at all.
+      Band, Bor);
 
    --  ---- mode ------------------------------------------------------------
    --  True while the front end should feed this package.  Only the hook

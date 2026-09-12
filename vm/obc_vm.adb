@@ -432,6 +432,13 @@ package body OBC_VM is
    Op_Btest       : constant := 16#68#;
    Op_Ord         : constant := 16#70#;
    Op_Chr         : constant := 16#71#;
+   --  BOOLEAN and / or.  The spec reserves 0x72-0x7F immediately after
+   --  BEQ/BNE/BTEST, so these take the first two of that block rather than the
+   --  end of the opcode space: nothing is renumbered, and a reader looking for
+   --  BOOLEAN operations finds them together.  They are exact for any truthy
+   --  value, not only for 0/1 - the result is canonical 0/1 either way.
+   Op_Band        : constant := 16#72#;
+   Op_Bor         : constant := 16#73#;
    Op_Jmp         : constant := 16#A0#;
    Op_Jz          : constant := 16#A1#;
    Op_Jnz         : constant := 16#A2#;
@@ -986,6 +993,13 @@ package body OBC_VM is
                end if;
                PC := PC + 1;
             when Op_Eq | Op_Ne | Op_Lt | Op_Le | Op_Gt | Op_Ge =>
+               if Depth < 2 then
+                  return Bad_Stack;
+               end if;
+               Depth := Depth - 1;
+               PC := PC + 1;
+            when Op_Band | Op_Bor =>
+               --  [a, b] -> [bool]: two in, one out, like a comparison.
                if Depth < 2 then
                   return Bad_Stack;
                end if;
@@ -2412,6 +2426,23 @@ package body OBC_VM is
                        when Op_Le => A <= B,
                        when Op_Gt => A > B,
                        when others => A >= B);
+               begin
+                  Push (if R then 1 else 0);
+               end;
+               PC := PC + 1;
+            when Op_Band | Op_Bor =>
+               --  Logical and / or.  The operands are BOOLEAN and BOOLEAN is
+               --  0/1 here, but the test is against ZERO rather than against 1
+               --  so the answer is right for any truthy value, and the result
+               --  is canonical either way.  No short-circuiting: both operands
+               --  are already evaluated and on the stack, and Oberon's `&` is
+               --  the strict operator - this dialect has no lazy form.
+               declare
+                  B : constant I64 := To_I64 (Pop);
+                  A : constant I64 := To_I64 (Pop);
+                  R : constant Boolean :=
+                    (if Op = Op_Band then A /= 0 and then B /= 0
+                     else A /= 0 or else B /= 0);
                begin
                   Push (if R then 1 else 0);
                end;
