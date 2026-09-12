@@ -1,0 +1,67 @@
+#!/bin/bash
+#  Known gaps in the bytecode backend, as a re-runnable probe.
+#
+#  Each entry is a construct the *Ada* backend accepts and the bytecode backend
+#  does not.  The script asserts the current state, so fixing a gap makes it
+#  FAIL until the entry is removed - which is what a todo list should do, and
+#  what a prose list cannot.
+#
+#  Why this exists: these were reported from a grep and an inference twice in
+#  one session, and both times the inference was wrong.  A construct is listed
+#  here only once a probe shows it failing, and the probe is the listing.
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+FRONT="$ROOT/tools/bin/o2c_bc_host"
+
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/alrrt}"
+export TMPDIR="${TMPDIR:-/tmp}"
+
+fails=0
+note() { echo "bytecode_gaps: $*"; }
+bad()  { echo "bytecode_gaps: FAIL: $*" >&2; fails=$((fails + 1)); }
+
+if [ ! -x "$FRONT" ]; then
+   ( cd "$ROOT" && make tools-host >"$WORK/build.log" 2>&1 ) \
+     || { tail -20 "$WORK/build.log" >&2; exit 1; }
+fi
+
+#  $1 label, $2 expected (blocked|ok), $3 source
+check() {
+   printf '%s\n' "$3" > "$WORK/p.ob2"
+   if timeout 60 "$FRONT" "$WORK/p.ob2" "$WORK/p.obc" >"$WORK/p.log" 2>&1; then
+      got=ok
+   else
+      got=blocked
+   fi
+   if [ "$got" = "$2" ]; then
+      note "  $2  $1"
+   else
+      bad "$1 is $got, but this list says $2 - the list needs updating"
+   fi
+}
+
+note "=== bytecode gaps, as of this commit ==="
+check "ARRAY OF CHAR variable"  blocked 'module G1; type T = array 8 of char; var v: T; begin end G1.'
+check "ARRAY OF BOOLEAN variable" blocked 'module G2; type T = array 4 of boolean; var v: T; begin end G2.'
+check "ARRAY OF REAL variable"  blocked 'module G3; type T = array 4 of real; var v: T; begin end G3.'
+check "ARRAY OF INTEGER variable" ok 'module G4; type T = array 4 of integer; var v: T; begin end G4.'
+check "inline array type"       blocked 'module G5; var v: array 4 of integer; begin end G5.'
+check "CONST in an expression"  blocked 'module G6; import Out; const N = 3; var k: integer; begin k := N end G6.'
+check "SET variable"            blocked 'module G7; type S = set of 0 .. 7; var s: S; begin end G7.'
+check "LONGINT declaration"    ok 'module G8; var n: longint; begin end G8.'
+check "LONGINT assignment"      blocked 'module G8b; import Out; var n: longint; begin n := 5 end G8b.'
+check "record, INTEGER field"   ok 'module G9; type R = record x: integer end; var v: R; begin end G9.'
+check "record extension"        ok 'module G10; type A = record x: integer end; type B = record (A) y: integer end; var v: B; begin end G10.'
+check "pointer"                 ok 'module G11; type R = record x: integer end; type P = pointer to R; var v: P; begin end G11.'
+check "parameterless call"      ok 'module G12; procedure P; begin end P; begin P end G12.'
+
+if [ "$fails" -eq 0 ]; then
+   note "PASS (all listed gaps still as recorded)"
+   exit 0
+fi
+note "FAIL: $fails entries differ from the recorded list"
+exit 1
