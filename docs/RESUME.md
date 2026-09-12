@@ -1421,11 +1421,8 @@ Measured so far, and still valid:
   (2215, 3506, 4079, 7435, 7991, 8297) or by a branch that returns early;
 - 1a is proven by the metric; `m1` is the gate; the item stays refused.
 
-**The process fix this attempt earned**: instrument by TEXT anchor, never by line
-number, and re-read the file for the anchor AFTER every preceding edit.  Two of
-the four failed attempts this item have been harness mistakes of exactly that
-kind (stale line numbers; a regex that ate real code), not wrong hypotheses.
-Cheap to state, cheap to follow, and neither had been written down.
+**The process fix this attempt earned is now a repo-wide rule** in
+`AGENTS.md` ("Probing the compiler: anchors, negatives, and sizing").
 
 **And the honest read on the hunt**: locating a consumer inside a 11k-line
 front end by instrument-and-rebuild is slow in this budget.  It is a
@@ -1464,10 +1461,8 @@ the site was named in one read-only pass by the **explore subagent**, which coul
 read the whole designator/selector path without spending the editing budget on
 rebuilds.  Two rules this item earned, now cheap to follow:
 
-- instrument by TEXT anchor, never by line number, and re-read the file for the
-  anchor after every preceding edit;
-- a NEGATIVE trace result is a result: "this branch never fires" (3aa) is what
-  made the search space small enough to hand to someone else.
+Both rules from this item are now repo-wide, in `AGENTS.md` under
+"Probing the compiler: anchors, negatives, and sizing".
 
 **Item 2 is already visible**: `Files.Rider`, an IMPORTED record
 (`record f: File; pos: longint; eof: boolean; res: integer; cur: A1 end`) - so the

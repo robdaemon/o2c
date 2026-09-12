@@ -109,6 +109,30 @@ anything from what a tool printed, confirm the tool contains your change:
 That check is cheap and it settles in one command what reasoning about the
 source cannot.
 
+## Probing the compiler: anchors, negatives, and sizing
+
+- **Instrument by TEXT anchor, never by line number.** A marker inserted at a
+  remembered line number lands inside a multi-line statement the moment an
+  earlier edit in the same change adds or removes a line, and the compiler then
+  rejects the file for reasons that have nothing to do with the hypothesis.
+  Match the text, or match the enclosing function's range, and re-read the file
+  for the anchor *after* every preceding edit.
+- **A negative trace result is a result.** "This branch never fires for that
+  input" reduced a failed hunt to one question small enough to hand to the
+  `explore` subagent, which named the site in a single read-only pass. Print the
+  candidate paths' inputs and read which one fires *before* patching either.
+- **Measure two cases, not one.** A real fix - the qualified call path pushed
+  every argument twice - was reverted as a non-fix because only one of its two
+  symptoms was re-tested: `u3` was unchanged, while `u4` went from a rejected
+  image to a running one. When a change is meant to alter behaviour, test every
+  case that behaviour covers.
+- **When a probe disproves an item's SIZING, not just a hypothesis, stop and
+  re-size it in the plan.** Three failures in one stretch were sizing errors
+  dressed as bugs: a "wiring" item that needed a cross-module call, a "check"
+  that needed a layout change, and a "stride constant" that needed the
+  designator to stop dropping a subscript. A wrong size belongs in the plan on
+  the day it is found, not after the chase.
+
 ## Repository conventions
 
 - Builds are serial; never `make -jN`.
@@ -124,3 +148,12 @@ source cannot.
 - Keep the tree warning-free; remove scratch artifacts (`*.ali`, `*.o`)
   from the repo root before committing (they are gitignored).
 - Commit after each milestone.
+
+- **A refusal names its subject.** "call to an unknown procedure", with no name,
+  cost rounds of hunting; `'Bracket'` and `('Tote')` each settled their question
+  in one run. Anything the bytecode backend refuses should say WHICH construct
+  it refused.
+- **The gap harness cannot express "compiles, runs, answers wrongly".**
+  `tests/bytecode_gaps.sh` records constructs that REFUSE, so a defect of the
+  other kind has no machine-checked home. It lives in the notes - or, better,
+  becomes a fixture the moment it is fixed.
