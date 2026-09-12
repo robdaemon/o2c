@@ -432,6 +432,23 @@ check "LONGINT add/sub/mul/DIV/MOD and unary -" ok 'module G48; var n: longint; 
 #  it is not mistaken for the arithmetic gap again.
 check "LONGINT literal above INTEGER'Last" blocked 'module G49; var n: longint; begin n := 3000000000 end G49.'
 
+note "--- ARRAY OF parameters, and the Files intrinsics ---"
+#  Out.String (s) inside a procedure failed with "operand-stack underflow": a
+#  bare ARRAY OF CHAR pushed nothing (its address is in the parameter's own
+#  slot), and the inline print loop only knew how to run off a globals array.
+#  tests/bc/arrparam.ob2 holds it by value, with three different lengths so a
+#  stale bound shows up.
+check "Out.String on an ARRAY OF parameter" ok 'module G50; import Out; var a: array 4 of char; procedure P(s: array of char); begin Out.String(s) end P; begin a := "hi"; P(a) end G50.'
+check "string comparison on an ARRAY OF parameter" ok 'module G51; import Out; var a: array 4 of char; f: boolean; procedure P(s: array of char; r: array of char); begin f := s = r end P; begin a := "hi"; P(a, a) end G51.'
+#  The Files intrinsics FDel / FRename used to refuse in bytecode mode even
+#  though their natives exist (ids 9 and 10): their branches appended to the
+#  Ada body only.  They are NOT reachable from a user module - the compiler
+#  gates them on the Files module - so there is no source-level check to write
+#  here, and a check that compiled some unrelated source would be worse than
+#  none.  What proves them is the MODULE compiling: the bytecode front end is
+#  run over the real Files source (extracted from the compiler) as part of the
+#  3d measurement, and it now gets past both.
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0

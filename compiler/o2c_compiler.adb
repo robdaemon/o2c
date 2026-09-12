@@ -4015,10 +4015,32 @@ package body O2c_Compiler is
                --  like a fixed array of the parameter's element type.
                declare
                   Nm : constant String := Cur.Text (1 .. Cur.Len);
+                  Sl : constant Integer := O2c_BC.Local_Slot (Ada_Id (Nm));
                begin
                   Next;              --  past the parameter name
                   if Syms (Id).Typ = T_Char then
                      if Cur.Kind /= Lex.Tok_LBracket then
+                        if O2c_BC.Bytecode_Mode then
+                           --  A bare ARRAY OF CHAR is a string VALUE, and the
+                           --  address of the caller's characters is in the
+                           --  parameter's own first slot: an ARRAY OF formal
+                           --  carries ADDRESS then LENGTH (see Pass_Actual),
+                           --  and this parameter was handed the caller's, not
+                           --  a copy.  Every consumer of a CStr wants that
+                           --  address on the stack - Out.String, string
+                           --  comparison, and the FFI primitives that take a
+                           --  name.  Without it, `Out.String (s)` inside a
+                           --  procedure failed as "operand-stack underflow",
+                           --  which is how a whole class of programs was
+                           --  refused by a message about the STACK rather
+                           --  than about the string.
+                           if Sl < 0 then
+                              raise O2c_BC.Wrong_Construct with "bytecode "
+                                & "backend: ARRAY OF parameter '" & Nm
+                                & "' is not in the frame";
+                           end if;
+                           O2c_BC.Load_Local (Natural (Sl));
+                        end if;
                         R.Text := To_Unbounded_String (Nm);
                         R.Typ := T_Str;
                         R.CStr := True;
@@ -7149,15 +7171,12 @@ package body O2c_Compiler is
             elsif To_String (Mod_Name) = "Files"
               and then Eq_No_Case (Head (1 .. H_Len), "FDEL")
             then
-               --  Refused in bytecode mode rather than silently emitting
-               --  nothing: this branch appends to the Ada body and makes no
-               --  O2c_BC call at all, so a bytecode program would compile,
-               --  run, and quietly do nothing at all.
-               if O2c_BC.Bytecode_Mode then
-                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                    & "Files.FDel are not yet supported";
-               end if;
-               --  M42 FFI: delete a named file (builtin Files only)
+               --  M42 FFI: delete a named file (builtin Files only).  The
+               --  bytecode half is emitted below, once the argument is on the
+               --  stack; the refusal this used to carry is now the negative of
+               --  a test - this branch appends to the Ada body, so without an
+               --  O2c_BC call a bytecode program compiled, ran, and quietly
+               --  did nothing at all.
                declare
                   P1 : Expr_Rec;
                begin
@@ -7170,21 +7189,23 @@ package body O2c_Compiler is
                   end if;
                   Expect (Lex.Tok_RParen, "')'");
                   Next;
+                  if O2c_BC.Bytecode_Mode then
+                     --  Native id 9 (o2c_fdel): ONE argument, the address of
+                     --  the name.  Parse_Expr has already pushed it, because
+                     --  an ARRAY OF parameter pushes its caller's address and
+                     --  a module-level array pushes its globals address.
+                     O2c_BC.Native_Call (9, 1);
+                  end if;
                   Append_Body ("      O2c_FDel ("
                                & To_String (P1.Text) & ");");
                end;
             elsif To_String (Mod_Name) = "Files"
               and then Eq_No_Case (Head (1 .. H_Len), "FRENAME")
             then
-               --  Refused in bytecode mode rather than silently emitting
-               --  nothing: this branch appends to the Ada body and makes no
-               --  O2c_BC call at all, so a bytecode program would compile,
-               --  run, and quietly do nothing at all.
-               if O2c_BC.Bytecode_Mode then
-                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                    & "Files.FRename are not yet supported";
-               end if;
-               --  M44 FFI: rename within a volume (builtin Files only)
+               --  M44 FFI: rename within a volume (builtin Files only).  Same
+               --  shape as FDel above: the bytecode half is emitted once both
+               --  names are on the stack, and the old refusal existed because
+               --  this branch appends to the Ada body only.
                declare
                   P1, P2 : Expr_Rec;
                begin
@@ -7203,6 +7224,12 @@ package body O2c_Compiler is
                   end if;
                   Expect (Lex.Tok_RParen, "')'");
                   Next;
+                  if O2c_BC.Bytecode_Mode then
+                     --  Native id 10 (o2c_frename): two addresses, source
+                     --  first - which is the order they were parsed and
+                     --  pushed, and the order the native's Args reads.
+                     O2c_BC.Native_Call (10, 2);
+                  end if;
                   Append_Body ("      O2c_FRename ("
                                & To_String (P1.Text) & ", "
                                & To_String (P2.Text) & ");");
@@ -8842,16 +8869,36 @@ package body O2c_Compiler is
                                  declare
                                     ASym : constant Natural :=
                                       Find (To_String (A.Text));
+                                    --  Two shapes print the same way.  A fixed
+                                    --  CHAR array lives in a globals run and
+                                    --  knows its length statically; an ARRAY
+                                    --  OF parameter IS the caller's array, with
+                                    --  its address and length in its own two
+                                    --  frame slots (see Pass_Actual), and its
+                                    --  UT is 0 because an open array has no
+                                    --  type of its own.  Recognising only the
+                                    --  first is why Out.String (s) inside a
+                                    --  procedure fell through to the
+                                    --  pool-string native and died as
+                                    --  "operand-stack underflow" - a message
+                                    --  about the stack for a problem with a
+                                    --  string.
+                                    Is_Open : constant Boolean :=
+                                      Syms (ASym).Open_Arr;
+                                    AU    : constant Natural := Syms (ASym).UT;
+                                    N     : constant Integer :=
+                                      (if Is_Open then 0
+                                       else UTypes (AU).Arr_Len);
+                                    P_Sl  : constant Integer :=
+                                      (if Is_Open
+                                       then O2c_BC.Local_Slot
+                                              (Ada_Id (To_String (A.Text)))
+                                       else -1);
                                  begin
-                                    if Syms (ASym).UT > 0
-                                      and then UTypes (Syms (ASym).UT).Elem
-                                        = T_Char
+                                    if Is_Open or else (AU > 0
+                                      and then UTypes (AU).Elem = T_Char)
                                     then
                                        declare
-                                          AU    : constant Natural :=
-                                            Syms (ASym).UT;
-                                          N     : constant Integer :=
-                                            UTypes (AU).Arr_Len;
                                           I_Sl  : constant Natural :=
                                             O2c_BC.Local ("o2c_str_i");
                                           V_Sl  : constant Natural :=
@@ -8871,15 +8918,33 @@ package body O2c_Compiler is
                                           O2c_BC.Store_Local (I_Sl);
                                           O2c_BC.Mark (L_Top);
                                           O2c_BC.Load_Local (I_Sl);
-                                          O2c_BC.Push_Int (N);
+                                          if Is_Open then
+                                             --  ... and its length is the
+                                             --  parameter's second slot, so
+                                             --  the bound is loaded rather
+                                             --  than fixed at compile time.
+                                             O2c_BC.Load_Local
+                                               (Natural (P_Sl) + 1);
+                                          else
+                                             O2c_BC.Push_Int (N);
+                                          end if;
                                           O2c_BC.Bin (O2c_BC.Lt);
                                           O2c_BC.Jump (O2c_BC.Jnz, L_Bdy);
                                           O2c_BC.Jump (O2c_BC.Jmp, L_End);
                                           O2c_BC.Mark (L_Bdy);
-                                          O2c_BC.Load_Addr_G
-                                            (O2c_BC.Global_Array
-                                               (Ada_Id (To_String (A.Text)),
-                                                Total_Slots (AU)));
+                                          if Is_Open then
+                                             --  The caller's characters,
+                                             --  addressed through the
+                                             --  parameter's first slot.
+                                             O2c_BC.Load_Local
+                                               (Natural (P_Sl));
+                                          else
+                                             O2c_BC.Load_Addr_G
+                                               (O2c_BC.Global_Array
+                                                  (Ada_Id
+                                                     (To_String (A.Text)),
+                                                   Total_Slots (AU)));
+                                          end if;
                                           O2c_BC.Load_Local (I_Sl);
                                           O2c_BC.Bin (O2c_BC.Load_Idx_B);
                                           O2c_BC.Store_Local (V_Sl);

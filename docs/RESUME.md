@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         303
-    fixtures        72 in tests/bc/
+    commits         304
+    fixtures        73 in tests/bc/
     foreign natives 21 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -514,6 +514,50 @@ which is that file working as intended: the assertion that unary minus on LONGIN
 **Measured result:** `Files` gets past LONGINT too and now stops at
 **`Files.FRename`** — an intrinsic. That is step 2's actual subject: what remains
 is the ~15 intrinsic primitives, not anything about the language.
+
+### 3j. DONE — two `ARRAY OF` parameter gaps, and the first two intrinsics
+
+**The user-visible half first, because it was not about `Files` at all.**
+`Out.String (s)` inside a procedure — `s: array of char` — failed with
+
+    o2c error: bytecode emitter: operand-stack underflow
+
+a message about the **stack** for a problem with a **string**, which is why it
+read as an emitter bug rather than as an unimplemented case. Two things were
+missing and both are about where an open array's bytes are:
+
+- a bare `ARRAY OF CHAR` pushed **nothing**: the caller's address sits in the
+  parameter's own first slot and nothing put it on the stack;
+- `Out.String` on a CHAR array is an inline print **loop over a globals run**,
+  and an `ARRAY OF` parameter is not in the globals — its `UT` is 0, because an
+  open array has no type of its own — so the loop was skipped and the
+  pool-string native ran on an address.
+
+The same push also fixes **string comparison** between open arrays, which needs
+two addresses. `tests/bc/arrparam.ob2` holds both by value, calling one
+procedure with arrays of **three different lengths** so a stale bound prints the
+wrong text rather than nothing.
+
+**Then the first two intrinsics.** `FDel` and `FRename` refused in bytecode mode
+even though their natives (`o2c_fdel` id 9, `o2c_frename` id 10) already exist —
+their branches append to the Ada body only, which is *why* they refused: with no
+`O2c_BC` call a bytecode program would have compiled, run, and quietly done
+nothing. Both now emit the native call once their argument addresses are on the
+stack. They are not reachable from a user module (the compiler gates them on the
+`Files` module), so there is no source-level check to write and none was added:
+what proves them is the **module** compiling, which is the measurement this whole
+sequence runs on.
+
+**Measured result, and the state of the path:** `Files` gets past both, and now
+stops at
+
+    o2c error: bytecode backend: '&' is not yet supported
+
+— `Files.Wait`'s `while (i < 400) & (FStat (path) < 0)`, the BOOLEAN `&` that
+`bytecode_gaps.sh` already records as *blocked*. So what remains is: the BOOLEAN
+operator opcodes, then the four natives (`FStat`/`FRead`/`FWrite`/`FClose`),
+after which the module compiles and step 3 (the `Begin_Mode` ordering) is the
+last thing between it and a program that calls `Files.Old`.
 
 ## 4. Method — what worked, and what did not
 
