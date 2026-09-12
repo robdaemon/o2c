@@ -49,7 +49,7 @@ check "ARRAY OF CHAR variable"  ok 'module G1; type T = array 8 of char; var v: 
 check "ARRAY OF BOOLEAN variable"  ok 'module G2; type T = array 4 of boolean; var v: T; begin end G2.'
 check "ARRAY OF REAL variable"  ok 'module G3; type T = array 4 of real; var v: T; begin end G3.'
 check "ARRAY OF INTEGER variable" ok 'module G4; type T = array 4 of integer; var v: T; begin end G4.'
-check "inline array type"       blocked 'module G5; var v: array 4 of integer; begin end G5.'
+check "inline array type"  ok 'module G5; var v: array 4 of integer; begin end G5.' 
 check "CONST in an expression"  ok 'module G6; import Out; const N = 3; var k: integer; begin k := N end G6.'
 check "CONST, computed value"  ok 'module G6b; import Out; const N = 3 + 1; var k: integer; begin k := N end G6b.' 
 check "SET operands (union, intersection, difference)"  ok 'module G31; import Out; var a: set; b: set; c: set; d: boolean; begin a := {1}; b := {2}; c := a + b; d := 2 in c end G31.' 

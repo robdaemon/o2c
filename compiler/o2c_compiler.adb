@@ -4700,6 +4700,72 @@ package body O2c_Compiler is
       end if;
    end Decl_Const;
 
+   --  Parse `ARRAY <len> OF <elem>` and lay the type out.  Shared by a
+   --  named TYPE declaration and by an inline array in a VAR, which has no
+   --  name of its own: the layout is identical, only the name differs.
+   procedure Parse_Array_Body (UTI : Natural; Name : String) is
+   begin
+         Next;
+         Expect (Lex.Tok_Number, "an array length");
+         declare
+            L : constant Integer := Integer'Value (Cur.Text (1 .. Cur.Len));
+         begin
+            if L <= 0 then
+               raise O2c_Error with "array length must be positive";
+            end if;
+            UTypes (UTI).Arr_Len := L;
+            Next;
+         end;
+         Expect (Lex.Tok_Of, "'OF'");
+         Next;
+         if Cur.Kind /= Lex.Tok_Ident then
+            raise O2c_Error with "an element type expected";
+         end if;
+         UTypes (UTI).Elem := Builtin_Type_Of (Cur.Text (1 .. Cur.Len));
+         if UTypes (UTI).Elem = T_Str then
+            --  element is a user type: an earlier ARRAY or RECORD (M16)
+            declare
+               EU : constant Natural := Find_UT (Cur.Text (1 .. Cur.Len));
+            begin
+               if EU = 0 or else UTypes (EU).Is_Ptr then
+                  raise O2c_Error with "array element types: INTEGER/BOOLEAN/"
+                    & "CHAR or an earlier ARRAY/RECORD type ('"
+                    & Cur.Text (1 .. Cur.Len) & "')";
+               end if;
+               UTypes (UTI).Elem_UT := EU;
+            end;
+         end if;
+         Next;
+         UTypes (UTI).Is_Rec := False;
+         if UTypes (UTI).Elem_UT /= 0 then
+            Append_Decl ("   type " & Name & " is array (0 .. "
+                         & Integer'Image (UTypes (UTI).Arr_Len - 1)
+                         & ") of "
+                         & To_String (UTypes (UTypes (UTI).Elem_UT).Name)
+                         & ";");
+         elsif UTypes (UTI).Elem = T_Char then
+            Append_Decl ("   subtype " & Name & " is String (1 .. "
+                         & Integer'Image (UTypes (UTI).Arr_Len) & ");");
+         else
+            --  numeric fixed arrays are constrained subtypes of the
+            --  shared open-array base so they also fit ARRAY OF formals
+            if UTypes (UTI).Elem = T_Int then
+               Used_Int_Arr := True;
+            else
+               Used_Bool_Arr := True;
+            end if;
+            if UTypes (UTI).ExpT then
+               Base_In_Spec := True;   --  M20e: base must be visible
+            end if;
+            Append_Decl ("   subtype " & Name & " is "
+                         & (if UTypes (UTI).Elem = T_Int
+                           then "O2c_Int_Arr"
+                           else "O2c_Bool_Arr")
+                         & " (0 .. "
+                         & Integer'Image (UTypes (UTI).Arr_Len - 1) & ");");
+         end if;
+   end Parse_Array_Body;
+
    procedure Decl_Var is
       Names : array (1 .. 16) of Unbounded_String;
       Exps  : array (1 .. 16) of Boolean := (others => False);
@@ -4756,7 +4822,28 @@ package body O2c_Compiler is
          Is_UT   : Boolean := False;
          Init_Txt : Unbounded_String;
       begin
-         if Cur.Kind = Lex.Tok_Ident then
+         if Cur.Kind = Lex.Tok_Array then
+            --  An inline (anonymous) array type: `var v: array 4 of integer;`
+            --  There is no name to declare it under, but the layout is exactly
+            --  a named array's, so a type is synthesized and the same parser
+            --  fills it.  The name cannot collide with source: it is not a
+            --  legal identifier, so nothing can refer to it by accident.
+            declare
+               Img : constant String := Natural'Image (N_UT + 1);
+            begin
+               N_UT := N_UT + 1;
+               if N_UT > UTypes'Last then
+                  raise O2c_Error with "too many type declarations";
+               end if;
+               UT := N_UT;
+               UTypes (UT) :=
+                 (Name => To_Unbounded_String
+                    ("O2c_Anon_Arr_" & Img (Img'First + 1 .. Img'Last)),
+                  Is_Rec => True, others => <>);
+               Parse_Array_Body (UT, To_String (UTypes (UT).Name));
+               Is_UT := True;
+            end;
+         elsif Cur.Kind = Lex.Tok_Ident then
             declare
                T : constant String := Cur.Text (1 .. Cur.Len);
             begin
@@ -4955,65 +5042,7 @@ package body O2c_Compiler is
          UTypes (UTI).Is_Rec := False;
          UTypes (UTI).Is_Proc := True;
       elsif Cur.Kind = Lex.Tok_Array then
-         Next;
-         Expect (Lex.Tok_Number, "an array length");
-         declare
-            L : constant Integer := Integer'Value (Cur.Text (1 .. Cur.Len));
-         begin
-            if L <= 0 then
-               raise O2c_Error with "array length must be positive";
-            end if;
-            UTypes (UTI).Arr_Len := L;
-            Next;
-         end;
-         Expect (Lex.Tok_Of, "'OF'");
-         Next;
-         if Cur.Kind /= Lex.Tok_Ident then
-            raise O2c_Error with "an element type expected";
-         end if;
-         UTypes (UTI).Elem := Builtin_Type_Of (Cur.Text (1 .. Cur.Len));
-         if UTypes (UTI).Elem = T_Str then
-            --  element is a user type: an earlier ARRAY or RECORD (M16)
-            declare
-               EU : constant Natural := Find_UT (Cur.Text (1 .. Cur.Len));
-            begin
-               if EU = 0 or else UTypes (EU).Is_Ptr then
-                  raise O2c_Error with "array element types: INTEGER/BOOLEAN/"
-                    & "CHAR or an earlier ARRAY/RECORD type ('"
-                    & Cur.Text (1 .. Cur.Len) & "')";
-               end if;
-               UTypes (UTI).Elem_UT := EU;
-            end;
-         end if;
-         Next;
-         UTypes (UTI).Is_Rec := False;
-         if UTypes (UTI).Elem_UT /= 0 then
-            Append_Decl ("   type " & Name & " is array (0 .. "
-                         & Integer'Image (UTypes (UTI).Arr_Len - 1)
-                         & ") of "
-                         & To_String (UTypes (UTypes (UTI).Elem_UT).Name)
-                         & ";");
-         elsif UTypes (UTI).Elem = T_Char then
-            Append_Decl ("   subtype " & Name & " is String (1 .. "
-                         & Integer'Image (UTypes (UTI).Arr_Len) & ");");
-         else
-            --  numeric fixed arrays are constrained subtypes of the
-            --  shared open-array base so they also fit ARRAY OF formals
-            if UTypes (UTI).Elem = T_Int then
-               Used_Int_Arr := True;
-            else
-               Used_Bool_Arr := True;
-            end if;
-            if UTypes (UTI).ExpT then
-               Base_In_Spec := True;   --  M20e: base must be visible
-            end if;
-            Append_Decl ("   subtype " & Name & " is "
-                         & (if UTypes (UTI).Elem = T_Int
-                           then "O2c_Int_Arr"
-                           else "O2c_Bool_Arr")
-                         & " (0 .. "
-                         & Integer'Image (UTypes (UTI).Arr_Len - 1) & ");");
-         end if;
+         Parse_Array_Body (UTI, Name);
       elsif Cur.Kind = Lex.Tok_Pointer then
          --  POINTER TO <record type> (M8).  The classic idiom
          --    Node = POINTER TO NodeDesc;

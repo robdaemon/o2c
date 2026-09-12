@@ -1,12 +1,12 @@
 module Unsup;
 import Out;
-(* An inline (anonymous) array type, which the bytecode backend still
-   cannot lay out.  This fixture used to assert that ARRAY OF CHAR was
-   unsupported; CHAR arrays work now, so it moved to something that is
-   still refused.  Kept as a fixture rather than deleted because the
-   contract it checks is the general one: unsupported source fails
-   loudly. *)
-var v: array 4 of integer;
+(* Oberon-1 bounded-set syntax, which this dialect does not have: a SET
+   here is unbounded and written plain.  This fixture asserts the general
+   contract that unsupported source fails loudly.  It used to be an inline
+   array type; inline arrays are supported now, so it moved to something
+   that is still refused. *)
+type S = set of 0 .. 7;
+var v: S;
 begin
   Out.Ln
 end Unsup.
