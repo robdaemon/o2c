@@ -265,27 +265,37 @@ accepts wider than the text claims:
 
 Read the code, not the message. Correcting the text is outstanding work.
 
-### A.1 These refusals are NOT the whole gap - two constructs were SILENT
+### A.1 These refusals are NOT the whole gap - three constructs were SILENT
 
 Section A cannot be complete, and the way it was incomplete is worth recording
 because the generation command above is blind to it BY CONSTRUCTION. A construct
 that is neither implemented nor refused emits no opcode and raises nothing: it
-compiles, runs, and quietly keeps the operand. Two did:
+compiles, runs, and quietly keeps the operand, or quietly skips itself. Three
+did:
 
-    unary -    x := -y     stored y      (y = 7 printed 7,   not -7)
-    not / ~    g := not f  stored f      (f = true printed 1, not 0)
+    unary -    x := -y     stored y       (y = 7 printed 7,   not -7)
+    not / ~    g := not f  stored f       (f = true printed 1, not 0)
+    LOOP       loop i := i + 1 end        body ran ONCE - an infinite loop
+                                          terminated, with i = 1
+    EXIT       exit                       emitted nothing at all
 
-Neither appears in the list above, because neither refuses. They were found by
+None appears in the list above, because none refuses. They were found by
 PROBING, not by the grep - which is the point: `grep '"bytecode backend: ..."'`
 enumerates refusals, so it can only ever find constructs that already fail
 loudly, and the failure that matters most is the one that does not.
 
-Both are fixed (the unary operator commit): `Neg`/`Rneg` are emitted for a
-unary sign - raised from here, where bytecode was silent - and `not b` is
-emitted as `b = 0`, which needs no new opcode because a BOOLEAN is 0/1 in this
-VM. tests/bc/unops.ob2 locks both BY VALUE and bytecode_gaps.sh asserts them,
-so a regression reads as a wrong number in a golden rather than as a compile
-error.
+The second pair has a second lesson in it. The grep could not see them, and
+neither could the FIRST coverage check - `loop` and `exit` both appear in
+samples/hello.ob2, which no test compiles, so they read as "covered" while the
+bytecode backend turned an infinite loop into a straight-line block. Coverage
+counted a hit in the wrong corpus; see section C.
+
+All four are fixed: `Neg`/`Rneg` are emitted for a unary sign, `not b` is
+emitted as `b = 0` (no new opcode - a BOOLEAN is 0/1 in this VM), and LOOP/EXIT
+emit the back-jump and the exit target they were missing. tests/bc/unops.ob2
+and tests/bc/loopexit.ob2 lock all of them BY VALUE - and loopexit.ob2 is
+written so that a wrong EXIT target does not print a wrong number but fails to
+TERMINATE, which is why the fixtures are run under a timeout.
 
     REFUSAL COMPLETENESS and IMAGE CORRECTNESS are two different claims.
     Section A is evidence for the first only, and only up to what the grep can

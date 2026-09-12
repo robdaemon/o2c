@@ -336,6 +336,10 @@ package body O2c_Compiler is
    Loop_Depth : Natural := 0;      --  open LOOP statements (EXIT target)
    Loop_N     : Natural := 0;      --  LOOP counter for generated labels
    Loop_Lbl   : array (1 .. 64) of Unbounded_String;  --  per-depth label
+   --  The bytecode counterpart of Loop_Lbl: the label EXIT jumps to.  Sized
+   --  and indexed by Loop_Depth, which is bounds-checked against Loop_Lbl
+   --  before either is used, so the two cannot disagree about the limit.
+   Bc_Loop_Exit : array (1 .. 64) of Natural := (others => 0);
 
    procedure Append_Decl (S : String) is
    begin
@@ -6207,6 +6211,15 @@ package body O2c_Compiler is
       --  Ada loop gets a generated label so that EXIT always leaves the
       --  LOOP even from inside a nested WHILE/REPEAT/FOR (a bare Ada
       --  'exit' would leave the innermost Ada loop instead).
+      --
+      --  Bytecode needs the same two things the Ada text gets for free: a
+      --  back-jump at the end of the body, and a target for EXIT to jump to.
+      --  Without them the body compiled as a STRAIGHT-LINE block that ran
+      --  once and fell through, and EXIT vanished - so `loop i := i + 1 end`
+      --  terminated instead of running forever.  A wrong image, no
+      --  diagnostic: the failure mode this backend exists to refuse.
+      L_Top  : Natural := 0;
+      L_Exit : Natural := 0;
    begin
       Next;                          --  LOOP
       Loop_Depth := Loop_Depth + 1;
@@ -6216,6 +6229,15 @@ package body O2c_Compiler is
            & Natural'Image (Cur.Line) & ")";
       end if;
       Loop_N := Loop_N + 1;
+      if O2c_BC.Bytecode_Mode then
+         --  Recorded per depth before the body is parsed, so a nested EXIT
+         --  inside a WHILE/REPEAT/FOR still leaves THIS loop - which is what
+         --  the Ada label does for the Ada side.
+         L_Top := New_Bc_Label;
+         L_Exit := New_Bc_Label;
+         Bc_Loop_Exit (Loop_Depth) := L_Exit;
+         O2c_BC.Mark (L_Top);
+      end if;
       declare
          Img : constant String := Natural'Image (Loop_N);
          Lbl : constant String := "O2c_Loop_"
@@ -6235,6 +6257,12 @@ package body O2c_Compiler is
          end;
          Expect (Lex.Tok_End, "'END' closing the LOOP");
          Next;
+         if O2c_BC.Bytecode_Mode then
+            --  The back-jump, then the exit mark: falling off the end of the
+            --  body loops, and EXIT lands here instead of looping.
+            O2c_BC.Jump (O2c_BC.Jmp, L_Top);
+            O2c_BC.Mark (L_Exit);
+         end if;
          Append_Body ("      end loop " & Lbl & ";");
       end;
       Loop_Depth := Loop_Depth - 1;
@@ -6247,6 +6275,13 @@ package body O2c_Compiler is
            & "statement (line " & Natural'Image (Cur.Line) & ")";
       end if;
       Next;                          --  past EXIT
+      if O2c_BC.Bytecode_Mode then
+         --  An absolute jump out of the innermost LOOP, wherever EXIT sits.
+         --  Leaving a nested WHILE or FOR takes no unwinding: frames are
+         --  frame slots and every loop is jumps, so there is no state to
+         --  restore.
+         O2c_BC.Jump (O2c_BC.Jmp, Bc_Loop_Exit (Loop_Depth));
+      end if;
       Append_Body ("      exit " & To_String (Loop_Lbl (Loop_Depth)) & ";");
    end Parse_Exit;
 
