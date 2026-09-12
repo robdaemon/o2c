@@ -193,6 +193,23 @@ Next: dump the loop's bytes and the verifier's per-offset depth, and compare
 them position by position.  That is the move that settled the two previous
 CHAR bugs after reasoning had failed on both.
 
+### 4d. String comparison emits no comparison
+
+`s = t`, `s # t` and `s < t` between two `ARRAY OF CHAR` variables all compile
+and then die on `operand-stack depth violation`.  Dumping the code shows why:
+`f := s = t` emits the two `COPY_STR`s and then `STORE_G 4` with **no
+comparison between them**, so the store pops a value nothing pushed.
+
+The site is the relational-operator block in the expression parser, where
+`Tok_Equal`/`Tok_NE`/`Tok_LT`/`Tok_LE`/`Tok_GT`/`Tok_GE` are turned into an Ada
+operator string.  That path builds Ada text and has no bytecode branch for two
+string operands - the same shape as the string assignment and the FFI helpers.
+
+`0xEE` is the next free opcode: `0xE5`-`0xED` are taken and the `0xF0` escape
+range is reserved.  The natural instruction is a three-way compare that pops
+two addresses and pushes -1, 0 or 1, from which `Eq`/`Ne`/`Lt`/`Le`/`Gt`/`Ge`
+against zero give all six operators - one op rather than six.
+
 ### 5. Inline (anonymous) array types
 
 `var v: array 4 of integer` fails with "a type name expected". An array type
