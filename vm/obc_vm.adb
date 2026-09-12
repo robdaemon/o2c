@@ -134,6 +134,11 @@ package body OBC_VM is
    --  boundary, so stopping the world here costs nothing - no signals, no
    --  write barrier.  That is what choosing VM-scheduled green threads buys.
    Op_Yield        : constant := 16#E4#;
+   --  Call through a procedure value: the id comes from the stack rather
+   --  than the instruction, because the callee is only known at run time.
+   --  Operand-free: the procedure type is parameterless and resultless by
+   --  definition, so the stack effect is fixed - pop the id and call it.
+   Op_Call_Indirect : constant := 16#E5#;
    Op_Dispatch     : constant := 16#E2#;
    Op_Alloc_New    : constant := 16#2A#;
    Op_Load_Fld_R   : constant := 16#24#;
@@ -887,6 +892,12 @@ package body OBC_VM is
                   Depth := Depth - NArgs - 1 + NRes;
                end;
                PC := PC + 5;
+            when Op_Call_Indirect =>
+               --  The callee is not statically known, so the depth effect
+               --  comes from the type: parameterless and resultless, so only
+               --  the procedure id is consumed.
+               Depth := Depth - 1;
+               PC := PC + 1;
             when Op_Yield =>
                PC := PC + 1;
             when Op_Desc_Of =>
@@ -1170,7 +1181,8 @@ package body OBC_VM is
       --  meant every change to frames had to be made twice - and the two
       --  copies had already drifted apart in what they reported.  False means
       --  the call could not be set up, with the reason already noted.
-      function Push_Frame (Callee : Natural) return Boolean is
+      function Push_Frame (Callee : Natural; Ret_PC : Natural)
+                           return Boolean is
          Base : constant Natural := Locals_Used;
       begin
          if Cur_Frame + 1 >= Frame_Slots'Length then
@@ -1214,7 +1226,7 @@ package body OBC_VM is
          for K in reverse 0 .. Img.Procs (Callee).NParams - 1 loop
             Locals (Base + K) := Pop;
          end loop;
-         Return_PC (Cur_Frame) := PC + 5;
+         Return_PC (Cur_Frame) := Ret_PC;
          Cur_Frame := Cur_Frame + 1;
          Frame_Base (Cur_Frame) := Base;
          Frame_Slots (Cur_Frame) := Img.Procs (Callee).Frame_Slots;
@@ -1658,7 +1670,7 @@ package body OBC_VM is
                   if SP < Img.Procs (Callee).NParams then
                      return Bad_Stack;
                   end if;
-                  if not Push_Frame (Callee) then
+                  if not Push_Frame (Callee, PC + 5) then
                      return Bad_Stack;
                   end if;
                   PC := Target;
@@ -1771,7 +1783,7 @@ package body OBC_VM is
                      Note_At ("dispatch resolved to no procedure", PC);
                      return Bad_Code;
                   end if;
-                  if not Push_Frame (Callee) then
+                  if not Push_Frame (Callee, PC + 5) then
                      return Bad_Stack;
                   end if;
                   PC := Img.Procs (Callee).Code_Off;
@@ -1807,6 +1819,31 @@ package body OBC_VM is
                   end if;
                end;
                PC := PC + 5;
+            when Op_Call_Indirect =>
+               declare
+                  Callee : constant Natural := Natural (Pop);
+               begin
+                  if Callee = 0 or else Callee > Img.N_Procs then
+                     Note_At ("indirect call target is not a procedure", PC);
+                     return Bad_Target;
+                  end if;
+                  --  A procedure value is parameterless and resultless, so a
+                  --  callee that wants arguments or returns a result cannot
+                  --  be what was called.  Checked rather than assumed:
+                  --  hand-written bytecode could otherwise reach a callee the
+                  --  verifier was unable to see.
+                  if Img.Procs (Callee).NParams /= 0
+                    or else Img.Procs (Callee).NResults /= 0
+                  then
+                     Note_At ("indirect call to a procedure with parameters "
+                              & "or a result", PC);
+                     return Bad_Stack;
+                  end if;
+                  if not Push_Frame (Callee, PC + 1) then
+                     return Bad_Stack;
+                  end if;
+                  PC := Img.Procs (Callee).Code_Off;
+               end;
             when Op_Yield =>
                PC := PC + 1;
                return Yielded;

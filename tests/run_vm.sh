@@ -284,6 +284,19 @@ fi
 #  ---- positive: hand-assembled Out.Char ------------------------------------
 #  Exercises native 4 independently of the emitter: two character codes go to
 #  the native, which prints the characters themselves.
+#  CALL_INDIRECT: the callee's id arrives on the stack, since the callee is
+#  only known at run time - which is exactly what a PROCEDURE-typed value is.
+if python3 "$ASM" "$ROOT/tests/vm/callind.asm" "$WORK/callind.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/callind.obc" >"$WORK/callind.out" 2>"$WORK/callind.err"; then
+   if diff -u "$ROOT/tests/vm/callind.out" "$WORK/callind.out"; then
+      note "positive: callind.asm (CALL_INDIRECT) matches the golden output"
+   else
+      bad "callind.asm output differs from tests/vm/callind.out"
+   fi
+else
+   bad "callind.asm failed: $(cat "$WORK/callind.err")"
+fi
+
 #  YIELD hands the VM back and the runner resumes the context at the next
 #  instruction.  The program completing and printing is the proof: a resume
 #  that re-ran the prologue or re-yielded forever would not get here.
