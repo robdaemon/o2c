@@ -1031,6 +1031,11 @@ package body O2c_Compiler is
          if UTypes (UT).Elem = T_Char then
             return (Natural (UTypes (UT).Arr_Len) + 1 + 7) / 8;
          end if;
+         if UTypes (UT).Elem = T_Bool then
+            --  One byte per element, as a CHAR array, but with no
+            --  terminator: a boolean array is a run of values, not a string.
+            return (Natural (UTypes (UT).Arr_Len) + 7) / 8;
+         end if;
          --  An array of slot-scalars is its length: that is both its
          --  footprint and what a variable of it needs nominating.  A record
          --  has Arr_Len zero and falls through to the field walk.
@@ -1887,7 +1892,9 @@ package body O2c_Compiler is
             Next;                --  past '['
             if O2c_BC.Bytecode_Mode
               and then (UTypes (UT).Elem = T_Int
-                        or else UTypes (UT).Elem = T_Char)
+                        or else UTypes (UT).Elem = T_Char
+                        or else UTypes (UT).Elem = T_Bool
+                        or else UTypes (UT).Elem = T_Real)
             then
                --  An array is a run of scalar slots: push the address of its
                --  first slot before the index is evaluated, so the stack
@@ -3241,7 +3248,7 @@ package body O2c_Compiler is
                                     if D.K = D_Index then
                                        --  [base, index]: load the element.
                                        R.Typ := D.Sc;
-                                       if D.Sc = T_Char then
+                                       if D.Sc = T_Char or else D.Sc = T_Bool then
                                           O2c_BC.Bin (O2c_BC.Load_Idx_B);
                                        else
                                           O2c_BC.Bin (O2c_BC.Load_Idx_I);
@@ -3725,7 +3732,7 @@ package body O2c_Compiler is
                      if D.K = D_Index then
                         --  [base, index]: load the element.
                         R.Typ := D.Sc;
-                        if D.Sc = T_Char then
+                        if D.Sc = T_Char or else D.Sc = T_Bool then
                            O2c_BC.Bin (O2c_BC.Load_Idx_B);
                         else
                            O2c_BC.Bin (O2c_BC.Load_Idx_I);
@@ -4719,7 +4726,9 @@ package body O2c_Compiler is
                   Ok_Arr : constant Boolean :=
                     UTypes (UT).Arr_Len > 0
                     and then (UTypes (UT).Elem = T_Int
-                              or else UTypes (UT).Elem = T_Char);
+                              or else UTypes (UT).Elem = T_Char
+                              or else UTypes (UT).Elem = T_Bool
+                              or else UTypes (UT).Elem = T_Real);
                   Ok_Ptr : constant Boolean := UTypes (UT).Is_Ptr;
                   --  A procedure value is one slot - a procedure id - so a
                   --  variable of that type is as ordinary as a pointer.
@@ -7039,7 +7048,7 @@ package body O2c_Compiler is
                                  declare
                                     V : Expr_Rec := Parse_Expr;
                                  begin
-                                    if D.Sc = T_Char then
+                                    if D.Sc = T_Char or else D.Sc = T_Bool then
                                        O2c_BC.Bin (O2c_BC.Store_Idx_B);
                                     else
                                        O2c_BC.Bin (O2c_BC.Store_Idx_I);
@@ -7344,7 +7353,7 @@ package body O2c_Compiler is
                            declare
                               V : Expr_Rec := Parse_Expr;
                            begin
-                              if D.Sc = T_Char then
+                              if D.Sc = T_Char or else D.Sc = T_Bool then
                                  O2c_BC.Bin (O2c_BC.Store_Idx_B);
                               else
                                  O2c_BC.Bin (O2c_BC.Store_Idx_I);
