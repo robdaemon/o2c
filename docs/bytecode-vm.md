@@ -453,6 +453,18 @@ backend's regression still passes **and** the new VM path is exercised.
     thread.  Verified by `tests/bc/threadstart.ob2`, `threadname.ob2`,
     `threadjoin.ob2`, `threadmutex.ob2`, and `tests/vm/spawn.asm`, `join.asm`,
     `release.asm`, `nested.asm`, `mutex.asm`, `mutexwait.asm`.
+  - **Scheduling stress:** `tests/run_stress.sh` runs `run_bc` and `run_vm` at a
+    quantum of 1, 2 and 3, where a switch fires between instructions rather
+    than only between whole turns.  The other suites run at the production
+    quantum, where a thread almost always finishes inside one turn - so
+    nothing else exercises a switch mid-sequence, which is where resumption
+    bugs live.  No new goldens: a correct VM gives the same output at any
+    quantum, so the claim under test is that where a switch lands cannot
+    change what a program does.  It found a join that could be woken early and
+    resume past itself, and two oracles that asserted an *order* rather than a
+    value - an order cannot hold at every quantum, and a program that prints
+    from two threads in some interleaving is racy by design rather than
+    wrong.
   - **Decided:** scheduling is **preemptive**, with an instruction budget per
     context checked between instructions.  A thread that never yields must not
     be able to freeze a user interface, which is why cooperative scheduling was
