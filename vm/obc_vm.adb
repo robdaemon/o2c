@@ -181,6 +181,11 @@ package body OBC_VM is
    type Natural_Array is array (Natural range <>) of Natural;
    type Natural_Array_Access is access Natural_Array;
 
+   --  A thread is runnable until its entry procedure returns.  Blocked and
+   --  the rest arrive with synchronisation; adding states at the end keeps
+   --  the existing ones meaningful.
+   type Thread_State is (Thread_Runnable, Thread_Done);
+
    type Context is record
       Stack       : U64_Array_Access := null;
       SP          : Natural := 0;
@@ -200,6 +205,16 @@ package body OBC_VM is
       --  because it is precisely what a thread must not be able to spend
       --  without giving the others a turn.
       Budget      : Natural := 0;
+      State       : Thread_State := Thread_Runnable;
+      --  True for a context the program spawned, which has no caller to
+      --  return to.  Its entry procedure returning ends the thread rather
+      --  than being the frame underflow it would be for the main context -
+      --  and keeping the main context's behaviour unchanged means a bad
+      --  return there is still reported instead of quietly ending the run.
+      Is_Thread   : Boolean := False;
+      --  Threads share the globals block: the interpreter keeps the root
+      --  context's array, so only the root loads it from the DATA section.
+      Loads_Globals : Boolean := True;
    end record;
    type Context_Access is access Context;
 
@@ -1468,10 +1483,14 @@ package body OBC_VM is
 
    begin
       if not Resuming then
-         --  module globals come from the DATA section (their initial values)
-         for I in 0 .. Img.N_Globals - 1 loop
-            Globals (I) := LE64 (Data, Img.Globals_Off + I * Const_Slot);
-         end loop;
+         --  Module globals come from the DATA section.  A thread shares the
+         --  root's block, so it must not reload - that would undo every
+         --  change the other threads had made.
+         if Ctx.Loads_Globals then
+            for I in 0 .. Img.N_Globals - 1 loop
+               Globals (I) := LE64 (Data, Img.Globals_Off + I * Const_Slot);
+            end loop;
+         end if;
 
          Frame_Slots (0) := Img.Procs (Img.Body_Proc).Frame_Slots;
          Locals_Used := Frame_Slots (0);
@@ -1696,6 +1715,10 @@ package body OBC_VM is
 
             when Op_Ret =>
                if Cur_Frame = 0 or else SP = 0 then
+                  if Ctx.Is_Thread then
+                     Ctx.State := Thread_Done;
+                     return Ok;
+                  end if;
                   return Bad_Stack;
                end if;
                declare
@@ -1709,6 +1732,10 @@ package body OBC_VM is
 
             when Op_Ret_Void =>
                if Cur_Frame = 0 then
+                  if Ctx.Is_Thread then
+                     Ctx.State := Thread_Done;
+                     return Ok;
+                  end if;
                   return Bad_Stack;
                end if;
                Locals_Used := Frame_Base (Cur_Frame);
@@ -2227,6 +2254,9 @@ package body OBC_VM is
                           (0 .. Natural'Max (Img.N_Globals, 1) - 1),
                       PC          => Img.Body_Off,
                       Budget      => Budget_Quantum,
+                      Loads_Globals => True,
+                      State       => Thread_Runnable,
+                      Is_Thread   => False,
                       Which_Frame => 0,
                       Frame_Base  =>
                         new Natural_Array'(0 .. Max_Frames - 1 => 0),
