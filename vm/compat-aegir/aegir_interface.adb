@@ -21,12 +21,14 @@ package body Aegir_Interface is
      return Cli_Code;
    type Stat_P    is access function (Name : String; Size : out File_Code)
      return File_Code;
+   type Del_P     is access function (Name : String) return File_Code;
 
    Unused_Init : constant Init_P    := Aegir_User.CLI.Init'Access;
    Get_Env     : constant Get_Env_P := Aegir_User.CLI.Get_Env'Access;
    Set_Env     : constant Set_Env_P := Aegir_User.CLI.Set_Env'Access;
    Stat        : constant Stat_P    := Aegir_User.Files.Stat'Access;
-   pragma Unreferenced (Unused_Init, Get_Env, Set_Env, Stat);
+   Delete      : constant Del_P     := Aegir_User.Files.Delete'Access;
+   pragma Unreferenced (Unused_Init, Get_Env, Set_Env, Stat, Delete);
    pragma Unreferenced (Cli_Ok, Cli_Fail, File_Ok);
 
    procedure Touch is

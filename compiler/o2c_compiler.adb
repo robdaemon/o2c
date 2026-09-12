@@ -7189,6 +7189,34 @@ package body O2c_Compiler is
                                  end;
                                  --  Native id 7: the third foreign entry.
                                  O2c_BC.Native_Call (7, 2);
+                              elsif Eq_No_Case (MNm, "Files")
+                                and then Eq_No_Case
+                                  (To_String (MName), "Delete")
+                                and then N_A = 1
+                              then
+                                 --  Files.Delete (name) is the exported form
+                                 --  of the FDel primitive: one string, no
+                                 --  result.
+                                 declare
+                                    SNm : constant String :=
+                                      To_String (Arg_R (1).Text);
+                                    SId : constant Natural := Find (SNm);
+                                 begin
+                                    if SId = 0
+                                      or else Syms (SId).UT = 0
+                                    then
+                                       raise O2c_BC.Wrong_Construct with
+                                         "bytecode backend: Files.Delete "
+                                         & "needs a declared ARRAY OF CHAR "
+                                         & "variable";
+                                    end if;
+                                    O2c_BC.Load_Addr_G
+                                      (O2c_BC.Global_Array
+                                         (Ada_Id (SNm),
+                                          Total_Slots (Syms (SId).UT)));
+                                 end;
+                                 --  Native id 9: foreign entry 5.
+                                 O2c_BC.Native_Call (9, 1);
                               else
                                  raise O2c_BC.Wrong_Construct with
                                    "bytecode backend: " & MNm & "."

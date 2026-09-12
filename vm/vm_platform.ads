@@ -32,4 +32,11 @@ package VM_Platform is
    --  the seam: the shared driver asks, and only the host can answer.
    function Quantum_Override return Natural;
 
+   --  Delete a file.  The host deletes it directly; the guest must ask its
+   --  file server, which is a capability it holds.  Oakwood's Files.Delete
+   --  has no status to report, so a failure here is not distinguishable from
+   --  success at the dialect level - deliberate, and the reason this is a
+   --  procedure rather than a function returning a code.
+   procedure Delete_File (Path : String);
+
 end VM_Platform;

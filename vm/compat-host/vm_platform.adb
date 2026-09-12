@@ -1,5 +1,6 @@
 --  Host body of VM_Platform: no runtime bookkeeping, just an exit status.
 with Ada.Command_Line;
+with Ada.Directories;
 with Ada.Environment_Variables;
 
 package body VM_Platform is
@@ -37,6 +38,16 @@ package body VM_Platform is
       N := Natural'Value (Raw);
       return N;
    end Quantum_Override;
+
+   procedure Delete_File (Path : String) is
+   begin
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         --  No status to report, and a missing file is not an error the
+         --  dialect can express.
+         null;
+   end Delete_File;
 
    procedure Exit_With (Ok : Boolean) is
    begin

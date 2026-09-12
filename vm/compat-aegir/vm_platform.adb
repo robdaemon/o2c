@@ -2,6 +2,7 @@
 --  trailer, cwd) and CLI.Exit_With closes the redirects, so the VM's
 --  output behaves like every other CLI program's.
 with Aegir_User.CLI;
+with Aegir_User.Files;
 with Aegir_Interface;
 
 package body VM_Platform is
@@ -55,6 +56,18 @@ package body VM_Platform is
       N := Natural'Value (Raw);
       return N;
    end Quantum_Override;
+
+   procedure Delete_File (Path : String) is
+      --  The file server's status is dropped on purpose: Oakwood's
+      --  Files.Delete has no status to report, so surfacing one here would
+      --  invent an API the dialect does not have.  A subsequent Stat is how a
+      --  program finds out whether it worked.
+      Status : constant Aegir_User.Files.U64 :=
+        Aegir_User.Files.Delete (Path);
+      pragma Unreferenced (Status);
+   begin
+      null;
+   end Delete_File;
 
    procedure Exit_With (Ok : Boolean) is
    begin

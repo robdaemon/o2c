@@ -12,6 +12,7 @@ with Interfaces;
 with Ada.Unchecked_Conversion;
 with VM_IO;
 with System.Storage_Elements;
+with VM_Platform;
 use type System.Storage_Elements.Integer_Address;
 
 package body OBC_VM is
@@ -384,6 +385,7 @@ package body OBC_VM is
       2 => (Sym => new String'("o2c_conv_toint"), Pops => 3),
       3 => (Sym => new String'("o2c_conv_fromint"), Pops => 2),
       4 => (Sym => new String'("o2c_conv_toreal"), Pops => 3),
+      5 => (Sym => new String'("o2c_fdel"), Pops => 1),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -397,6 +399,7 @@ package body OBC_VM is
       6 => 3,     --  o2c_conv_toint: str, var x, var res
       7 => 2,     --  o2c_conv_fromint: x (value), var str
       8 => 3,     --  o2c_conv_toreal: str, var x (REAL), var res
+      9 => 1,     --  o2c_fdel: the file name's address
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -1211,6 +1214,36 @@ package body OBC_VM is
       end Put_Str;
    begin
       case Idx is
+         when Max_Natives + 4 =>
+            --  o2c_fdel: id 9, foreign slot 5.  Void, one argument: the
+            --  address of the file name, NUL-terminated as all strings here
+            --  are.  The Aegir file server takes at most 48 bytes of name,
+            --  so a longer one is truncated rather than truncated-loudly -
+            --  noted rather than silently relied on.
+            declare
+               function Byte_At (A : U64; N : Natural) return Byte is
+                  B : Byte with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A)
+                       + System.Storage_Elements.Integer_Address (N));
+               begin
+                  return B;
+               end Byte_At;
+               Buf : String (1 .. 64);
+               N   : Natural := 0;
+               B   : Byte;
+            begin
+               loop
+                  B := Byte_At (Args (0), N);
+                  exit when B = 0 or else N = Buf'Last;
+                  N := N + 1;
+                  Buf (N) := Character'Val (Natural (B));
+               end loop;
+               if N > 0 then
+                  VM_Platform.Delete_File (Buf (1 .. N));
+               end if;
+               return Ok;
+            end;
          when Max_Natives + 3 =>
             --  o2c_conv_toreal: id 8, foreign slot 4.  Void, like ToInt -
             --  same three arguments, but the second is a REAL slot, so the

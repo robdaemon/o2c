@@ -103,6 +103,35 @@ else
    bad "Convert.ToInt no longer compiles: $(tail -1 "$WORK/ffi.log")"
 fi
 
+#  Files.Delete has a real side effect, so it is asserted by its EFFECT rather
+#  than by output: create a file, delete it from bytecode, check it is gone.
+#  A golden cannot express this - the program prints the same thing whether or
+#  not the delete happened, which is exactly the silent no-op this replaced.
+DFILE="$WORK/o2c_delme.txt"
+printf 'doomed\n' > "$DFILE"
+cat > "$WORK/del.ob2" <<EOB
+module Del;
+import Files, Out;
+var s: array 64 of char;
+begin
+  s := "$DFILE";
+  Files.Delete(s);
+  Out.Int(1, 0); Out.Ln
+end Del.
+EOB
+if timeout 60 "$FRONT" "$WORK/del.ob2" "$WORK/del.obc" >"$WORK/del.log" 2>&1; then
+   got="$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/del.obc" 2>/dev/null | tr -d '\n\r')"
+   if [ "$got" = "1" ] && [ ! -e "$DFILE" ]; then
+      note "  ok  Files.Delete removed the file (effect verified)"
+   elif [ -e "$DFILE" ]; then
+      bad "Files.Delete ran but the file is still there"
+   else
+      bad "the Files.Delete probe printed '$got', expected 1"
+   fi
+else
+   bad "Files.Delete no longer compiles: $(tail -1 "$WORK/del.log")"
+fi
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0
