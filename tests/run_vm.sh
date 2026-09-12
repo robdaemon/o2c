@@ -383,6 +383,23 @@ else
    bad "join.asm failed: $(cat "$WORK/join.err")"
 fi
 
+#  The Aegir coupling surface is fixed and small.  A new site that reaches into
+#  Aegir without anyone noticing is how a false claim about the other repo gets
+#  written down - the rule is "use its API or check it", and this is the check:
+#  every one of these four files is auditable, and a fifth has to be deliberate.
+AEGIR_SITES="vm/vm_platform.ads
+vm/compat-aegir/vm_platform.adb
+vm/compat-aegir/aegir_interface.adb
+compiler/o2c_compiler.adb"
+found="$(cd "$ROOT" && grep -rl "Aegir_User" --include=*.adb --include=*.ads \
+           vm/ compiler/ tools/ 2>/dev/null | grep -v '/obj' | sort)"
+want="$(printf '%s\n' "$AEGIR_SITES" | sort)"
+if [ "$found" = "$want" ]; then
+   note "the Aegir coupling surface is the four expected files"
+else
+   bad "the Aegir coupling surface changed: $(printf '%s' "$found" | tr '\n' ' ')"
+fi
+
 #  SPAWN starts a thread.  main spawns Worker and halts, so Worker only
 #  produces its output if the scheduler gives a context other than the root
 #  a turn after the root is already done.

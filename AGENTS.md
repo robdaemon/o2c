@@ -71,6 +71,8 @@ are not. The coupling is real; it just needs writing down.
   symbols through `OBC_VM.Native_Id`; the emitter carries that dependency so
   the compiler does not grow a second path to the VM.
 - **Host-only targets** — `make vm-host`, `make tools-host` — need no Aegir.
+  **`AEGIR_ROOT` is required** for anything touching the Aegir side:
+  `make build AEGIR_ROOT=…`, and the guest tests.
 
 **Never describe the other repo in prose — use its API, or check it.** A
 comment in `vm/compat-aegir/` once asserted that the guest has no environment.
@@ -88,8 +90,6 @@ It is an interface check, evaluated against whatever Aegir is now. A unit
 nothing calls is never compiled (gprbuild builds only what a main can reach),
 so it is reached from `VM_Platform.Init` — an unreached probe passes while
 checking nothing, which is how its first version behaved.
-  **`AEGIR_ROOT` is required** for anything touching the Aegir side:
-  `make build AEGIR_ROOT=…`, and the guest tests.
 
 **If you add a directory to the VM, add it to both gprs.** A missing source
 directory does *not* announce itself as a build failure at the point of use —
