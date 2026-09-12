@@ -348,21 +348,35 @@ guesses at the condition were wrong.
 `tests/bc/ffi.ob2` holds the golden, and `tests/bytecode_gaps.sh` asserts the
 converted value rather than merely that it compiles.
 
-**The FFI surface, by which primitives the embedded sources actually call.**
-Measured by searching each `Oak_*_Src` body for `Name (` - the CALL, not the
-declaration, which is a distinction this file got wrong once already:
+**The FFI surface, measured from the exported procedure BODIES.** This is the
+only method that has held up; three earlier attempts here went wrong, twice by
+searching for a declaration instead of a use and once by requiring `Name (` when
+the primitive takes no arguments (`PlaneClear`, `InOpen`).
 
-    Files     FDel FRename FStat FRead FWrite FClose
-    Env       EnvGet EnvSet
-    Args      ArgGet
-    XYplane   PlaneOpen PlaneDot
-    In        InName
+    Env.Get  (name, var value)      -> EnvGet (name, value)        thin
+    Env.Set  (name, value)          -> EnvSet (name, value)        thin
+    Args.Get (n, var arg, var res)  -> ArgGet (n, arg, res)        thin
+    XYplane.Clear                   -> PlaneClear                  thin
+    XYplane.Dot (x, y, mode)        -> PlaneDot (x, y, mode)       thin
+    XYplane.IsDot (x, y): boolean   -> PlaneIsDot (x, y)           thin, RETURNS
+    XYplane.Key: char               -> PlaneKey                    thin, RETURNS
+    XYplane.Open                    -> X:=0;Y:=0;W:=640;H:=400;    HAS LOGIC
+                                       PlaneOpen (W, H)
+    In.Open / String / Name         -> one primitive each          thin
 
-Two corrections to the earlier "ten FFI helpers" list. `XYplane.PlaneClear` and
-`In.InReset`/`InWord` are **not called by their own module sources**, so the
-statement branches that recognise them are unreachable and there is nothing to
-implement for them. Conversely `Files` reaches six primitives, not two, and four
-of those six were never on the list.
+    Files.Delete (name)             -> FDel (name)                 thin    DONE
+    Files.Rename (from, dst)        -> FRename (from, dst)         thin    DONE
+    Files.Old / Read / Write / Close / New                         HAS LOGIC
+
+So the picture is the opposite of what `Files` alone suggested. **Everything
+outside `Files` is a thin wrapper**, and only two procedures have real logic -
+`XYplane.Open`, which sets four module globals before calling its primitive, and
+the `Files` readers, which allocate and copy. A thin wrapper is inline-able at
+its call site; the two with logic are not.
+
+Correction to the earlier entry, which said `PlaneClear` and `InOpen` were never
+called: they are, from `XYplane.Clear` and `In.Open`. The regex that missed them
+required a `(` and they take no arguments.
 
 **Each primitive, and the exported procedure that reaches it.** Read from the
 `Oak_Files_Src` bodies rather than from the names, which is the only way that
