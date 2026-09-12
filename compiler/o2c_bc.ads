@@ -139,6 +139,9 @@ package O2c_BC is
    --  value holds - and the type guarantees it takes no arguments and
    --  returns no result.
    procedure Call_Indirect;
+   --  Start a thread on the procedure id on top of the stack, consuming it.
+   --  The entry point is a procedure value, so it may come from a variable.
+   procedure Spawn;
 
    --  Push a procedure id: what a PROCEDURE-typed value is.  One slot, and
    --  the VM already numbers procedures, so a procedure value needs no

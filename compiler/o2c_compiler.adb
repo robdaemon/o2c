@@ -7581,6 +7581,54 @@ package body O2c_Compiler is
                      end;
                   end if;
                end;
+            elsif Cur.Kind = Lex.Tok_Dot
+              and then Head (1 .. H_Len) = "Threads"
+            then
+               --  Threads.Start (p): start a thread on a procedure value, so
+               --  the argument may be a name or a PROCEDURE-typed variable -
+               --  the same value that b() calls through.  A sibling branch of
+               --  the Out case rather than a case inside it, because what
+               --  follows is Out's own argument handling and a Threads call
+               --  must not fall through into it.
+               Next;                        --  past '.'
+               Expect (Lex.Tok_Ident, "a member name after '.'");
+               if Cur.Text (1 .. Cur.Len) /= "Start" then
+                  raise O2c_Error with "Threads provides only Start (found '"
+                    & Cur.Text (1 .. Cur.Len) & "')";
+               end if;
+               if not O2c_BC.Bytecode_Mode then
+                  raise O2c_Error with "Threads needs the bytecode backend "
+                    & "(the Ada backend has no threads)";
+               end if;
+               Next;                        --  past Start -> '('
+               Expect (Lex.Tok_LParen, "'(' after Threads.Start");
+               Next;
+               Expect (Lex.Tok_Ident, "a procedure or a PROCEDURE-typed "
+                       & "variable");
+               declare
+                  Arg : constant String := Cur.Text (1 .. Cur.Len);
+                  AI  : constant Natural := Find (Arg);
+               begin
+                  Next;                     --  past the argument
+                  Expect (Lex.Tok_RParen, "')' after Threads.Start");
+                  Next;
+                  if AI > 0
+                    and then Syms (AI).Kind = S_Proc
+                    and then not Syms (AI).Ret
+                    and then Syms (AI).Bc_Proc /= 0
+                  then
+                     O2c_BC.Push_BC_Proc (Syms (AI).Bc_Proc);
+                  elsif AI > 0 and then Syms (AI).UT > 0
+                    and then UTypes (Syms (AI).UT).Is_Proc
+                  then
+                     Bc_Load (Arg);
+                  else
+                     raise O2c_Error with "Threads.Start needs a "
+                       & "parameterless procedure or a PROCEDURE-typed "
+                       & "variable (found '" & Arg & "')";
+                  end if;
+                  O2c_BC.Spawn;
+               end;
             elsif Cur.Kind = Lex.Tok_Dot then
                --  Out.String / Out.Int / Out.Ln
                Next;
