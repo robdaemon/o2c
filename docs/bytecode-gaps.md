@@ -348,6 +348,31 @@ guesses at the condition were wrong.
 `tests/bc/ffi.ob2` holds the golden, and `tests/bytecode_gaps.sh` asserts the
 converted value rather than merely that it compiles.
 
+**A thin wrapper is necessary but NOT sufficient - the primitive behind it
+decides the cost.** `In.Open`/`String`/`Name` are one call each, but the
+primitives they call are a real tokenizer: `O2c_In_Name` calls `O2c_In_Token`,
+which calls `O2c_In_Skip` and `O2c_In_Load`, over a line buffer with a
+position. That is the Ada backend's shadow implementation of input, and the VM
+would have to grow the same state. Same shape as the plane (below) and as the
+`Files` readers.
+
+So the exported bodies say which procedures are reachable; they do not say how
+much work each is. The cost is in the primitive, and the Ada backend's helper
+for that primitive is the spec.
+
+**`XYplane` needs no platform seam.** The Ada backend does not touch hardware:
+it keeps a shadow plane in the program (`Plane`, `Plane_W`, `Plane_H`), with
+`O2c_Plane_Open` sizing and zeroing it, `O2c_Plane_Clear` zeroing it,
+`O2c_Plane_Dot` setting a cell and `O2c_Plane_IsDot` reading one. The VM should
+hold the same state itself - it is not a per-platform question, and adding a
+seam for it would be inventing a difference that does not exist.
+
+And `XYplane` has an observability constraint worth stating: `Dot` has no
+observable effect without `IsDot`, and `IsDot` is a FUNCTION, so it goes through
+the expression path rather than the statement path every helper so far has used.
+The minimal verifiable `XYplane` unit is therefore Open + Dot + IsDot together,
+spanning both paths.
+
 **The FFI surface, measured from the exported procedure BODIES.** This is the
 only method that has held up; three earlier attempts here went wrong, twice by
 searching for a declaration instead of a use and once by requiring `Name (` when
