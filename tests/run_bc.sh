@@ -86,6 +86,23 @@ else
    bad "gclive.ob2 did not compile: $(cat "$WORK/glive.compile")"
 fi
 
+#  ---- calling a procedure value, end to end ------------------------------
+#  Compiling is not enough here: the value has to reach the call.  The first
+#  cut pushed the procedure id and never stored it, so the variable kept the
+#  zeroed slot and the call went to procedure 0 - which compiles cleanly and
+#  fails only at run time.
+if ! timeout 120 "$FRONT" "$ROOT/tests/bc/proccall.ob2" "$WORK/pcall.obc" \
+   >"$WORK/pcall.compile" 2>&1; then
+   bad "proccall.ob2 did not compile: $(cat "$WORK/pcall.compile")"
+elif ! timeout 60 "$VM" "$WORK/pcall.obc" >"$WORK/pcall.out" 2>"$WORK/pcall.err"
+then
+   bad "proccall.ob2 failed to run: $(cat "$WORK/pcall.err")"
+elif diff -u "$ROOT/tests/bc/proccall.out" "$WORK/pcall.out" >/dev/null; then
+   note "positive: proccall.ob2 calls a procedure value and prints the golden"
+else
+   bad "proccall.ob2 output differs: $(cat "$WORK/pcall.out")"
+fi
+
 #  ---- procedure types: the minimal form, and its refusal -----------------
 #  A procedure type with no parameters and no result: a value is a procedure
 #  id with no environment, which is what makes it cheap.  Parameter lists are

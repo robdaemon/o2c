@@ -7563,6 +7563,10 @@ package body O2c_Compiler is
                                 and then not Syms (RS).Ret
                               then
                                  O2c_BC.Push_BC_Proc (Syms (RS).Bc_Proc);
+                                 --  Store it: pushing alone leaves the
+                                 --  variable holding whatever it held, which
+                                 --  for a fresh one is the zeroed slot.
+                                 Bc_Store (Head (1 .. H_Len));
                                  Next;
                               else
                                  raise O2c_Error with "'"
@@ -7766,72 +7770,97 @@ package body O2c_Compiler is
                   end if;
                end;
             elsif Cur.Kind = Lex.Tok_LParen then
-               if Idx = 0 or else Syms (Idx).Kind /= S_Proc then
-                  raise O2c_Error with "'" & Head (1 .. H_Len)
-                    & "' is not a declared procedure (line "
-                    & Natural'Image (Cur.Line) & ")";
-               end if;
-               Next;
-               declare
-                  Args : array (1 .. Max_Params) of Unbounded_String;
-                  N_A  : Natural := 0;
-                  Call : Unbounded_String;
-               begin
-                  loop
-                     exit when Cur.Kind = Lex.Tok_RParen;
-                     N_A := N_A + 1;
-                     if N_A > Max_Params then
-                        raise O2c_Error with "too many arguments";
-                     end if;
-                     declare
-                        A : Expr_Rec :=
-                          Parse_Actual (Syms (Idx).P (N_A));
-                     begin
-                        Args (N_A) := A.Text;
-                     end;
-                     exit when Cur.Kind /= Lex.Tok_Comma;
+               if O2c_BC.Bytecode_Mode
+                 and then Idx > 0
+                 and then Syms (Idx).Kind /= S_Proc
+                 and then Syms (Idx).UT > 0
+                 and then UTypes (Syms (Idx).UT).Is_Proc
+               then
+                  --  Calling a procedure value: the callee is whatever the
+                  --  variable holds, so load it and call through it.  Such a
+                  --  procedure takes no arguments by definition, so there is
+                  --  no argument list to parse - which is why this is a
+                  --  separate branch and not a variant of the code below.
+                  declare
+                     --  Capture the name before advancing: Head is a lexer
+                     --  buffer that Next overwrites, so reading it after the
+                     --  tokens have moved on gives the wrong identifier.
+                     Var : constant String := Ada_Id (Head (1 .. H_Len));
+                  begin
                      Next;
-                  end loop;
-                  if N_A /= Syms (Idx).Params then
-                     raise O2c_Error with Head (1 .. H_Len) & " expects "
-                       & Natural'Image (Syms (Idx).Params)
-                       & " argument(s), got " & Natural'Image (N_A);
+                     Expect (Lex.Tok_RParen, "')' after a procedure value");
+                     Next;
+                     Bc_Load (Var);
+                     O2c_BC.Call_Indirect;
+                  end;
+               else
+                  if Idx = 0 or else Syms (Idx).Kind /= S_Proc then
+                     raise O2c_Error with "'" & Head (1 .. H_Len)
+                       & "' is not a declared procedure (line "
+                       & Natural'Image (Cur.Line) & ")";
                   end if;
-                  Expect (Lex.Tok_RParen, "')'");
                   Next;
-                  if O2c_BC.Bytecode_Mode then
-                     --  A call to something the emitter never opened is an
-                     --  imported or undeclared procedure: fail loudly rather
-                     --  than emit a call to procedure 0.
-                     if Syms (Idx).Bc_Proc = 0 then
-                        raise O2c_Error with "bytecode backend: call to '"
-                          & Head (1 .. H_Len)
-                          & "' resolved to symbol "
-                          & Natural'Image (Idx) & " named '"
-                          & To_String (Syms (Idx).Name)
-                          & "' (kind " & Sym_Kind'Image (Syms (Idx).Kind)
-                          & ", params" & Natural'Image (Syms (Idx).Params)
-                          & ") with no procedure id";
+                  declare
+                     Args : array (1 .. Max_Params) of Unbounded_String;
+                     N_A  : Natural := 0;
+                     Call : Unbounded_String;
+                  begin
+                     loop
+                        exit when Cur.Kind = Lex.Tok_RParen;
+                        N_A := N_A + 1;
+                        if N_A > Max_Params then
+                           raise O2c_Error with "too many arguments";
+                        end if;
+                        declare
+                           A : Expr_Rec :=
+                             Parse_Actual (Syms (Idx).P (N_A));
+                        begin
+                           Args (N_A) := A.Text;
+                        end;
+                        exit when Cur.Kind /= Lex.Tok_Comma;
+                        Next;
+                     end loop;
+                     if N_A /= Syms (Idx).Params then
+                        raise O2c_Error with Head (1 .. H_Len) & " expects "
+                          & Natural'Image (Syms (Idx).Params)
+                          & " argument(s), got " & Natural'Image (N_A);
                      end if;
-                     if Syms (Idx).Foreign_Native /= 0 then
-                        --  A foreign procedure: CALL_NATIVE rather than a
-                        --  call to a body it does not have.
-                        O2c_BC.Native_Call (Syms (Idx).Foreign_Native,
-                                            Syms (Idx).Params);
-                     else
-                        O2c_BC.Call_Proc (Syms (Idx).Bc_Proc);
+                     Expect (Lex.Tok_RParen, "')'");
+                     Next;
+                     if O2c_BC.Bytecode_Mode then
+                        --  A call to something the emitter never opened is an
+                        --  imported or undeclared procedure: fail loudly rather
+                        --  than emit a call to procedure 0.
+                        if Syms (Idx).Bc_Proc = 0 then
+                           raise O2c_Error with "bytecode backend: call to '"
+                             & Head (1 .. H_Len)
+                             & "' resolved to symbol "
+                             & Natural'Image (Idx) & " named '"
+                             & To_String (Syms (Idx).Name)
+                             & "' (kind " & Sym_Kind'Image (Syms (Idx).Kind)
+                             & ", params" & Natural'Image (Syms (Idx).Params)
+                             & ") with no procedure id";
+                        end if;
+                        if Syms (Idx).Foreign_Native /= 0 then
+                           --  A foreign procedure: CALL_NATIVE rather than a
+                           --  call to a body it does not have.
+                           O2c_BC.Native_Call (Syms (Idx).Foreign_Native,
+                                               Syms (Idx).Params);
+                        else
+                           O2c_BC.Call_Proc (Syms (Idx).Bc_Proc);
+                        end if;
                      end if;
-                  end if;
-                  Call := Call & Head (1 .. H_Len) & " (";
-                  for I in 1 .. N_A loop
-                     if I > 1 then
-                        Call := Call & ", ";
-                     end if;
-                     Call := Call & Args (I);
-                  end loop;
-                  Call := Call & ");";
-                  Append_Body ("      " & To_String (Call));
-               end;
+                     Call := Call & Head (1 .. H_Len) & " (";
+                     for I in 1 .. N_A loop
+                        if I > 1 then
+                           Call := Call & ", ";
+                        end if;
+                        Call := Call & Args (I);
+                     end loop;
+                     Call := Call & ");";
+                     Append_Body ("      " & To_String (Call));
+                  end;
+               end if;
             elsif Cur.Kind = Lex.Tok_Assign then
                if Idx = 0 or else Syms (Idx).Kind /= S_Var then
                   raise O2c_Error with "'" & Head (1 .. H_Len)
