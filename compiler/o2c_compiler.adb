@@ -3411,6 +3411,34 @@ package body O2c_Compiler is
                        & "('" & LNm & "' is not one) (line "
                        & Natural'Image (Cur.Line) & ")";
                   end if;
+                  if O2c_BC.Bytecode_Mode then
+                     --  LEN had NO bytecode emission at all - only the Ada
+                     --  text below - so `i < len (name)` left the comparison a
+                     --  value short and the VM rejected the entire image as
+                     --  malformed.  Where the length lives depends on the array:
+                     if Syms (LId).Open_Arr then
+                        --  An ARRAY OF parameter travels as TWO slots, the
+                        --  address and then its length (see the parameter
+                        --  linkage in Decl_Procedure).
+                        declare
+                           Sl : constant Integer :=
+                             O2c_BC.Local_Slot (Ada_Id (LNm));
+                        begin
+                           if Sl < 0 then
+                              raise O2c_BC.Wrong_Construct with "bytecode "
+                                & "backend: LEN of an unknown parameter";
+                           end if;
+                           O2c_BC.Load_Local (Natural (Sl) + 1);
+                        end;
+                     elsif Syms (LId).UT /= 0
+                       and then UTypes (Syms (LId).UT).Arr_Len > 0
+                     then
+                        O2c_BC.Push_Int (UTypes (Syms (LId).UT).Arr_Len);
+                     else
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                          & "LEN of '" & LNm & "' has no known length";
+                     end if;
+                  end if;
                   R.Text := To_Unbounded_String (LNm) & "'Length";
                   R.Typ := T_Int;
                   Next;

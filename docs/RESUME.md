@@ -7,7 +7,7 @@ Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
     commits         311
-    fixtures        76 in tests/bc/
+    fixtures        77 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -868,6 +868,55 @@ that is where to look next: a fixture per construct, not a Files-shaped one.
 So the sequence for 3d is now: exercise those constructs directly, fix whichever
 is unbalanced, then the end-to-end check (`Files.Old` + `Files.Length`) should
 pass - `Files.Length` being the one-slot control case.
+
+
+### 3q. DONE — LEN; and the bisect that found it
+
+The underflow in 3p was `LEN`, which had **no bytecode emission at all** - only
+Ada text was produced:
+
+    if Eq_No_Case (Cur.Text (1 .. Cur.Len), "LEN") then
+       ...
+       R.Text := To_Unbounded_String (LNm) & "'Length";
+       R.Typ  := T_Int;                --  and nothing pushed
+
+So `i < len (name)` left the comparison a value short, and the VM rejected the
+whole image:
+
+    vm: internal error in phase 3: CONSTRAINT_ERROR (obc_vm.adb:2129 range check
+    failed)          --  Top's "return Stack (SP - 1)", an operand-stack underflow
+
+**Where the length lives depends on the array**, which is why one emission is not
+enough: a known-length array's length is its declared one (a constant at the use
+site), and an `ARRAY OF` parameter's length is the CALLER's, in the parameter's
+second slot (the `#alen-` slot the parameter linkage interns).  Both cases are
+emitted; anything else refuses.
+
+**The bisect is the reusable part.**  The constructs in `Files.Old` were tested
+one at a time, as local procedures in main modules with no Files involved:
+
+    c1  new(f) + f^.name[0] := "x" + read back ........ works
+    c2  len(name) on an OPEN array .................... MALFORMED  <- this one
+    c3  f^.name[i] := name[i] ......................... runs, copies NOTHING
+    d1  f^.size := 7 through a pointer, read back ..... works
+    d2  f^.name[i] := nm[i] from a GLOBAL array ....... works
+    d3  read name[0] / name[i] of an OPEN parameter ... prints BLANKS
+
+Each is a main module with no imports, so a failure cannot be about the call, the
+module boundary or the builtin - only about the construct.  `c2` was the first
+failure and the fix above is its fix.
+
+**Fixture**: `tests/bc/lenopen.ob2`.  Its last two lines call the same procedure
+with arrays of DIFFERENT lengths; a length taken from the declaration instead of
+from the caller would pass the first two lines and fail those - which is the
+point of writing it that way.  It is corroborated by BOTH backends (48 fixtures
+corroborated now, up from 47): the Ada side and the VM agree on all four numbers.
+
+**Still broken, and it is what breaks `Files.Old`** (which copies `name[i]` into
+its record): reading an element of an `ARRAY OF` parameter - `d3`, constant and
+variable index alike - prints blanks, in SILENCE.  `d2` shows it is specific to
+the open array: the same store from a global array works.  So the next step is
+the open-array element READ, and `d3` is its minimal reproduction.
 
 
 ## 4. Method — what worked, and what did not
