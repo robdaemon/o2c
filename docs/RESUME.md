@@ -1,18 +1,19 @@
 # RESUME — starting point for the next session
 
 Written at the end of a long session on the bytecode backend's FFI surface,
-then corrected by the unary-operator session that followed it.
+then corrected and extended by the two sessions that followed it - the unary
+operators, then construct coverage.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
-    HEAD            a1f424d  (bc: unary operators were silent ...)
-    commits         294
-    fixtures        65 in tests/bc/
+    HEAD            d8312f5 (bc: LOOP/EXIT were silent) - docs commit on top
+    commits         297
+    fixtures        68 in tests/bc/
     foreign natives 21 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
 ## 1. Where things stand
 
-**All four suites pass** — run them before touching anything, to confirm the
+**All six suites pass** — run them before touching anything, to confirm the
 starting point is what this file claims:
 
     export AEGIR_ROOT=/home/rroland/src/aegir
@@ -23,6 +24,7 @@ starting point is what this file claims:
     timeout 3000 tests/run_stress.sh
     timeout 1800 tests/run_m1.sh          # the guest build; catches Aegir-side breaks
     timeout 300  tests/bytecode_gaps.sh   # the executable half of the checklist
+    timeout 300  tests/coverage.sh        # every lexer token kind is exercised
 
 `make build` / `make vm-host` / `make tools-host` / `make vm-aegir`, all with
 `AEGIR_ROOT=...`, build clean with zero warnings.
@@ -117,30 +119,63 @@ discard — and every other stack site — is unaffected.
 AND/OR opcodes, and the spec has none — `docs/obc-image.md` puts BOOLEAN at
 0x66/0x67/0x68 (BEQ/BNE/BTEST) with 0x72–0x7F reserved.
 
-### 3b. Coverage: a fixture per construct
+### 3b. DONE — `tests/coverage.sh`, and it is not a grep
 
 The language's surface is the lexer's token kinds
 (`compiler/o2c_lexer.ads`, `Tok_*`). A construct with no fixture cannot be
 checked by a differential, because a construct no test uses cannot disagree.
 
-A first pass over `tests/bc`, `samples` and `tests/vm` found exactly two token
-kinds with no fixture anywhere — `>=` and `or`. `>=` works; `or` is 3a. Make the
-check standing: **grep the corpus for each `Tok_*` spelling and require a hit.**
+The check is now standing, and it differs from what this section originally
+prescribed in the two places that mattered. The original was: *grep the corpus
+for each `Tok_*` spelling and require a hit.* It reported "exactly two token
+kinds with no fixture anywhere — `>=` and `or`", and **both halves of that were
+wrong: the real number is seven, and a hit says nothing about whether the
+construct works.**
 
-Two corrections to that method, both learned by running it:
+- **The corpus must be `tests/bc` only.** The grep also walked `samples` and
+  `tests/vm`. `~`, `loop`, `exit` and `by` all appear in `samples/hello.ob2`,
+  which no test and no Makefile target compiles, and `tests/vm/*.asm` is
+  assembly whose comments are full of keyword-shaped words. So four constructs
+  read as "covered" while three of them were silently wrong in bytecode.
+- **The tokens must come from the lexer, not a pattern.** `tools/o2c_tokscan`
+  lexes the corpus and reports the kinds that occur, so a token inside a comment
+  cannot count and `>=` cannot be confused with `>` followed by `=`.
+- **Every unexercised kind must be exempt or a RECORDED known gap** with a probe
+  pinning its current behaviour, so the list cannot decay: a gap that is
+  silently fixed fails the check.
 
-- **Its verdict on a construct was wrong.** It found the construct with no
-  fixture, then recorded the wrong reason `or` failed; and it counted `~` as
-  covered because `samples/hello.ob2` contains one, although no test and no
-  Makefile target ever compiles that file. Coverage says *where to look*, not
-  what is there — and a hit only counts if the backend actually runs it.
-- **A second pass finds a third gap.** `for i := 3 to 1` never runs its body:
-  `Asc` comes from whether the `BY` text starts with `-`, and the way to ask for
-  a descent — `by -1` — is rejected with "FOR BY must be an integer constant",
-  because `-1` reaches the header as the text `-(1)`. The header's digit check
-  even allows a leading `-`, so `by -1` was *meant* to work; the unary-minus text
-  form defeats it. No fixture and no doc mentions either spelling. Not caused by
-  the unary-operator fix (that fix is depth-neutral); diagnosed, not fixed.
+What the seven were, and what became of them:
+
+    TOK_GE  `>=`      works - no fixture.  Now tests/bc/relops.ob2 (value-locked,
+                      and written so `>=`/`>` differ on a = b, which a single
+                      mis-emitted opcode could not survive).
+    TOK_BY  `by`      works - no fixture.  Now tests/bc/forstep.ob2.  Worth a
+                      fixture because the step is used from its TEXT, not the
+                      stack, so a stray slot is invisible in a golden.
+    TOK_LOOP/TOK_EXIT  SILENTLY WRONG - the body ran once, EXIT did nothing, so
+                      an infinite loop terminated.  FIXED (3e).
+    TOK_AMP `&`       refuses loudly.  Known gap, pinned in coverage.sh.
+    TOK_OR  `or`      refuses loudly.  Known gap, pinned in coverage.sh.
+    TOK_AND `AND`     reserved by the lexer and never parsed - a grammar hole,
+                      not a missing operator.  Known gap, pinned.
+    TOK_ERROR         not a construct - exempt.
+
+Descending FOR is the one known gap coverage CANNOT see, and that is the point
+of the caveat at the end of this section: its tokens (`FOR`, `TO`, `BY`,
+`MINUS`) are all exercised by ascending loops, so the token check passes while
+the construct is wrong. It is pinned by a probe in `coverage.sh` instead. `for i
+:= 3 to 1` never runs its body, because `Asc` comes from whether the `BY` text
+starts with `-`, and the way to ask for a descent — `by -1` — is rejected with
+"FOR BY must be an integer constant": `-1` reaches the header as the text
+`-(1)`. The header's digit check even allows a leading `-`, so `by -1` was
+*meant* to work. **A value fixture cannot hold this**: asserting that `3 to 1`
+sums to 0 would be asserting wrongness as if it were correct, which is why it
+lives as a known-gap probe and not in tests/bc.
+
+**The lesson: coverage says where to look, not what is there.** It found the
+constructs no test reached; it could not tell that three of them were wrong, and
+the one construct that is wrong while fully covered is invisible to it by
+construction. That is 3c's job.
 
 ### 3c. Differential: run the corpus through both backends
 
@@ -174,6 +209,29 @@ Deferred, and now **sized** rather than open. Reading the bodies settled it:
   places. **Scope it to the modules that can actually compile** — Files, Env,
   Args, XYplane, In — leaving Strings, Texts, Math, MathL, Input, Term on the
   Ada path, no worse off than today.
+
+### 3e. DONE — `LOOP` / `EXIT`
+
+The third member of the silent wrong-image class, and the worst: found by 3b's
+coverage check, not by a fixture. `Parse_Loop` and `Parse_Exit` appended only
+Ada text, so in bytecode mode `LOOP` emitted no back-jump and `EXIT` emitted
+nothing. **An infinite loop terminated**: `loop i := i + 1 end` printed 1.
+
+Fixed by giving bytecode what the Ada text gets for free: a top label and a
+back-jump in `Parse_Loop`, and an exit label — recorded per depth in
+`Bc_Loop_Exit` alongside the text-label array `Loop_Lbl`, both bounded by the
+same checked limit — that `Parse_Exit` jumps to. Leaving a nested `WHILE`/`FOR`
+needs no unwinding: frames are frame slots and every loop is jumps.
+
+`tests/bc/loopexit.ob2` is written for that last point. Its fourth case is an
+`EXIT` from inside a nested `WHILE`, and if the exit target were the `WHILE`'s
+the program would not print a wrong number — **it would never terminate**,
+which is why the fixtures run under a timeout. Coverage cannot see a wrong exit
+target; only executing it can.
+
+For the next silent-image hunt: coverage found this only because `loop`/`exit`
+had NO fixture. A construct that is exercised AND wrong is invisible to
+coverage — that is exactly the descending-FOR entry in 3b, and it is 3c's job.
 
 ## 4. Method — what worked, and what did not
 
@@ -215,6 +273,9 @@ message while changing nothing; `git status` was clean. After any scripted edit,
 - **`tools/bin/o2c_bc_host` links the compiler sources.** After changing any
   `compiler/*.adb` you MUST `rm -f tools/bin/o2c_bc_host && make tools-host`,
   or you will debug a stale binary. `make build` alone is not enough.
+  `tools/bin/o2c_tokscan` links the lexer and is the coverage check's oracle -
+  it is built by the same `make tools-host`, and a stale one would report
+  coverage for a lexer that no longer exists.
 - **The `VM_Platform` seam is three files per platform**, not two: the spec, the
   body, and the probe in `vm/compat-aegir/aegir_interface.adb`. Missing the
   Aegir *body* passes all three host suites and only `run_m1` notices.
@@ -236,13 +297,16 @@ message while changing nothing; `git status` was clean. After any scripted edit,
 
     docs/bytecode-gaps.md      the checklist; section A is generated
     tests/bytecode_gaps.sh     the executable half — asserts the working set
+    tests/coverage.sh          every lexer token kind is exercised, or a recorded gap
     tests/run_bc.sh            fixtures in tests/bc/ (.ob2 + .out golden)
     tests/run_m1.sh            the guest build and the Ada-vs-VM diff
     compiler/o2c_compiler.adb  ~11k lines; the FFI call sites are near the end
+    compiler/o2c_lexer.ads     the token kinds coverage is measured against
     vm/obc_vm.adb              the VM; natives are in the native dispatch
     vm/vm_platform.ads         the seam spec
     vm/compat-host|aegir/      the two seam bodies
     tools/o2c_bc_host.adb      the host front end; takes libs as extra args
+    tools/o2c_tokscan.adb      lexes a corpus and reports the kinds it finds
 
 ## 7. One thing to decide early — DECIDED
 

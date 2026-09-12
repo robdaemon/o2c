@@ -352,35 +352,56 @@ TERMINATE, which is why the fixtures are run under a timeout.
     require a fixture for each. Finds UNEXERCISED constructs, which the
     differential cannot: a construct no test uses cannot disagree.
 
-  The second one is not theoretical, but running it also shows why it is not
-  enough. It found exactly two token kinds with no fixture anywhere - `>=` and
-  `or` - and the first reading of the `or` result was WRONG:
+  The second one is not theoretical, but the first attempt at it was wrong in
+  two ways at once, and both are worth keeping.
 
-      INTEGER >=   works        REAL >=   works
-      BOOLEAN or   Ada backend accepts, bytecode refuses   <- the REAL gap
-      SET or       rejected by BOTH backends
+  It grepped tests/bc AND samples AND tests/vm and reported "exactly two token
+  kinds with no fixture anywhere - `>=` and `or`". The real answer over the
+  corpus this backend RUNS (tests/bc) is SEVEN. The extra hits came from files
+  nothing compiles: `~`, `loop`, `exit` and `by` all appear in
+  samples/hello.ob2, and tests/vm/*.asm is assembly whose comments are full of
+  keyword-shaped words. And a hit was treated as evidence the construct WORKS,
+  which is how `not`, unary `-` and LOOP/EXIT scored as "covered" while all
+  three were silently wrong (A.1).
 
-  The earlier version of this file recorded "SET or: the Ada backend ACCEPTS
-  this". It does not. The operand-type check at o2c_compiler.adb:4443 runs
-  BEFORE the Bytecode_Mode test, so SET operands raise the same O2c_Error in
-  either mode - a FRONT-END limit, not a backend divergence, and therefore
-  something no differential could ever have found, because both backends agree.
-  Measured by calling the Ada-text entry point `O2c_Compiler.Compile` (the M1
-  door, which never sets Bytecode_Requested): `c := a or b` raises, while
-  `c := a + b` and `b := (1=1) or (2=3)` both compile. The site's two mode
-  branches had been crossed - `" or "` is emitted on the BOOLEAN branch, which
-  bytecode refuses two lines earlier, while the SET branch is the one that
-  raises. `or` on a SET is not Oberon-2 set union either; `+` is, and works.
+      INTEGER >=   works (no fixture - now relops.ob2)
+      BY           works (no fixture - now forstep.ob2)
+      BOOLEAN or   Ada backend accepts, bytecode refuses   <- a real gap
+      BOOLEAN &    same
+      AND          reserved by the lexer, NEVER PARSED - a hole in the grammar
+      LOOP / EXIT  were silently wrong - the body ran once, EXIT did nothing
+      SET or       rejected by BOTH backends - not a gap, see below
 
-  Coverage also counted a hit that does not cover the backend. `~` appears in
-  samples/hello.ob2, which NO test and NO Makefile target ever compiles, so
-  Tok_Tilde read as "covered" while `not` was silently wrong in bytecode (A.1).
-  A grep over "the corpus" is only as good as the corpus being the one the
-  backend actually runs.
+  The `or` reading was wrong in the other direction too. The earlier version of
+  this file recorded "SET or: the Ada backend ACCEPTS this". It does not. The
+  operand-type check at o2c_compiler.adb:4443 runs BEFORE the Bytecode_Mode
+  test, so SET operands raise the same O2c_Error in either mode - a FRONT-END
+  limit, not a backend divergence, and therefore something no differential
+  could ever have found, because both backends agree. Measured by calling the
+  Ada-text entry point `O2c_Compiler.Compile` (the M1 door, which never sets
+  Bytecode_Requested): `c := a or b` raises, while `c := a + b` and
+  `b := (1=1) or (2=3)` both compile. The site's two mode branches had been
+  crossed - `" or "` is emitted on the BOOLEAN branch, which bytecode refuses
+  two lines earlier, while the SET branch is the one that raises. `or` on a SET
+  is not Oberon-2 set union either; `+` is, and works.
 
-  So coverage found the construct with no fixture - but its verdict on what
-  that construct DOES was wrong, and it read a hit from a file the backend
-  never sees. Coverage says where to look; it does not say what is there.
+  SO THE CHECK IS NOW tests/coverage.sh, and it differs from the first attempt
+  in the two places that mattered:
+
+    * the corpus is tests/bc ONLY - the fixtures run_bc.sh actually runs;
+    * the token kinds come from the LEXER (tools/o2c_tokscan), not from a
+      regular expression. The lexer never sees a token inside a comment and
+      cannot confuse `>=` with `>` followed by `=`, which is precisely how the
+      grep produced both false hits and false misses.
+
+  It answers one question: is each construct in front of the backend at all.
+  Every unexercised kind must be either exempt (EOF, a scan error) or a
+  RECORDED known gap with a probe pinning its current behaviour - so the list
+  cannot decay, because a gap that is silently fixed fails the check. It says
+  nothing about whether the backend gets a construct right; that is still the
+  differential's job, and neither check replaces the other.
+
+  Coverage says where to look; it does not say what is there.
 
   Both checks are cheap. Coverage is a grep over the corpus for each token kind;
   the differential is the guest gate already there. Neither is a list anyone has
