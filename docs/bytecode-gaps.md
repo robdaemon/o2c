@@ -128,6 +128,28 @@ Declaration is accepted; **assignment** is not ("only INTEGER/CHAR/BOOLEAN
 assignments"). Found by this list's own first run, which contradicted the claim
 that had just been written beside it.
 
+### 4b. `s := <string literal>` does not copy
+
+The statement compiles and copies **nothing** - the array keeps its zeros.  It
+is `Append_Body` only; the branch at the string-literal-into-ARRAY-OF-CHAR site
+has no bytecode path.
+
+An attempt is recorded rather than landed, because it does not work and the
+failure is one step further on: `Op_Copy_Str` (copy a pool string into a packed
+array, pop the const offset and the destination, NUL-terminate) built and
+emitted correctly - the dump shows `LOAD_ADDR_G`, `LOAD_CONST`, `0xED` in the
+right order and the verifier accepts the depth - but the program then fails at
+the *next* statement, `Out.Char (s[0])`, with "value out of range".  So the copy
+runs and writes to the wrong place.
+
+The next probe is therefore to check the destination address rather than the
+op: `0x16` is `LOAD_ADDR_G` and `0x12` is `LOAD_G`, and the integer-array store
+sequence uses `0x12` where this uses `0x16` - worth confirming which one the
+array base is supposed to be before assuming either.
+
+Also found on the way: `Out.String (<CHAR array variable>)` does not merely emit
+nothing, it ends the run - no output at all, not even the following statement.
+
 ### 5. Inline (anonymous) array types
 
 `var v: array 4 of integer` fails with "a type name expected". An array type
