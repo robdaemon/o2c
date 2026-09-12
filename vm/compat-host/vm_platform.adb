@@ -57,6 +57,19 @@ package body VM_Platform is
          null;
    end Rename_File;
 
+   function Get_Env (Name : String) return String is
+     (if Ada.Environment_Variables.Exists (Name)
+      then Ada.Environment_Variables.Value (Name)
+      else "");
+
+   procedure Set_Env (Name, Value : String) is
+   begin
+      Ada.Environment_Variables.Set (Name, Value);
+   exception
+      when others =>
+         null;
+   end Set_Env;
+
    procedure Exit_With (Ok : Boolean) is
    begin
       if Ok then

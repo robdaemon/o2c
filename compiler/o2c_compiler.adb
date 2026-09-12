@@ -7247,6 +7247,44 @@ package body O2c_Compiler is
                                  end loop;
                                  --  Native id 10: foreign entry 6.
                                  O2c_BC.Native_Call (10, 2);
+                              elsif Eq_No_Case (MNm, "Env")
+                                and then (Eq_No_Case
+                                            (To_String (MName), "Get")
+                                          or else Eq_No_Case
+                                            (To_String (MName), "Set"))
+                                and then N_A = 2
+                              then
+                                 --  Env.Get (name, var value) reads, Env.Set
+                                 --  (name, value) writes: same two addresses,
+                                 --  opposite direction, so only the native
+                                 --  id differs.
+                                 for K in 1 .. 2 loop
+                                    declare
+                                       ANm : constant String :=
+                                         To_String (Arg_R (K).Text);
+                                       AId : constant Natural := Find (ANm);
+                                    begin
+                                       if AId = 0
+                                         or else Syms (AId).UT = 0
+                                       then
+                                          raise O2c_BC.Wrong_Construct with
+                                            "bytecode backend: Env."
+                                            & To_String (MName) & " needs "
+                                            & "declared ARRAY OF CHAR "
+                                            & "variables";
+                                       end if;
+                                       O2c_BC.Load_Addr_G
+                                         (O2c_BC.Global_Array
+                                            (Ada_Id (ANm),
+                                             Total_Slots
+                                               (Syms (AId).UT)));
+                                    end;
+                                 end loop;
+                                 --  Native ids 11 and 12: foreign 7 and 8.
+                                 O2c_BC.Native_Call
+                                   ((if Eq_No_Case (To_String (MName),
+                                                    "Get")
+                                     then 11 else 12), 2);
                               else
                                  raise O2c_BC.Wrong_Construct with
                                    "bytecode backend: " & MNm & "."

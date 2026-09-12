@@ -387,6 +387,8 @@ package body OBC_VM is
       4 => (Sym => new String'("o2c_conv_toreal"), Pops => 3),
       5 => (Sym => new String'("o2c_fdel"), Pops => 1),
       6 => (Sym => new String'("o2c_frename"), Pops => 2),
+      7 => (Sym => new String'("o2c_envget"), Pops => 2),
+      8 => (Sym => new String'("o2c_envset"), Pops => 2),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -402,6 +404,8 @@ package body OBC_VM is
       8 => 3,     --  o2c_conv_toreal: str, var x (REAL), var res
       9 => 1,     --  o2c_fdel: the file name's address
       10 => 2,    --  o2c_frename: the two name addresses
+      11 => 2,    --  o2c_envget: name address, value address (out)
+      12 => 2,    --  o2c_envset: name address, value address
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -1216,6 +1220,66 @@ package body OBC_VM is
       end Put_Str;
    begin
       case Idx is
+         when Max_Natives + 6 | Max_Natives + 7 =>
+            --  o2c_envget (id 11, slot 7) and o2c_envset (id 12, slot 8).
+            --  Both void, both two addresses.  They differ only in direction:
+            --  Get reads the value at the second address, Set reads it there.
+            declare
+               function Byte_At (A : U64; N : Natural) return Byte is
+                  B : Byte with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A)
+                       + System.Storage_Elements.Integer_Address (N));
+               begin
+                  return B;
+               end Byte_At;
+               function CStr (A : U64; Buf : out String) return Natural is
+                  N : Natural := 0;
+                  B : Byte;
+               begin
+                  loop
+                     B := Byte_At (A, N);
+                     exit when B = 0 or else N = Buf'Last;
+                     N := N + 1;
+                     Buf (N) := Character'Val (Natural (B));
+                  end loop;
+                  return N;
+               end CStr;
+               procedure Put_CStr (A : U64; S : String) is
+                  procedure Put_Byte (N : Natural; V : Byte) is
+                     B : Byte with Address =>
+                       System.Storage_Elements.To_Address
+                         (System.Storage_Elements.Integer_Address (A)
+                          + System.Storage_Elements.Integer_Address (N));
+                  begin
+                     B := V;
+                  end Put_Byte;
+               begin
+                  for I in S'Range loop
+                     Put_Byte (I - S'First, Byte (Character'Pos (S (I))));
+                  end loop;
+                  --  Single-byte terminator, as every string here carries.
+                  Put_Byte (S'Length, 0);
+               end Put_CStr;
+               NB : String (1 .. 64);
+               VB : String (1 .. 64);
+               NN : constant Natural := CStr (Args (0), NB);
+            begin
+               if NN = 0 then
+                  return Ok;
+               end if;
+               if Idx = Max_Natives + 6 then
+                  Put_CStr (Args (1), VM_Platform.Get_Env (NB (1 .. NN)));
+               else
+                  declare
+                     NV : constant Natural := CStr (Args (1), VB);
+                  begin
+                     VM_Platform.Set_Env
+                       (NB (1 .. NN), VB (1 .. NV));
+                  end;
+               end if;
+               return Ok;
+            end;
          when Max_Natives + 5 =>
             --  o2c_frename: id 10, foreign slot 6.  Void, two arguments: the
             --  addresses of the two names.

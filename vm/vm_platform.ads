@@ -43,4 +43,13 @@ package VM_Platform is
    --  no status to report, so a procedure.
    procedure Rename_File (From, To : String);
 
+   --  Environment variables.  This is the case the seam was built for: the
+   --  host has a real environment, the guest keeps variables as ENV:<Name>
+   --  files and reaches them through CLI.  The shared VM asks; only the
+   --  platform knows where the answer lives.  An unset name reads as the
+   --  empty string, which is what Aegir's CLI.Get_Env returns and what
+   --  Oakwood's Env.Get expects.
+   function Get_Env (Name : String) return String;
+   procedure Set_Env (Name, Value : String);
+
 end VM_Platform;

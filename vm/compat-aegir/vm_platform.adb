@@ -77,6 +77,19 @@ package body VM_Platform is
       null;
    end Rename_File;
 
+   function Get_Env (Name : String) return String is
+   begin
+      return Aegir_User.CLI.Get_Env (Name);
+   end Get_Env;
+
+   procedure Set_Env (Name, Value : String) is
+      Status : constant Aegir_User.CLI.U64 :=
+        Aegir_User.CLI.Set_Env (Name, Value);
+      pragma Unreferenced (Status);
+   begin
+      null;
+   end Set_Env;
+
    procedure Exit_With (Ok : Boolean) is
    begin
       if Ok then

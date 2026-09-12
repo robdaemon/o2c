@@ -160,6 +160,39 @@ else
    bad "Files.Rename no longer compiles: $(tail -1 "$WORK/ren.log")"
 fi
 
+#  Env.Get / Env.Set.  Asserted as a round trip AND as a read of a variable the
+#  VM did not set, because the two together are what show it reaches the real
+#  environment rather than a private table the natives keep to themselves.
+cat > "$WORK/env.ob2" <<'EOB'
+module EnvT;
+import Env, Out;
+var k: array 64 of char;
+    v: array 64 of char;
+begin
+  k := "O2C_GAPS_ROUNDTRIP";
+  v := "hello";
+  Env.Set(k, v);
+  v := "x";
+  Env.Get(k, v);
+  Out.String(v); Out.Ln;
+  k := "O2C_GAPS_PREEXISTING";
+  v := "x";
+  Env.Get(k, v);
+  Out.String(v); Out.Ln
+end EnvT.
+EOB
+if timeout 60 "$FRONT" "$WORK/env.ob2" "$WORK/env.obc" >"$WORK/env.log" 2>&1; then
+   got="$(O2C_GAPS_PREEXISTING=fromhost timeout 60 "$ROOT"/vm/bin/vm_main \
+            "$WORK/env.obc" 2>/dev/null | tr -d '\n\r')"
+   if [ "$got" = "hellofromhost" ]; then
+      note "  ok  Env.Set/Get round-trips and reads a foreign variable"
+   else
+      bad "Env round-trip printed '$got', expected hellofromhost"
+   fi
+else
+   bad "Env.Get/Set no longer compiles: $(tail -1 "$WORK/env.log")"
+fi
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0
