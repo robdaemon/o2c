@@ -1,9 +1,10 @@
 # RESUME — starting point for the next session
 
-Written at the end of a long session on the bytecode backend's FFI surface.
+Written at the end of a long session on the bytecode backend's FFI surface,
+then corrected by the unary-operator session that followed it.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
-    HEAD            "bc: unary operators reach the stack" - see git log -1
+    HEAD            a1f424d  (bc: unary operators were silent ...)
     commits         294
     fixtures        65 in tests/bc/
     foreign natives 21 in vm/obc_vm.adb
