@@ -30,9 +30,30 @@ none of the fixes for them can be demonstrated - until this lands. It is the
 difference between "bytecode mode runs the demo programs" and "bytecode mode
 can replace the Ada backend".
 
-Open questions to settle first: how a CHAR array is laid out in the arena; how
-`Push_Str` and the const pool relate to a *mutable* string; whether a CHAR
-array is one slot plus length or a runtime length elsewhere.
+**Layout — settled, and the work sized.** `Push_Str` stores `Text & NUL` in the
+const pool's string area: **NUL-terminated, one byte per char**. The guest's
+`Console.Put` takes an Ada `String`, which is the same thing. So a packed CHAR
+array is the only layout that can be handed to the existing natives unchanged,
+and the alternatives would have needed a converting native that the guest has
+no reason to understand. **One byte per char, NUL-terminated** — decided.
+
+That makes the pieces concrete, and three of them were built and reverted
+because the fourth is wrong:
+
+- `Total_Slots` must return `(N + 2) / 8` slots for a CHAR array, not `N` —
+  bytes rounded up, with the terminator. Built, compiles.
+- The index ops are `Bas + Idx * 8`; the byte versions are the same with scale
+  1, and the load must **zero**-extend, since a CHAR is unsigned and sign
+  extension would corrupt anything above 127. Built, compiles.
+- There are **five** index emission sites, not three: three loads, two stores.
+  One is the *open array* path, where `D` (the designator) is not in scope and
+  the element type comes from `Syms (Id).Typ` instead. Worth knowing before
+  editing them.
+- **The blocker:** indexed CHAR access reads the wrong byte. `s[2] := c;
+  Out.Char (s[2])` prints byte value 2 — the *index*, not the stored character.
+  So the base address or the operand order in the emitted sequence is wrong.
+  That is the thing to debug, and it is why the whole change was reverted:
+  a silent wrong value is worse than the block it replaced.
 
 ### 2. CONST in an expression
 
