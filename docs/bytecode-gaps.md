@@ -270,12 +270,32 @@ builtin and every user library, and only THEN calls `O2c_BC.Begin_Mode`
 appending to a body that `Emits` then discards in bytecode mode. That is why the
 refusals cannot fire and why the suites pass.
 
-So reaching an FFI branch in bytecode mode means calling `Begin_Mode` before the
-builtin and library compiles, not before the main source alone. That in turn
-requires the builtins' procedures to be interned as bytecode procedures like any
-other (`Begin_Proc`/`End_Proc`), with `Provided` registration still happening so
-user code can import them. That is a real but bounded piece of work, and it is
-the next one - see the corrected plan above.
+**But simply moving `Begin_Mode` earlier is NOT the answer.** It would put every
+builtin into bytecode mode, not just the FFI ones - Strings, Texts, Math, MathL,
+In, Input, Term, Reals. Those are not small: Math and Reals do REAL arithmetic,
+and the bytecode backend still refuses mixed INTEGER/REAL and LONGINT operations
+in several places. Compiling them under `Bytecode_Mode` would make the bytecode
+pass fail on its own builtins. The suites would catch it, but the change is
+wrong in principle as well as in effect.
+
+**The intent is already stated in the code.** `Emits` carries the comment "the
+VM calls the Oakwood surface as NATIVES, so the Ada units are irrelevant there".
+So the designed path is that an FFI module's surface is exposed to bytecode as
+*natives* and its dialect source is used only for the Ada backend - not that the
+dialect source is compiled to bytecode.
+
+That means the work is: when the main source (or another bytecode unit) calls an
+FFI builtin's exported procedure, emit `Native_Call` for it, and implement the
+native in the VM. The `Oak_*_Src` bodies stay as they are, driving the Ada
+backend exactly as now. What has to be replaced is the M19 import path's
+treatment of these calls, plus the ten FFI *statement* branches, which currently
+build Ada text and have no bytecode counterpart.
+
+**This is a design choice, not a mechanical edit, and it should be made
+deliberately**: natives for the whole Oakwood surface (matching the comment, and
+what `labs` already does) versus compiling some builtins to bytecode. The
+existing `labs` - a foreign function reached by `Max_Natives + I - 1` - is the
+precedent for the first.
 
 ## Not gaps
 
