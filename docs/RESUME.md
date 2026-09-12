@@ -1370,6 +1370,42 @@ behaviour is unchanged: a nested-array variable is refused loudly rather than
 laid out wrongly.  The fixture and 1a are kept in 3x/3y.
 
 
+### 3aa. THE TRACE SAYS WHERE THE FIX IS *NOT* — the outer subscript never
+### reaches the designator's index step
+
+Instrumented the designator chain's subscript step and ran `m1` (with the
+scaffolding in place so it compiles at all).  Two hits, and their content is the
+whole answer:
+
+    DESIG idx ut= 1 elem=T_INT elem_ut= 0 len= 4
+    DESIG idx ut= 1 elem=T_INT elem_ut= 0 len= 4
+
+`ut=1` is `V4` - `array 4 of integer`, `len=4`, a scalar element.  So the branch
+fires for the INNER subscript.  There is no hit for `M2` (`len=2`, a user-typed
+element).  **The outer subscript is not handled by that code at all.**
+
+Which is exactly why 1b and 1c changed nothing observable: they edited a branch
+that never runs for this expression, and unchanged output plus an unchanged image
+size (712 bytes) was the tell.  The scaffolding - 1a, the two rules, the
+`Elem_UT` recording, 1b, the trace - was reverted, because with the check open it
+produces silently wrong answers and that is the one thing this backend exists not
+to do.
+
+**So the question is now narrow and factual**: what consumes the outer `[`?
+
+The walker's own subscript step is the only one inside `Parse_Rec_Ptr_Chain`
+(traced).  So the outer subscript is consumed BEFORE the walker is entered, or by
+a branch that returns early.  That is a one-command question to answer with the
+same technique: instrument the ENTRY of the walker (and the array handling that
+precedes it) and print, per selector, the kind consumed and the current type.  If
+the walker's loop sees only one `[` for `m[i][j]`, the outer one was taken before
+it, and the fix belongs there.
+
+**What is NOT in doubt**: 1a is one line and proven by the metric (`Tote` ->
+`Files.Rider` with it, back on revert), and the fixture `m1` is the gate.  Both
+are recorded in 3x/3y/3z.
+
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
