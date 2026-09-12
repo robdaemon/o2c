@@ -6578,6 +6578,14 @@ package body O2c_Compiler is
                         or else Eq_No_Case (Head (1 .. H_Len),
                                             "CONVFROMINT"))
             then
+               --  Refused in bytecode mode rather than silently emitting
+               --  nothing: this branch appends to the Ada body and makes no
+               --  O2c_BC call at all, so a bytecode program would compile,
+               --  run, and quietly do nothing at all.
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "Convert.ConvToInt/ConvToReal/ConvFromInt are not yet supported";
+               end if;
                --  M52 FFI: number <-> string (builtin Convert only)
                declare
                   Kind : constant String := Head (1 .. H_Len);
@@ -6679,6 +6687,14 @@ package body O2c_Compiler is
             elsif To_String (Mod_Name) = "Args"
               and then Eq_No_Case (Head (1 .. H_Len), "ARGGET")
             then
+               --  Refused in bytecode mode rather than silently emitting
+               --  nothing: this branch appends to the Ada body and makes no
+               --  O2c_BC call at all, so a bytecode program would compile,
+               --  run, and quietly do nothing at all.
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "Args.ArgGet are not yet supported";
+               end if;
                --  M50 FFI: argument fetch (builtin Args only)
                declare
                   P1, P2, P3 : Expr_Rec;
@@ -6715,6 +6731,14 @@ package body O2c_Compiler is
                                             "PLANECLEAR")
                         or else Eq_No_Case (Head (1 .. H_Len), "PLANEDOT"))
             then
+               --  Refused in bytecode mode rather than silently emitting
+               --  nothing: this branch appends to the Ada body and makes no
+               --  O2c_BC call at all, so a bytecode program would compile,
+               --  run, and quietly do nothing at all.
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "XYplane.PlaneOpen/PlaneClear/PlaneDot are not yet supported";
+               end if;
                --  M49 FFI: plane operations (builtin XYplane only)
                if Eq_No_Case (Head (1 .. H_Len), "PLANECLEAR") then
                   Next;
@@ -6761,6 +6785,14 @@ package body O2c_Compiler is
                         or else Eq_No_Case (Head (1 .. H_Len), "INSTRING")
                         or else Eq_No_Case (Head (1 .. H_Len), "INNAME"))
             then
+               --  Refused in bytecode mode rather than silently emitting
+               --  nothing: this branch appends to the Ada body and makes no
+               --  O2c_BC call at all, so a bytecode program would compile,
+               --  run, and quietly do nothing at all.
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "In.InReset/InString/InName are not yet supported";
+               end if;
                --  M45 FFI: input statements (builtin In module only)
                if Eq_No_Case (Head (1 .. H_Len), "INOPEN") then
                   Next;
@@ -6797,6 +6829,14 @@ package body O2c_Compiler is
             elsif To_String (Mod_Name) = "Files"
               and then Eq_No_Case (Head (1 .. H_Len), "FDEL")
             then
+               --  Refused in bytecode mode rather than silently emitting
+               --  nothing: this branch appends to the Ada body and makes no
+               --  O2c_BC call at all, so a bytecode program would compile,
+               --  run, and quietly do nothing at all.
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "Files.FDel are not yet supported";
+               end if;
                --  M42 FFI: delete a named file (builtin Files only)
                declare
                   P1 : Expr_Rec;
@@ -6816,6 +6856,14 @@ package body O2c_Compiler is
             elsif To_String (Mod_Name) = "Files"
               and then Eq_No_Case (Head (1 .. H_Len), "FRENAME")
             then
+               --  Refused in bytecode mode rather than silently emitting
+               --  nothing: this branch appends to the Ada body and makes no
+               --  O2c_BC call at all, so a bytecode program would compile,
+               --  run, and quietly do nothing at all.
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "Files.FRename are not yet supported";
+               end if;
                --  M44 FFI: rename within a volume (builtin Files only)
                declare
                   P1, P2 : Expr_Rec;

@@ -240,10 +240,27 @@ must be named. Ergonomic rather than load-bearing.
 `O2c_BC` call at all**. Their branches carry no `Bytecode_Mode` guard, so in
 bytecode mode they compile, run, and quietly do nothing.
 
-`Env` now refuses instead of emitting nothing (`9078a84`). The rest have not
-been changed. **None of them can be tested yet**, because all of them take
-`ARRAY OF CHAR` and that is gap 1 - so this section is currently reasoned and
-unverified, and says so.
+All ten now refuse instead of emitting nothing: `Env` in `9078a84`, the other
+nine next commit. That removes a silent no-op from the language's own library,
+which is worth doing on its own. **It does not make any of them work, and none
+of the refusals could be demonstrated reachable** - see the correction below.
+
+**Correction to the reasoning in `9078a84`.** That commit expected the refusals
+to become reachable "the moment the ARRAY OF CHAR restriction is lifted". CHAR
+arrays work now, and the branches are still unreachable for a second and
+independent reason: `Out` is the only builtin module (`o2c_compiler.adb:469`), so
+every other module name - `Files`, `Convert`, `Args`, `XYplane`, `In`, `Env` -
+takes the M19 library path, which requires a compiled module *source* that
+exports the member. Probing with `import Files; ... Files.FDel(n);` now fails
+earlier, at `'Files.FDel' is not exported by module Files`, not at the FFI branch.
+
+**So the harness is the real blocker, and it is a source tree, not a switch.**
+Nothing named `Files.ob2`, `Convert.ob2` or `Env.ob2` exists in either repository
+(the reference implementation is in the Aegir guest's Ada library, not in this
+repo's dialect). Building the harness means writing those module sources in the
+dialect, exporting the helper procedures, and compiling them with the program
+through `Compile_Multi`'s `Libs`. Until that exists none of the ten can be
+tested, and neither can their eventual implementations.
 
 ## Not gaps
 
