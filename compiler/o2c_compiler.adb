@@ -7706,9 +7706,43 @@ package body O2c_Compiler is
                         Bc_Load (Arg);
                         O2c_BC.Join;
                      end;
+                  elsif Member = "Init" or else Member = "Lock"
+                    or else Member = "Unlock"
+                  then
+                     --  A mutex is an INTEGER variable the program owns, and
+                     --  the VM needs its globals slot.  A local would have no
+                     --  stable slot to name, so it is refused rather than
+                     --  silently becoming a new global of its own.
+                     Next;                     --  past the member -> '('
+                     Expect (Lex.Tok_LParen, "'(' after Threads." & Member);
+                     Next;
+                     Expect (Lex.Tok_Ident, "a mutex variable");
+                     declare
+                        Arg : constant String := Cur.Text (1 .. Cur.Len);
+                     begin
+                        if O2c_BC.Local_Slot (Ada_Id (Arg)) >= 0 then
+                           raise O2c_Error with "a mutex must be a "
+                             & "module-level variable, not a local";
+                        end if;
+                        Next;                  --  past the argument
+                        Expect (Lex.Tok_RParen,
+                                "')' after Threads." & Member);
+                        Next;
+                        if Member = "Init" then
+                           --  Globals start zeroed, so this is only needed to
+                           --  put a used mutex back to free.
+                           O2c_BC.Push_Int (0);
+                           O2c_BC.Store (O2c_BC.Global (Ada_Id (Arg)));
+                        elsif Member = "Lock" then
+                           O2c_BC.Mutex_Lock (O2c_BC.Global (Ada_Id (Arg)));
+                        else
+                           O2c_BC.Mutex_Unlock
+                             (O2c_BC.Global (Ada_Id (Arg)));
+                        end if;
+                     end;
                   else
-                     raise O2c_Error with "Threads provides Start and Join "
-                       & "(found '" & Member & "')";
+                     raise O2c_Error with "Threads provides Start, Join, "
+                       & "Init, Lock and Unlock (found '" & Member & "')";
                   end if;
                end;
             elsif Cur.Kind = Lex.Tok_Dot then

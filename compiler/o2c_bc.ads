@@ -145,6 +145,10 @@ package O2c_BC is
    --  Wait for the thread whose handle is on top of the stack, consuming it.
    --  Parks the calling thread rather than spinning.
    procedure Join;
+   --  Lock and unlock a mutex named by its globals slot.  A mutex is an
+   --  INTEGER the program owns, so nothing here needs a handle or a table.
+   procedure Mutex_Lock (Slot : Natural);
+   procedure Mutex_Unlock (Slot : Natural);
 
    --  Push a procedure id: what a PROCEDURE-typed value is.  One slot, and
    --  the VM already numbers procedures, so a procedure value needs no

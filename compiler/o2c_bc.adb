@@ -613,6 +613,20 @@ package body O2c_BC is
       N_Insns := N_Insns + 1;
    end Join;
 
+   procedure Mutex_Lock (Slot : Natural) is
+   begin
+      Put_Byte (16#E8#);
+      Put_U32 (U32 (Slot));
+      N_Insns := N_Insns + 1;
+   end Mutex_Lock;
+
+   procedure Mutex_Unlock (Slot : Natural) is
+   begin
+      Put_Byte (16#E9#);
+      Put_U32 (U32 (Slot));
+      N_Insns := N_Insns + 1;
+   end Mutex_Unlock;
+
    --  ---- procedures and frames -----------------------------------------
    function Begin_Proc (NParams : Natural; NResults : Natural) return Natural is
    begin

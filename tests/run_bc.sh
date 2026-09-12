@@ -89,7 +89,7 @@ fi
 #  ---- Threads.Start, with a procedure value and with a name ---------------
 #  The point of the procedure type: Start takes a procedure *value*, so the
 #  thread body may be chosen at run time by assigning to the variable.
-for TN in threadstart threadname threadjoin; do
+for TN in threadstart threadname threadjoin threadmutex; do
    if ! timeout 120 "$FRONT" "$ROOT/tests/bc/$TN.ob2" "$WORK/$TN.obc" \
         >"$WORK/$TN.compile" 2>&1; then
       bad "$TN.ob2 did not compile: $(cat "$WORK/$TN.compile")"
@@ -102,6 +102,20 @@ for TN in threadstart threadname threadjoin; do
       bad "$TN.ob2 output differs: $(cat "$WORK/$TN.out")"
    fi
 done
+
+#  A mutex must be module-level: the VM names it by its globals slot, and a
+#  local has none.  Refused rather than silently becoming a global of its own.
+if timeout 120 "$FRONT" "$ROOT/tests/bc/threadmutex_bad.ob2" "$WORK/mmb.obc" \
+   >"$WORK/mmb.log" 2>&1
+then
+   bad "threadmutex_bad.ob2 compiled, but a local mutex has no slot to name"
+else
+   if grep -aq 'module-level variable' "$WORK/mmb.log"; then
+      note "negative: a local mutex is refused"
+   else
+      bad "threadmutex_bad.ob2 failed without a clear diagnostic: $(cat "$WORK/mmb.log")"
+   fi
+fi
 
 #  ---- calling a procedure value, end to end ------------------------------
 #  Compiling is not enough here: the value has to reach the call.  The first
