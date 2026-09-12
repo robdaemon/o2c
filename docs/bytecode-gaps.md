@@ -306,6 +306,33 @@ Read the code, not the message. Correcting the text is outstanding work.
   So the guarantee for constructs rests on section A's refusals being complete,
   verified by reading. That is the remaining soft spot.
 
+  TWO CHECKS ARE NEEDED, and neither alone is enough. They find different
+  things, and the corpus is the reason.
+
+    DIFFERENTIAL - run a program through both backends and compare. Finds WRONG
+    behaviour, but only for constructs the corpus exercises.
+
+    COVERAGE - list the language's constructs from the lexer's token kinds and
+    require a fixture for each. Finds UNEXERCISED constructs, which the
+    differential cannot: a construct no test uses cannot disagree.
+
+  The second one is not theoretical. Running it against tests/bc, samples and
+  tests/vm found exactly two token kinds with no fixture anywhere - `>=` and
+  `or` - and probing those turned up a real gap:
+
+      INTEGER >=   works        REAL >=   works
+      SET or       "OR needs BOOLEAN operands"   <- the Ada backend ACCEPTS this
+      BOOLEAN or   refused (known)
+
+  `or` on a SET is accepted by the Ada backend (its text is "a or b") and
+  rejected by the bytecode backend, and NO fixture used `or` at all, so the
+  differential had nothing to compare. That is the caveat, demonstrated.
+
+  Both checks are cheap. Coverage is a grep over the corpus for each token kind;
+  the differential is the guest gate already there. Neither is a list anyone has
+  to remember to update - the tokens come from the lexer and the differences come
+  from the programs.
+
   THE CHECK THAT WOULD WORK is differential, not static: run a program through
   BOTH backends and compare the output. Any disagreement is a gap, found
   empirically and with no list to maintain. The project already has this gate -
