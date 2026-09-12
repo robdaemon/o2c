@@ -646,60 +646,78 @@ native calls, and the four primitives are verified by effect. What is left of 3d
 is **step 3** — the `Begin_Mode` ordering — which is what lets a *user* program
 call `Files.Old`/`Read`/`Close` rather than only the module compiling.
 
-### 3m. MEASURED AND REVERTED — the ordering exposes a lost procedure id
+### 3m. MEASURED AND REVERTED — root cause: a procedure frame left open
 
-Step 3 was implemented as designed: `Begin_Mode` moved before the builtins, a
-`Scoped` flag per module, the main module switched on afterwards, and the scoped
-set taken from the measurement below.  It builds clean.  **It regresses EVERY
-fixture**, and the suites caught it at once:
+Step 3 as first designed — `Begin_Mode` before the builtins, a `Scoped` flag per
+module, the scoped set from the measurement below — builds clean and **regresses
+EVERY fixture**:
 
     run_bc: FAIL: sum: compile failed: o2c error: bytecode backend:
-            call to an unknown procedure
+            call to an unknown procedure 'Bracket'
 
-Not "some", and not just a program that calls `Files.Old` - every program,
-including ones that never mention Files.
+Two wrong diagnoses were recorded here before the right one.  The first blamed
+the export record (`X_Entry` carries no bytecode id); the second blamed
+main-module vs library compilation.  Naming the procedure in the refusal got
+rid of the first, and instrumenting `Decl_Procedure` and the call site got rid
+of the second.
 
-**THE FIRST DIAGNOSIS WAS WRONG, and the correction is the useful part.**  The
-refusal used to say only "an unknown procedure", so the first write-up of this
-section blamed the export record (`X_Entry` carries no bytecode id, so an
-imported call cannot resolve).  Naming the procedure in the message settled it:
+**The trace** (13th module reset, bytecode on - that is `Term`):
 
-    bytecode backend: call to an unknown procedure 'Bracket'
+    TRC reset bytecode=TRUE
+    TRC call 'Bracket' idx= 9 bcproc= 0 n_sym= 11
+    TRC decl 'Ch'     idx=10 id=50
+    TRC decl 'Clear'  idx=11 id=51
 
-`Bracket` is a procedure **in `Term`** - a LOCAL procedure, declared at line 13
-and called from line 30 on, so it is not a source-order forward reference either.
-The id assignment for a local procedure is `o2c_compiler.adb:5837`
-(`Syms (N_Sym).Bc_Proc := O2c_BC.Begin_Proc (...)`, in `Decl_Procedure`), and it
-does run.  The export record was never involved.
+`Bracket` is `Term`'s FIRST procedure and gets no `TRC decl` line at all; the
+second and third do.  `Bracket` is declared at line 13 and called at line 30, so
+it is not a forward reference, and its own `end Bracket` is what clears the
+problem for everything after it.
 
-What the evidence actually says:
+**The mechanism.** The id is assigned only when
 
-    Term compiled ALONE, bytecode mode, as the MAIN module ....... compiles
-    Term compiled as a BUILTIN (library) with bytecode on ........ 'Bracket' has
-                                                                  no id
+    if O2c_BC.Bytecode_Mode and then not O2c_BC.Proc_Open then
+       Syms (N_Sym).Bc_Proc := O2c_BC.Begin_Proc (...);
 
-Same source, same mode, different compile path.  So the blocker is narrower than
-3m first claimed and is **main-module vs library in bytecode mode**: something in
-the library path either never assigns the id for a locally declared procedure or
-wipes it, and `X_Entry` is not the reason.  That is the thing to find, and the
-`Term`/`Bracket` pair is the reproduction (it needs no filesystem, no natives and
-no main-module code - `sum`, which imports only `Out`, is enough).
+and `Proc_Open` is not a mode flag at all:
 
-**The scoped set below is still measured and still holds** (each module compiled
-alone, in bytecode mode, in library shape):
+    function Proc_Open return Boolean is (Cur_Proc /= 0);
+
+It means "a procedure frame is open", and `Begin_Mode` only clears it because
+`Begin_Mode` calls `Reset` - the whole-image reset.  With the ordering change,
+`Reset` runs ONCE, before the first builtin, so a frame left open by one module
+is still open when the next one starts.  The module order makes it concrete:
+
+    ... Err (bytecode)  ->  Env, In, Reals (Ada mode)  ->  Term (bytecode)
+                                                           ^ first procedure
+                                                             sees a stale frame
+
+So the first procedure of every bytecode-mode module that follows an Ada-mode
+module silently loses its id, and its FIRST call site is where it surfaces -
+`Term/Bracket`, reached from `sum`, which imports only `Out`.
+
+**That also explains why this was invisible until the ordering changed**: with
+`Begin_Mode` after the builtins, every builtin was parsed in Ada mode and then
+`Reset` wiped the frame before the main module ran.  The ordering change did not
+break the main module - it exposed a leak that had always been there.
+
+**The fix direction** is therefore NOT more scoping: either balance the frame at
+the end of a module compile (a module in bytecode mode should end with
+`Cur_Proc` closed), or find which module leaves it open.  `Begin_Mode`/`Reset`
+hiding it is the reason it was never noticed.  Then re-apply the ordering (the
+reverted diff is reproducible from this note) and wire the five
+intrinsic-refusing modules.
+
+**Kept from this attempt:** the refusal NAMES the procedure it cannot call.
+Without that, this section would still be blaming the export record.
+
+**The scoped set is measured and still holds** (each module compiled alone, in
+bytecode mode, in library shape):
 
     scoped (compile)   Texts, Files, Math, Term, MathL, Err
     emitter gap        Strings, Reals, Input   (operand-stack underflow)
     intrinsic sites    Env, Args, XYplane, In, Convert - whose natives
                        (6/7/8, 11-21) already exist and need only the wiring
                        the Files intrinsics got in 3l
-
-So the order of work is: find why the library path loses a local procedure's id,
-then re-apply the ordering (the reverted diff is reproducible from this note),
-then wire the five intrinsic-refusing modules.
-
-**Kept from this attempt:** the refusal now NAMES the procedure it cannot call -
-without that, this section would still be blaming the wrong thing.
 
 ## 4. Method — what worked, and what did not
 
