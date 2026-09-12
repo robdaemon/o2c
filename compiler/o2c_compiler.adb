@@ -3968,8 +3968,8 @@ package body O2c_Compiler is
             begin
                if R.Typ = T_Set and then X.Typ = T_Set then
                   if O2c_BC.Bytecode_Mode then
-                     raise O2c_BC.Wrong_Construct with
-                       "bytecode backend: SET operands are not yet supported";
+                     O2c_BC.Bin (O2c_BC.Set_Intersect);
+                     --  The operands are already on the stack.
                   end if;
                   R.Text := "(" & R.Text & " and " & X.Text & ")";
                   R.Lit := False;
@@ -4087,8 +4087,8 @@ package body O2c_Compiler is
             begin
                if R.Typ = T_Set and then X.Typ = T_Set then
                   if O2c_BC.Bytecode_Mode then
-                     raise O2c_BC.Wrong_Construct with
-                       "bytecode backend: SET operands are not yet supported";
+                     O2c_BC.Bin (O2c_BC.Set_Symdiff);
+                     --  The operands are already on the stack.
                   end if;
                   R.Text := "(" & R.Text & " xor " & X.Text & ")";
                   R.Lit := False;
@@ -4160,8 +4160,8 @@ package body O2c_Compiler is
             begin
                if R.Typ = T_Set and then X.Typ = T_Set then
                   if O2c_BC.Bytecode_Mode then
-                     raise O2c_BC.Wrong_Construct with
-                       "bytecode backend: SET operands are not yet supported";
+                     O2c_BC.Bin (O2c_BC.Set_Union);
+                     --  The operands are already on the stack.
                   end if;
                   R.Text := "(" & R.Text & " or " & X.Text & ")";
                   R.Lit := False;
@@ -4228,8 +4228,8 @@ package body O2c_Compiler is
             begin
                if R.Typ = T_Set and then X.Typ = T_Set then
                   if O2c_BC.Bytecode_Mode then
-                     raise O2c_BC.Wrong_Construct with
-                       "bytecode backend: SET operands are not yet supported";
+                     O2c_BC.Bin (O2c_BC.Set_Diff);
+                     --  The operands are already on the stack.
                   end if;
                   R.Text := "(" & R.Text & " and not " & X.Text & ")";
                   R.Lit := False;

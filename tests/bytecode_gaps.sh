@@ -52,7 +52,7 @@ check "ARRAY OF INTEGER variable" ok 'module G4; type T = array 4 of integer; va
 check "inline array type"       blocked 'module G5; var v: array 4 of integer; begin end G5.'
 check "CONST in an expression"  ok 'module G6; import Out; const N = 3; var k: integer; begin k := N end G6.'
 check "CONST, computed value"   blocked 'module G6b; import Out; const N = 3 + 1; var k: integer; begin k := N end G6b.'
-check "SET operands (union, intersection)"  blocked 'module G31; var a: set; b: set; c: set; begin a := {1}; b := {2}; c := a + b end G31.'
+check "SET operands (union, intersection, difference)"  ok 'module G31; import Out; var a: set; b: set; c: set; d: boolean; begin a := {1}; b := {2}; c := a + b; d := 2 in c end G31.' 
 check "SET variable"  ok 'module G6; import Out; var v: set; b: boolean; begin v := {1, 3}; b := 3 in v end G6.' 
 check "LONGINT declaration"    ok 'module G8; var n: longint; begin end G8.'
 check "LONGINT assignment"  ok 'module G9; import Out; var n: longint; begin n := 5; if n = 5 then Out.Int(1,0) end end G9.' 
