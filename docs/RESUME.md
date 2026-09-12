@@ -1292,6 +1292,52 @@ DESCRIPTION came from another module - which is a question this note does not
 answer, and marks as unmeasured.
 
 
+### 3y. 1b ANATOMY — why the rows aliased, and what the fix must touch
+
+Reading the VM rather than guessing changes 1b's sizing, so it is recorded before
+the attempt is made.
+
+**The stride cannot be fixed in the index expression.**  `Op_Load_Idx_I` and
+`Op_Store_Idx_I` scale the index by a HARD-CODED eight bytes:
+
+    + System.Storage_Elements.Integer_Address (Idx)
+      * System.Storage_Elements.Integer_Address (8);        (vm/obc_vm.adb:2826)
+
+(`..._Idx_B` scales by one byte.)  So a subscript's stride is one slot by
+construction, and an element that is a user type - `V4`, four slots - cannot be
+reached by it at all.
+
+**And the measured output identifies the defect exactly.**  If the outer
+subscript on a user-typed element is DROPPED - `m[i]` yields the base address,
+only `[j]` is applied, at stride 8 - then:
+
+    i = 0 writes 0,1,2,3   to bytes 0, 8, 16, 24
+    i = 1 writes 10..13    to the SAME bytes
+    the print loop reads them back at the same addresses
+
+which prints `10 11 12 13 10 11 12 13` - byte for byte the measured output.  The
+model reproduces the observation, so the defect is not "a stride constant": it is
+
+    (i)  the designator must NOT drop a subscript on a user-typed element, and
+    (ii) an outer index on such an element needs its offset computed by the
+         compiler - `base + idx * Total_Slots (Elem_UT) * 8` - because no opcode
+         will do it.
+
+**Why this is landable and safe to attempt.**  It touches the designator path,
+which is where the `UTypes (0)` crash and the pointer-field subtlety came from -
+but the fixture gates it: `m1` above must print `0 1 2 3 10 11 12 13`, and a wrong
+answer fails it and reverts.  Item 1 therefore lands as 1a + 1b + the fixture in
+one commit, or not at all, and the current state (refused at the declaration, per
+the check at `o2c_compiler.adb:5279`) remains the safe one meanwhile.
+
+Fixture, kept here because the commit that needs it will need it verbatim:
+
+    type V4 = array 4 of integer;  type M2 = array 2 of V4;  var m: M2; i, j: integer;
+    (* m[i][j] := i * 10 + j for i in 0..1, j in 0..3; then print each as
+       Out.Int (m[i][j], 1) with Out.Char (" ") after it; expect
+       0 1 2 3 10 11 12 13 *)
+
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
