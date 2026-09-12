@@ -441,6 +441,38 @@ into a fixed 64-byte field and returns the record. That is real logic, not a
 primitive, so inlining it would mean reimplementing the module in the compiler.
 The rest of `Files` is the same shape.
 
+**But "not inline-able" is not "not doable", and reading the bodies settles
+which.** The types are ordinary ones:
+
+    type File*     = pointer to FileDesc;
+    type FileDesc  = record name: A64; size: longint end;
+    type Rider*    = record f: File; pos: longint; eof*: boolean;
+                            res*: integer; cur: A1 end;
+
+and every statement in the module is something the bytecode backend already
+supports - record and pointer assignment (`r.f := f`), field access, integer and
+BOOLEAN comparison, array indexing (`r.cur[0]`), `new`. The only parts that are
+not bytecode are the FFI primitives themselves:
+
+    Read   r.res := FRead (r.f^.name, r.pos, r.cur);  ch := r.cur[0];
+    Close  r.res := FClose (r.f^.name);
+    Old    new (f); f^.size := FStat (name); <copy>; return f
+
+So the module does not need reimplementing in the compiler. It needs COMPILING -
+its primitive calls becoming native calls exactly as `Convert.ToInt`'s call site
+does - and the pieces are now all present: records, pointers, the expression
+path for a value-returning call, and the natives themselves.
+
+**What stands in the way is ordering, not capability.** `Compile_Multi` calls
+`O2c_BC.Begin_Mode` after the builtin and library compiles, so the builtins are
+always parsed in Ada mode and their FFI branches take the Ada path. Moving
+`Begin_Mode` earlier would put EVERY builtin into bytecode mode - Math and Reals
+do REAL arithmetic, which the backend still refuses in places - so the change
+needs scoping to the modules that can actually compile: Files, Env, Args,
+XYplane, In. The others (Strings, Texts, Math, MathL, Input, Term) are used only
+by the Ada backend and are no worse off than today, where they already do
+nothing under bytecode.
+
 So the cherry-pick approach reaches exactly two procedures in this module.
 Beyond them, `Files` needs its own source compiled to bytecode - the design
 question deferred earlier, not a fourth call-site emission.
