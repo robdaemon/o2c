@@ -1239,6 +1239,59 @@ command.  That is the shape this work should have had from the start.
 pins it comes with the fix, not before: the work order is item, test, commit.
 
 
+### 3x. ITEM 1 IS TWO HALVES — one measured, one not; attempt reverted
+
+Attempted item 1 (record fields that are arrays of arrays) and **reverted it**,
+because the attempt was half a fix and the half that was missing made things
+worse in the way that matters.
+
+**What the half proved.**  Two changes were needed and both were made - a
+recursive `Total_Slots` (an array whose element is a user type is
+`Arr_Len * Total_Slots (Elem_UT)` slots, not `Arr_Len`), the record-field rule,
+and the declaration rule.  With them, the progress metric MOVED:
+
+    hello.ob2 refuses at  'Tote'  ->  'Files.Rider'
+
+So the layout half is real, and the checklist is now self-updating in practice
+rather than in principle.  Item 2 is `Files.Rider` - an IMPORTED record.
+
+**Why it still cannot land.**  The fixture that exercises two-level indexing says
+so:
+
+    type V4 = array 4 of integer;
+    type M2 = array 2 of V4;
+    var  m  : M2;
+    (* for i in 0..1, j in 0..3:  m[i][j] := i * 10 + j;  then print *)
+
+    expected:  0 1 2 3 10 11 12 13
+    measured:  10 11 12 13 10 11 12 13
+
+Both rows hold the same values, so the ROWS ALIAS: the first-level index stride is
+0 or 1 where it must be `Total_Slots (V4)` = 4 slots.  The layout was fixed and
+the ACCESS was not.  With the check open, that is not a refusal - it is a program
+that compiles, runs, and answers wrongly, which is the one outcome this project
+does not accept.  So the whole attempt was reverted rather than landing the size
+fix unverified: with the check closed again, the size fix changes nothing
+observable, and a change that alters nothing observable is not a commit.
+
+**Item 1, restated with both halves named:**
+
+    1a  size:   Arr_Len * Total_Slots (Elem_UT)          - known, one line,
+                                                           measured to work
+    1b  access: the first-level index stride, currently  - the missing half
+                ignoring the element size
+
+1a is recorded here so it is not rediscovered; it is re-applied WITH 1b in one
+commit, because alone it is invisible and together they are testable by the
+fixture above.
+
+**And item 2 is already named**: `Files.Rider` is an IMPORTED record
+(`record f: File; pos: longint; eof: boolean; res: integer; cur: A1 end`), so the
+next thing after 1 is how a record's fields lay out when the record's
+DESCRIPTION came from another module - which is a question this note does not
+answer, and marks as unmeasured.
+
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
