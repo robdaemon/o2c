@@ -1,14 +1,10 @@
-module Ffi;
-import Out;
-var y: integer;
-(* A foreign declaration: no Oberon body, bound to a C function.  The name
-   deliberately avoids Abs/Max/Min/Ord/Chr/Len, which are builtins and are
-   intercepted before symbol resolution - a stub naming one of those binds
-   nothing and silently emits no call. *)
-procedure LabsOf (x: integer): integer EXTERN "labs";
-END LabsOf;
+module FFI;
+import Convert, Out;
+var s: array 8 of char;
+    x: integer;
+    r: integer;
 begin
-  y := LabsOf(0 - 7);
-  Out.Int(y, 0);
-  Out.Ln
-end Ffi.
+  s := "42";
+  Convert.ToInt(s, x, r);
+  Out.Int(x, 0); Out.Ln
+end FFI.

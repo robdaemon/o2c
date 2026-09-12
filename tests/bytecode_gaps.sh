@@ -69,11 +69,10 @@ check "string comparison"  ok 'module G24; import Out; type T = array 8 of char;
 check "Out.String on a CHAR array"  ok 'module G23; import Out; type T = array 8 of char; var v: T; begin v := "hi"; Out.String(v) end G23.'
 check "string literal assign"   ok 'module G22; import Out; type T = array 8 of char; var v: T; begin v := "hi"; Out.Char(v[0]) end G22.'
 
-#  An imported builtin's exported procedure is an FFI primitive with no
-#  bytecode emission.  It used to compile, run and silently do nothing -
-#  printing 0 where the same program without the call prints 42.  It now
-#  refuses.  This asserts the refusal, so deleting the guard without
-#  implementing the native makes it fail.
+#  An imported builtin's exported procedure is an FFI primitive.  These used
+#  to compile, run and silently do nothing; they now either work or refuse.
+#  Convert.ToInt is the one that works - it is the shape the rest follow, so
+#  this asserts a real converted value rather than merely that it compiles.
 cat > "$WORK/ffi.ob2" <<'EOB'
 module FFI;
 import Convert, Out;
@@ -87,12 +86,14 @@ begin
 end FFI.
 EOB
 if timeout 60 "$FRONT" "$WORK/ffi.ob2" "$WORK/ffi.obc" >"$WORK/ffi.log" 2>&1; then
-   bad "Convert.ToInt compiled - it is an FFI primitive with no bytecode"
-   bad "     emission, so it must refuse rather than run and do nothing"
-elif grep -q "is an FFI primitive" "$WORK/ffi.log"; then
-   note "  ok  Convert.ToInt is refused, not a silent no-op"
+   got="$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/ffi.obc" 2>/dev/null | tr -d '\n\r')"
+   if [ "$got" = "42" ]; then
+      note "  ok  Convert.ToInt converts (prints 42)"
+   else
+      bad "Convert.ToInt printed '$got', expected 42"
+   fi
 else
-   bad "Convert.ToInt failed for an unexpected reason: $(tail -1 "$WORK/ffi.log")"
+   bad "Convert.ToInt no longer compiles: $(tail -1 "$WORK/ffi.log")"
 fi
 
 if [ "$fails" -eq 0 ]; then

@@ -327,15 +327,26 @@ a `while` (`o2c_compiler.adb:9100`), which is what made a second clause fail
 with "expected CONST/VAR/TYPE/PROCEDURE/BEGIN/END". My syntax was wrong, not
 the compiler's - for the fourth time in this stretch.
 
-**The gap is now demonstrated end to end**, which it never was before:
+**Convert.ToInt NOW WORKS**, and it is the template for the other nine.
 
     module FFI;  import Convert, Out;
-    s := "42";  Convert.ToInt (s, x, r);  Out.Int (x, 0)
+    s := "42";  Convert.ToInt (s, x, r);  Out.Int (x, 0)      -- prints 42
 
-prints `0`. The same program without the Convert call prints `42`. So an
-imported builtin's exported procedure compiles, runs, and silently does nothing:
-x is never set, and nothing reports it. `tests/bytecode_gaps.sh` asserts this as
-the current state and will FAIL once ToInt works, per that script's contract.
+The FFI surface takes ADDRESSES, not values. These procedures are written in
+terms of out parameters - ToInt's two `var` formals - so the call site pushes
+where the results go (`Load_Addr_G`) and the native writes through. That shape
+is shared by all ten helpers, so it was worth fixing once here.
+
+**The one thing that was not obvious: position decides the parameter role, not
+type.** An `ARRAY OF CHAR` actual parses with `Typ = T_INT` - it arrives through
+an open-array formal - so testing `Typ = T_Str` for the string argument silently
+fails and falls through to the refusal. The parameter *position* is the only
+reliable discriminator for this surface. That was found by putting the actual
+values in the error message and letting the compiler report them, after two
+guesses at the condition were wrong.
+
+`tests/bc/ffi.ob2` holds the golden, and `tests/bytecode_gaps.sh` asserts the
+converted value rather than merely that it compiles.
 
 This is the first demonstration of the silent no-op rather than an argument that
 it must exist, and it needs no change to `Begin_Mode`, no new sources and no new

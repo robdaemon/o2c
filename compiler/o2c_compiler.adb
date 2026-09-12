@@ -7065,6 +7065,10 @@ package body O2c_Compiler is
                         declare
                            Args : array (1 .. Max_Params)
                              of Unbounded_String;
+                           --  The parsed form is kept as well as the text:
+                           --  a bytecode emission needs the operand's type
+                           --  and name, which the Ada text alone cannot give.
+                           Arg_R : array (1 .. Max_Params) of Expr_Rec;
                            N_A  : Natural := 0;
                            Call : Unbounded_String;
                         begin
@@ -7079,6 +7083,7 @@ package body O2c_Compiler is
                                    Parse_Actual (X_Formal (XI, N_A));
                               begin
                                  Args (N_A) := A.Text;
+                                 Arg_R (N_A) := A;
                               end;
                               exit when Cur.Kind /= Lex.Tok_Comma;
                               Next;
@@ -7104,15 +7109,52 @@ package body O2c_Compiler is
                            if O2c_BC.Bytecode_Mode
                              and then Is_FFI_Mod (MNm)
                            then
-                              --  Refused rather than appended and discarded:
-                              --  this is an FFI primitive with no bytecode
-                              --  emission, so the program would compile, run
-                              --  and silently do nothing.
-                              raise O2c_BC.Wrong_Construct with
-                                "bytecode backend: " & MNm & "."
-                                & To_String (MName)
-                                & " is an FFI primitive and is not yet "
-                                & "supported";
+                              --  The FFI surface takes ADDRESSES: these are
+                              --  written in terms of out parameters, so the
+                              --  call site pushes where the results go and
+                              --  the native writes through.  Only the one
+                              --  native that exists is wired; the rest still
+                              --  refuse rather than appending Ada text that
+                              --  bytecode would discard.
+                              if Eq_No_Case (MNm, "Convert")
+                                and then Eq_No_Case
+                                  (To_String (MName), "ToInt")
+                                and then N_A = 3
+                              then
+                                 declare
+                                    SNm : constant String :=
+                                      To_String (Arg_R (1).Text);
+                                    SId : constant Natural := Find (SNm);
+                                 begin
+                                    if SId = 0
+                                      or else Syms (SId).UT = 0
+                                    then
+                                       raise O2c_BC.Wrong_Construct with
+                                         "bytecode backend: Convert.ToInt "
+                                         & "needs a declared ARRAY OF CHAR "
+                                         & "variable";
+                                    end if;
+                                    O2c_BC.Load_Addr_G
+                                      (O2c_BC.Global_Array
+                                         (Ada_Id (SNm),
+                                          Total_Slots (Syms (SId).UT)));
+                                 end;
+                                 O2c_BC.Load_Addr_G
+                                   (O2c_BC.Global
+                                      (Ada_Id (To_String (Arg_R (2).Text))));
+                                 O2c_BC.Load_Addr_G
+                                   (O2c_BC.Global
+                                      (Ada_Id (To_String (Arg_R (3).Text))));
+                                 --  id Max_Natives + 1: the second foreign
+                                 --  entry, appended after labs.
+                                 O2c_BC.Native_Call (6, 3);
+                              else
+                                 raise O2c_BC.Wrong_Construct with
+                                   "bytecode backend: " & MNm & "."
+                                   & To_String (MName)
+                                   & " is an FFI primitive and is not yet "
+                                   & "supported";
+                              end if;
                            end if;
                            Append_Body ("      " & To_String (Call));
                         end;
