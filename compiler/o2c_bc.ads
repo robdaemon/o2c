@@ -185,6 +185,14 @@ package O2c_BC is
    --  contiguous and last.
    procedure Begin_Body;
 
+   --  Closes the frame Begin_Body opened, if it is still open.  A module's
+   --  body frame used to be left open for good, and that is not harmless: the
+   --  next module's FIRST procedure then saw Proc_Open true at its declaration,
+   --  skipped Begin_Proc, and never got a bytecode id - while the End_Proc at
+   --  its end (which is unconditional) closed the leaked frame instead, so the
+   --  damage healed from the second procedure on.  Balance it here.
+   procedure End_Body;
+
    --  Frame local of the currently open procedure: interned by name and
    --  numbered from 0, so the frame slots are the parameter slots.
    function Local (Ada_Name : String) return Natural;

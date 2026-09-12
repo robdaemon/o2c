@@ -696,6 +696,15 @@ package body O2c_BC is
       Body_Proc := Begin_Proc (0, 0);
    end Begin_Body;
 
+   procedure End_Body is
+   begin
+      --  Only the BODY frame: a procedure frame left open is a different bug,
+      --  and closing it here would hide it.
+      if Cur_Proc /= 0 and then Cur_Proc = Body_Proc then
+         End_Proc;
+      end if;
+   end End_Body;
+
    function Local (Ada_Name : String) return Natural is
    begin
       if Cur_Proc = 0 then

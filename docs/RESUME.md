@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         306
+    commits         310
     fixtures        76 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -646,78 +646,82 @@ native calls, and the four primitives are verified by effect. What is left of 3d
 is **step 3** — the `Begin_Mode` ordering — which is what lets a *user* program
 call `Files.Old`/`Read`/`Close` rather than only the module compiling.
 
-### 3m. MEASURED AND REVERTED — root cause: a procedure frame left open
+### 3m. DONE — the body frame, the ordering, and bytecode builtins
 
-Step 3 as first designed — `Begin_Mode` before the builtins, a `Scoped` flag per
-module, the scoped set from the measurement below — builds clean and **regresses
-EVERY fixture**:
+**The root cause was an asymmetric begin/end pair**, and finding it took three
+diagnoses, two of them wrong.  Recording the wrong ones because they are the
+trap: (1) "the export record carries no bytecode id" - plausible, wrong;
+(2) "main-module vs library compilation" - wrong; (3) the trace.
 
-    run_bc: FAIL: sum: compile failed: o2c error: bytecode backend:
-            call to an unknown procedure 'Bracket'
+What the refusal said once it NAMED the procedure:
 
-Two wrong diagnoses were recorded here before the right one.  The first blamed
-the export record (`X_Entry` carries no bytecode id); the second blamed
-main-module vs library compilation.  Naming the procedure in the refusal got
-rid of the first, and instrumenting `Decl_Procedure` and the call site got rid
-of the second.
+    bytecode backend: call to an unknown procedure 'Bracket'
 
-**The trace** (13th module reset, bytecode on - that is `Term`):
+`Bracket` is `Term`'s first procedure.  Instrumenting `Decl_Procedure` and the
+call site showed it gets no id at all while the second and third procedures do:
 
     TRC reset bytecode=TRUE
     TRC call 'Bracket' idx= 9 bcproc= 0 n_sym= 11
     TRC decl 'Ch'     idx=10 id=50
     TRC decl 'Clear'  idx=11 id=51
 
-`Bracket` is `Term`'s FIRST procedure and gets no `TRC decl` line at all; the
-second and third do.  `Bracket` is declared at line 13 and called at line 30, so
-it is not a forward reference, and its own `end Bracket` is what clears the
-problem for everything after it.
-
-**The mechanism.** The id is assigned only when
+The id is assigned only when
 
     if O2c_BC.Bytecode_Mode and then not O2c_BC.Proc_Open then
-       Syms (N_Sym).Bc_Proc := O2c_BC.Begin_Proc (...);
 
-and `Proc_Open` is not a mode flag at all:
+and `Proc_Open` is not a mode flag - it is frame state:
 
     function Proc_Open return Boolean is (Cur_Proc /= 0);
 
-It means "a procedure frame is open", and `Begin_Mode` only clears it because
-`Begin_Mode` calls `Reset` - the whole-image reset.  With the ordering change,
-`Reset` runs ONCE, before the first builtin, so a frame left open by one module
-is still open when the next one starts.  The module order makes it concrete:
+`Begin_Body` opens the module body's frame (`Body_Proc := Begin_Proc (0, 0)`) and
+**nothing ever closed it**.  So the next module's FIRST procedure saw the frame
+still open, skipped `Begin_Proc` - and its `end` still called `End_Proc`, which
+is unconditional (`o2c_compiler.adb:6176`).  That closed the leaked frame, which
+is why the damage healed from the second procedure on.  One procedure per module
+lost its id, and its first call site is where it surfaced.
 
-    ... Err (bytecode)  ->  Env, In, Reals (Ada mode)  ->  Term (bytecode)
-                                                           ^ first procedure
-                                                             sees a stale frame
+**Why it was invisible until the ordering changed**: `Begin_Mode` calls `Reset`,
+which wiped the frame, and `Begin_Mode` used to run after the builtins and just
+before the main module.  The ordering change did not break the main module - it
+exposed a leak that had always been there, hidden by `Reset`.
 
-So the first procedure of every bytecode-mode module that follows an Ada-mode
-module silently loses its id, and its FIRST call site is where it surfaces -
-`Term/Bracket`, reached from `sum`, which imports only `Out`.
+**The fix** is two pieces, both landed here:
 
-**That also explains why this was invisible until the ordering changed**: with
-`Begin_Mode` after the builtins, every builtin was parsed in Ada mode and then
-`Reset` wiped the frame before the main module ran.  The ordering change did not
-break the main module - it exposed a leak that had always been there.
+1. `O2c_BC.End_Body`, the matching close for `Begin_Body`, called at the START of
+   every module compile.  At module start no procedure frame can legitimately be
+   open, so this is exactly the missing balance.  It closes the BODY frame only
+   (`Cur_Proc = Body_Proc`) - a procedure frame left open is a different bug and
+   closing it here would hide it.
+2. The ordering change, now working: `Begin_Mode` before the builtins, a
+   `Scoped` flag per module, the main module switched on afterwards.
 
-**The fix direction** is therefore NOT more scoping: either balance the frame at
-the end of a module compile (a module in bytecode mode should end with
-`Cur_Proc` closed), or find which module leaves it open.  `Begin_Mode`/`Reset`
-hiding it is the reason it was never noticed.  Then re-apply the ordering (the
-reverted diff is reproducible from this note) and wire the five
-intrinsic-refusing modules.
-
-**Kept from this attempt:** the refusal NAMES the procedure it cannot call.
-Without that, this section would still be blaming the export record.
-
-**The scoped set is measured and still holds** (each module compiled alone, in
-bytecode mode, in library shape):
+**The scoped set is measured, not chosen** (each module compiled alone, bytecode
+mode, library shape):
 
     scoped (compile)   Texts, Files, Math, Term, MathL, Err
     emitter gap        Strings, Reals, Input   (operand-stack underflow)
     intrinsic sites    Env, Args, XYplane, In, Convert - whose natives
                        (6/7/8, 11-21) already exist and need only the wiring
                        the Files intrinsics got in 3l
+
+A builtin left out costs nothing: every module is parsed and its Ada text emitted
+either way, so `Scoped => False` is exactly the old behaviour.
+
+**Verified**: `sum` compiles (5504 bytes, the scoped builtins' code is now in the
+image) and RUNS CORRECTLY - `bc slice ok` / `406`, the sum of 1..28 - where it
+used to fail with `call to an unknown procedure 'Bracket'`.  All seven suites
+green, 47 corroborated by both backends, zero warnings.
+
+**What is left of 3d**: a USER program calling `Files.Old` now reaches a clean,
+explicit refusal rather than confusion -
+
+    o2c error: bytecode backend: Files.Old is not yet supported
+
+That is the FFI default-refusal allowlist, and it is the last step: let a
+qualified user call resolve to the procedure that is now IN the image, through
+the export record (`X_Entry`), which is where a bytecode id must travel between
+modules.  (`X_Entry` genuinely has no such field - it was the right fix, just
+not the cause of the regression.)
 
 ## 4. Method — what worked, and what did not
 

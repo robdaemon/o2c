@@ -9837,6 +9837,13 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       Spec_Buf := Null_Unbounded_String;
       Mod_Name := Null_Unbounded_String;
       N_Sym := 0;
+      --  A module must START with no frame open.  The previous module's body
+      --  frame is still open at this point (Begin_Body is not closed by the
+      --  emitter until the image is encoded), and leaving it open makes this
+      --  module's first procedure skip its id - see O2c_BC.End_Body.
+      if O2c_BC.Bytecode_Mode then
+         O2c_BC.End_Body;
+      end if;
       N_UT := 0;
       Loop_Depth := 0;
       Loop_N := 0;
@@ -11832,6 +11839,14 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  One builtin imports another - Convert imports Reals (M52) - so
       --  Reals is emitted whenever Convert is.  If more such edges appear
       --  this wants a closure rather than a special case.
+      procedure Compile_Builtin (Src : String; Scoped : Boolean) is
+      begin
+         if Bytecode_Requested then
+            O2c_BC.Bytecode_Mode := Scoped;
+         end if;
+         Compile_Module (Src, True, M_T, S_T, B_T);
+      end Compile_Builtin;
+
       function Emits (Name : String) return Boolean is
         (not Bytecode_Requested
          and then (Imported (Name)
@@ -11867,8 +11882,12 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
               & "   type O2c_Set is mod 2**32;" & ASCII.LF
               & "end O2c_Types;" & ASCII.LF));
       --  M38: compile the builtin Oakwood modules first so that user
-      --  modules and the main can import them
-      Compile_Module (Oak_Strings_Src, True, M_T, S_T, B_T);
+      --  modules and the main can import them.
+      if Bytecode_Requested then
+         O2c_BC.Begin_Mode;
+      end if;
+
+      Compile_Builtin (Oak_Strings_Src, Scoped => False);
       if Emits ("Strings") then
          --  Strings: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -11880,7 +11899,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Module (Oak_Texts_Src, True, M_T, S_T, B_T);
+      Compile_Builtin (Oak_Texts_Src, Scoped => True);
       if Emits ("Texts") then
          --  Texts: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -11892,7 +11911,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Module (Oak_Files_Src, True, M_T, S_T, B_T);
+      Compile_Builtin (Oak_Files_Src, Scoped => True);
       if Emits ("Files") then
          --  Files: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -11908,7 +11927,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       --  wins over the builtin (the dogfood demo used to own the
       --  name); otherwise Math is auto-provided like the others.
       if not Skip_Math then
-         Compile_Module (Oak_Math_Src, True, M_T, S_T, B_T);
+         Compile_Builtin (Oak_Math_Src, Scoped => True);
          if Emits ("Math") then
             --  Math: parsed above in every case, emitted only when
             --  something imports it (see Emits).
@@ -11921,7 +11940,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
          Provided (N_Prov) := Mod_Name;
       end if;
 
-      Compile_Module (Oak_MathL_Src, True, M_T, S_T, B_T);
+      Compile_Builtin (Oak_MathL_Src, Scoped => True);
       if Emits ("MathL") then
          --  MathL: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -11933,7 +11952,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Module (Oak_Input_Src, True, M_T, S_T, B_T);
+      Compile_Builtin (Oak_Input_Src, Scoped => False);
       if Emits ("Input") then
          --  Input: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -11945,7 +11964,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Module (Oak_XYplane_Src, True, M_T, S_T, B_T);
+      Compile_Builtin (Oak_XYplane_Src, Scoped => False);
       if Emits ("XYplane") then
          --  XYplane: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -11957,7 +11976,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Module (Oak_Args_Src, True, M_T, S_T, B_T);
+      Compile_Builtin (Oak_Args_Src, Scoped => False);
       if Emits ("Args") then
          --  Args: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -11969,7 +11988,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Module (Oak_Err_Src, True, M_T, S_T, B_T);
+      Compile_Builtin (Oak_Err_Src, Scoped => True);
       if Emits ("Err") then
          --  Err: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -11981,7 +12000,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Module (Oak_Env_Src, True, M_T, S_T, B_T);
+      Compile_Builtin (Oak_Env_Src, Scoped => False);
       if Emits ("Env") then
          --  Env: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -11993,7 +12012,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Module (Oak_In_Src, True, M_T, S_T, B_T);
+      Compile_Builtin (Oak_In_Src, Scoped => False);
       if Emits ("In") then
          --  In: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -12005,7 +12024,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Module (Oak_Reals_Src, True, M_T, S_T, B_T);
+      Compile_Builtin (Oak_Reals_Src, Scoped => False);
       if Emits ("Reals") then
          --  Reals: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -12017,7 +12036,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Module (Oak_Term_Src, True, M_T, S_T, B_T);
+      Compile_Builtin (Oak_Term_Src, Scoped => True);
       if Emits ("Term") then
          --  Term: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -12029,7 +12048,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
       N_Prov := N_Prov + 1;
       Provided (N_Prov) := Mod_Name;
 
-      Compile_Module (Oak_Convert_Src, True, M_T, S_T, B_T);
+      Compile_Builtin (Oak_Convert_Src, Scoped => False);
       if Emits ("Convert") then
          --  Convert: parsed above in every case, emitted
          --  only when something imports it (see Emits).
@@ -12055,7 +12074,7 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
          end if;
       end loop;
       if Bytecode_Requested then
-         O2c_BC.Begin_Mode;
+         O2c_BC.Bytecode_Mode := True;
       end if;
       Compile_Module (Main_Source, False, M_T, S_T, B_T);
       if O2c_BC.Bytecode_Mode then
