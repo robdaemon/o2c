@@ -284,21 +284,18 @@ fi
 #  ---- positive: hand-assembled Out.Char ------------------------------------
 #  Exercises native 4 independently of the emitter: two character codes go to
 #  the native, which prints the characters themselves.
-#  YIELD hands the VM back rather than falling through.  No scheduler is
-#  wired yet, so this asserts the status and that PC advanced - a resume that
-#  re-yielded forever would be the failure this catches.
-if python3 "$ASM" "$ROOT/tests/vm/yield.asm" "$WORK/yield.obc" >/dev/null 2>&1; then
-   if timeout 60 "$VM" "$WORK/yield.obc" >"$WORK/yield.out" 2>"$WORK/yield.err"; then
-      bad "yield.asm ran to completion, but YIELD must hand the VM back"
+#  YIELD hands the VM back and the runner resumes the context at the next
+#  instruction.  The program completing and printing is the proof: a resume
+#  that re-ran the prologue or re-yielded forever would not get here.
+if python3 "$ASM" "$ROOT/tests/vm/yield.asm" "$WORK/yield.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/yield.obc" >"$WORK/yield.out" 2>"$WORK/yield.err"; then
+   if diff -u "$ROOT/tests/vm/yield.out" "$WORK/yield.out"; then
+      note "positive: yield.asm (YIELD and resume) matches the golden output"
    else
-      if grep -aq 'the thread yielded the VM' "$WORK/yield.err"; then
-         note "positive: yield.asm reports the VM handed back"
-      else
-         bad "yield.asm failed without yielding: $(cat "$WORK/yield.err")"
-      fi
+      bad "yield.asm output differs from tests/vm/yield.out"
    fi
 else
-   bad "yield.asm did not assemble"
+   bad "yield.asm failed: $(cat "$WORK/yield.err")"
 fi
 
 if python3 "$ASM" "$ROOT/tests/vm/ffilabs.asm" "$WORK/ffilabs.obc" >/dev/null \

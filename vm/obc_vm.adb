@@ -1096,7 +1096,8 @@ package body OBC_VM is
 
    --  ---- interpreter ----------------------------------------------------
    function Execute (Data : Byte_Array; Img : Image_Info;
-                     Ctx : Context_Access) return Status is
+                     Ctx : Context_Access;
+                     Resuming : Boolean := False) return Status is
       Code   : Byte_Array renames Img.Code.all;
       Consts : Byte_Array renames Img.Consts_Copy.all;
       Stack   : U64_Array_Access renames Ctx.Stack;
@@ -1443,14 +1444,16 @@ package body OBC_VM is
       end Allocate;
 
    begin
-      --  module globals come from the DATA section (their initial values)
-      for I in 0 .. Img.N_Globals - 1 loop
-         Globals (I) := LE64 (Data, Img.Globals_Off + I * Const_Slot);
-      end loop;
+      if not Resuming then
+         --  module globals come from the DATA section (their initial values)
+         for I in 0 .. Img.N_Globals - 1 loop
+            Globals (I) := LE64 (Data, Img.Globals_Off + I * Const_Slot);
+         end loop;
 
-      Frame_Slots (0) := Img.Procs (Img.Body_Proc).Frame_Slots;
-      Locals_Used := Frame_Slots (0);
-      Cur_Frame := 0;
+         Frame_Slots (0) := Img.Procs (Img.Body_Proc).Frame_Slots;
+         Locals_Used := Frame_Slots (0);
+         Cur_Frame := 0;
+      end if;
 
       loop
          if PC >= Code'Length then
@@ -2120,6 +2123,23 @@ package body OBC_VM is
    --  Run uses, split out so a caller that *has* the bytes - notably o2c
    --  itself, which can run the image it just emitted - need not write
    --  them to a file first.
+   --  Run a context until it finishes, resuming it whenever it yields.
+   --  There is one thread today, so this is deliberately simple - but a yield
+   --  is treated as a chance to run someone else rather than as a failure,
+   --  which is the shape a scheduler needs and the reason YIELD exists.
+   function Run_Context (Data : Byte_Array; Img : Image_Info;
+                         Ctx : Context_Access) return Status is
+      St       : Status;
+      Resuming : Boolean := False;
+   begin
+      loop
+         St := Execute (Data, Img, Ctx, Resuming);
+         exit when St /= Yielded;
+         Resuming := True;
+      end loop;
+      return St;
+   end Run_Context;
+
    function Run_Buffer (Data : Byte_Array) return Status is
       St    : Status;
       Img   : Image_Info;
@@ -2138,7 +2158,7 @@ package body OBC_VM is
       Phase := 3;
       --  The interpreter's root-bearing state, sized once the image has
       --  been read.  One context today; a nested Execute will push another.
-      return Execute
+      return Run_Context
         (Data, Img,
          new Context'(Stack       => new U64_Array (0 .. Max_Stack - 1),
                       SP          => 0,
