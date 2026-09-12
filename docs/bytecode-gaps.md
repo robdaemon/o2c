@@ -55,6 +55,29 @@ because the fourth is wrong:
   That is the thing to debug, and it is why the whole change was reverted:
   a silent wrong value is worse than the block it replaced.
 
+**The canonical sequence, decoded** (`a[1] := i` for an INTEGER array, via
+`/tmp/probe3.py`-style dumping of the CODE section). Opcode bytes:
+`Load_G = 0x12`, `Load_Const = 0x14`, `Load_Idx_I = 0x1D`, `Store_Idx_I = 0x20`,
+`CALL_NATIVE = 0xC3`, `HALT = 0x01`. The shape is:
+
+```
+... 12 00 00 00 00   LOAD_G <slot>      <- the array base, immediately before
+    20               STORE_IDX_I
+... 1d               LOAD_IDX_I         (the base pushed earlier)
+```
+
+So the base goes on the stack just before the index op, and the byte ops sit
+exactly where the integer ones do. **That rules out the operand order and the
+emission sites**: a byte op substituted 1:1 has the same stack discipline.
+
+What is left, and where to look next: the **base address** and the
+**footprint**. `Total_Slots` was changed to return `(N+2)/8` slots for a packed
+CHAR array, and `Global_Array` is handed that number — but `Load_Addr_G` yields
+a slot address, and the second slot of a 2-slot packed array is then addressed
+as byte offset 8, past the 9 bytes it actually holds. The next probe is to dump
+what `Load_Addr_G` pushes for a packed array and what the indexed op computes
+from it, rather than assuming either.
+
 ### 2. CONST in an expression
 
 `const N = 3; ... k := N` fails with `'N' is not a module variable`. Named
