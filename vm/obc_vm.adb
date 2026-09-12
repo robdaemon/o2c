@@ -934,14 +934,10 @@ package body OBC_VM is
                end;
                PC := PC + 5;
             when Op_Spawn =>
-               if not Fits (PC + 1, 4) then
-                  Note_At ("malformed code", PC);
-                  return Bad_Code;
-               end if;
-               --  The procedure id is an operand, not a stack value, so this
-               --  changes nothing here: the thread starts with an empty stack
-               --  and the spawning context keeps everything it had.
-               PC := PC + 5;
+               --  Consumes the procedure id.  The thread's own stack starts
+               --  empty, so nothing is left behind on this one.
+               Depth := Depth - 1;
+               PC := PC + 1;
             when Op_Call_Indirect =>
                --  The callee is not statically known, so the depth effect
                --  comes from the type: parameterless and resultless, so only
@@ -1889,14 +1885,12 @@ package body OBC_VM is
                end;
                PC := PC + 5;
             when Op_Spawn =>
-               if PC + 4 >= Code'Length then
-                  return Bad_Code;
-               end if;
                declare
-                  --  A procedure id, the same one CALL and DISPATCH use, so
-                  --  a thread's entry point is named the way the compiler
-                  --  already names it.
-                  Callee : constant Natural := Natural (LE32 (Code, PC + 1));
+                  --  The procedure id comes from the stack, not the
+                  --  instruction: what Start is given is a procedure *value*,
+                  --  which may be a variable, so the callee is only known at
+                  --  run time.  Same reason CALL_INDIRECT exists.
+                  Callee : constant Natural := Natural (Pop);
                begin
                   if Ctx.Is_Thread then
                      Note_At ("a thread cannot start another thread yet", PC);
@@ -1942,7 +1936,7 @@ package body OBC_VM is
                      Live_Contexts (N_Contexts) := T;
                   end;
                end;
-               PC := PC + 5;
+               PC := PC + 1;
             when Op_Call_Indirect =>
                declare
                   Callee : constant Natural := Natural (Pop);

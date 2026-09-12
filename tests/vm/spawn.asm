@@ -3,12 +3,14 @@
 #  main is already out of turns.
 MAXSTACK 4
 GLOBALS 0
+POOL cworker 2
 POOL c2 2
 POOL cw 0
 
 ENTRY main
 PROC main 0 0 0
-  SPAWN Worker
+  LOAD_CONST cworker
+  SPAWN
   HALT
 PROC Worker 0 0 0
   LOAD_CONST c2

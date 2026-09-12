@@ -26,7 +26,7 @@ OPS = {
     "CALL_NATIVE": (0xC3, 3),
     "LOAD_L": (0x10, 2), "STORE_L": (0x11, 2),
     "CALL": (0xC0, 4), "RET": (0xC1, 0), "RET_VOID": (0xC2, 0),
-    "SPAWN": (0xE6, 4),
+    "SPAWN": (0xE6, 0),
     #  FOR opcodes carry several operands including a label, so they are
     #  encoded specially below rather than through the width table.
     "FOR_ENTER_I": (0xA4, 0), "FOR_NEXT_I": (0xA5, 0),
@@ -55,7 +55,6 @@ def assemble(text):
     desc_names = {}
     table_names = {}      #  method table name -> its biased reference
     meth_fixups = []      #  (offset in types, the table's procedure names)
-    proc_fixups = []      #  (offset in code, a SPAWN's procedure name)
     proc_ids = {}         #  procedure name -> its 1-based id
     types = bytearray()
     globals_n, maxstack, entry = 0, 0, None
@@ -200,11 +199,6 @@ def assemble(text):
                     and isinstance(vals[0], str):
                 pending.append((len(code), vals[0]))
                 code += b"\x00" * 4
-            elif op == "SPAWN" and isinstance(vals[0], str):
-                #  A name, but resolved to a procedure *number* rather than a
-                #  code offset, so it needs its own fix-up pass.
-                proc_fixups.append((len(code), vals[0]))
-                code += b"\x00" * 4
             else:
                 if nbytes == 2:
                     code += struct.pack("<H", vals[0] & 0xFFFF)
@@ -212,13 +206,6 @@ def assemble(text):
                     code += struct.pack("<B", vals[0] & 0xFF)
                 else:
                     code += struct.pack("<I", vals[0] & 0xFFFFFFFF)
-    #  a SPAWN names a procedure the way CALL does, but the operand is the
-    #  procedure number, not its code offset
-    for at, nm in proc_fixups:
-        if nm not in proc_ids:
-            raise SystemExit("obc_asm: SPAWN names unknown procedure '"
-                             + nm + "'")
-        code[at:at + 4] = struct.pack("<I", proc_ids[nm])
     #  patch the method tables now that every procedure is known
     for at, names in meth_fixups:
         for k, nm in enumerate(names):
