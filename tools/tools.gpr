@@ -9,11 +9,12 @@ project Tools is
    for Source_Dirs use (".", "../compiler", "../vm", "../vm/compat-host");
    for Object_Dir use "obj";
    for Exec_Dir use "bin";
-   --  Two tools share this project: the bytecode front end, and the
-   --  token-kind scan the coverage check drives.  The scan needs only the
-   --  lexer, but it lives here rather than in a project of its own because
-   --  the front end already links the same sources.
-   for Main use ("o2c_bc_host.adb", "o2c_tokscan.adb");
+   --  Three tools share this project: the two front ends (bytecode and
+   --  Ada-text, which the differential compares) and the token-kind scan the
+   --  coverage check drives.  Only the bytecode front end needs ../vm; all
+   --  three link the same compiler core, so they live together rather than in
+   --  projects of their own.
+   for Main use ("o2c_bc_host.adb", "o2c_ada_host.adb", "o2c_tokscan.adb");
    for Create_Missing_Dirs use "True";
 
    package Compiler is

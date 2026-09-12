@@ -4045,6 +4045,24 @@ package body O2c_Compiler is
                end if;
                R.Text := To_Unbounded_String (Cur.Text (1 .. Cur.Len));
                R.Typ := Syms (Id).Typ;
+               --  A CONST reference folds in the BYTECODE path above, because
+               --  that is where its value is needed for a push; the Ada path
+               --  emits the name and lets Ada's own constant do the work.
+               --
+               --  But the fold is part of the expression's MEANING, not of one
+               --  backend, and a site that asks "is this a compile-time
+               --  integer?" must get the same answer in both.  The FOR BY step
+               --  is such a site, and without this `by SOME_CONST` was accepted
+               --  by the bytecode backend and refused by the Ada one - exactly
+               --  the one-backend-supports-it gap this project keeps closing.
+               if not O2c_BC.Bytecode_Mode
+                 and then Syms (Id).Kind = S_Const
+                 and then Syms (Id).Const_Usable
+                 and then Syms (Id).Typ = T_Int
+               then
+                  R.Val := Syms (Id).Const_Val;
+                  R.Folds := True;
+               end if;
                Next;
             end if;
          when others =>
@@ -6436,7 +6454,26 @@ package body O2c_Compiler is
                raise O2c_Error with "FOR BY must not be zero (line "
                  & Natural'Image (Cur.Line) & ")";
             end if;
-            By_Text := B.Text;
+            --  The Ada text uses the step's VALUE, not its source text.  The
+            --  text form of a negative step is `-(1)`, and Ada rejects it in
+            --  `i := i + -(1)` with "parentheses required for unary minus" -
+            --  so emitting the text built a program that would not compile,
+            --  which the differential caught and nothing else would have
+            --  (no other test writes a descending `by`).  A negative value is
+            --  parenthesised for the same reason Ada rejects the text form.
+            declare
+               Abs_Img : constant String := Integer'Image (abs By_Val);
+               --  "Digits" is an Ada reserved word (digits <n>), and
+               --  identifiers may not end with '_' either - see the trap list.
+               Step_Digits : constant String :=
+                 Abs_Img (Abs_Img'First + 1 .. Abs_Img'Last);
+            begin
+               if By_Val < 0 then
+                  By_Text := To_Unbounded_String ("(-" & Step_Digits & ")");
+               else
+                  By_Text := To_Unbounded_String (Step_Digits);
+               end if;
+            end;
          end;
       end if;
       Expect (Lex.Tok_Do, "'DO'");

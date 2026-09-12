@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         299
+    commits         300
     fixtures        69 in tests/bc/
     foreign natives 21 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -17,7 +17,7 @@ command. Verify with `git rev-list --count HEAD` and `ls tests/bc/*.ob2 | wc -l`
 
 ## 1. Where things stand
 
-**All six suites pass** — run them before touching anything, to confirm the
+**All seven suites pass** — run them before touching anything, to confirm the
 starting point is what this file claims:
 
     export AEGIR_ROOT=/home/rroland/src/aegir
@@ -29,6 +29,7 @@ starting point is what this file claims:
     timeout 1800 tests/run_m1.sh          # the guest build; catches Aegir-side breaks
     timeout 300  tests/bytecode_gaps.sh   # the executable half of the checklist
     timeout 300  tests/coverage.sh        # every lexer token kind is exercised
+    timeout 900  tests/differential.sh    # both backends, three-way vs the golden
 
 `make build` / `make vm-host` / `make tools-host` / `make vm-aegir`, all with
 `AEGIR_ROOT=...`, build clean with zero warnings.
@@ -183,16 +184,77 @@ constructs no test reached; it could not tell that three of them were wrong, and
 a construct that is wrong while fully covered is invisible to it by
 construction. That is 3c's job.
 
-### 3c. Differential: run the corpus through both backends
+### 3c. DONE — `tests/differential.sh`, and it is a HOST sweep
 
-`run_m1` already diffs Ada against the VM, but for **one demo program**. Extend
-it to the fixtures. Two things to get right:
+The premise this section carried was wrong, and the wrongness is the useful part:
+it said "the Ada side needs the **guest** toolchain, so this runs in the guest".
+It does not. The Ada side's output is Ada source, and that source's **entire**
+runtime dependency across the corpus is `Aegir_User.Console` — three
+subprograms — because the builtin modules are emitted as pure Ada (Convert.ToInt
+converts a string by hand) and `Out` is inlined into Console calls. Measured
+with `grep -ho 'Aegir_User\.[A-Za-z_.]*'` over the emitted units of every
+fixture. So `tests/ada_host/` supplies those three on the host, and the whole
+differential — 59 fixtures, both backends, three-way compare — runs in **14
+seconds** with no QEMU, no cross-compile and no initrd.
 
-- The Ada side needs the **guest** toolchain, so this runs in the guest, not as
-  a host sweep.
-- Some differences are legitimate — the Ada backend has its own known gaps, and
-  PASS-count variance between runs is already cosmetic. The diff must
-  distinguish "VM wrong" from "both differ from the golden".
+That reframing is the point. A check that needs a guest boot per fixture would
+never have run often enough to be worth having; at 14s this is a suite.
+
+**THE THREE-WAY COMPARISON is the design**, and it is why a two-way diff of the
+backends would be worse. There are three numbers, not two:
+
+    golden   the expectation, checked in
+    ada      what the Ada backend's OWN output does when run
+    vm       what the bytecode image does when run
+
+    ada == golden, vm != golden   ->  THE VM IS WRONG       (a bytecode bug)
+    vm  == golden, ada != golden  ->  THE GOLDEN IS SUSPECT
+    all three differ              ->  look; possibly a front-end bug
+    all three agree               ->  the golden is CORROBORATED
+
+And that is exactly what the section asked for: it distinguishes "the VM is
+wrong" from "both differ from the golden" by construction, rather than by
+reading a two-way diff.
+
+**What it found, on its first run.** Zero VM bugs and zero wrong goldens — the
+good news, and now evidence rather than hope:
+
+    corroborated by both backends : 41
+    VM wrong                      :  0
+    golden suspect                :  1   (withguard - see below)
+    ada refused (its own gap)     : 10   (Threads; procedure values)
+    ada emits Ada that won't build:  7   (see below)
+
+So every disagreement in the corpus is the ADA side failing, not the VM. Seven
+fixtures make the Ada backend emit Ada that does not compile — a name colliding
+with a declaration (`gcscalar`, `recmix`, `recreal`), a component used before
+its record ends (`nested`), a type name that does not denote a type (`list`,
+`newloop`), and one `expected type Boolean` (`realarr`). Those are Ada-backend
+bugs, and the Ada backend is being retired, so they are **recorded** in the
+script rather than fixed.
+
+**It also caught a regression of its own making** — which is the strongest
+argument for having it. The `by -1` fix (3f) started emitting the step's source
+text into the Ada, and Ada rejects `i := i + -(1)` ("parentheses required for
+unary minus"). Nothing else in the repo writes a descending `by`, so nothing
+else could have noticed; the differential found it on the run that introduced it.
+
+**`withguard` is the one golden suspect, and it resolved to the Ada side being
+wrong.** The fixture guards a `P` (base) as its extension with a body that never
+mentions the guarded variable. The VM and the golden print `425` — the body is
+**skipped** — and the Ada side prints `4295`, running it. Oberon's `WITH` is a
+*conditional* region: the body runs only if the guard holds, and the trap
+belongs to the `v(T)` designator form (which is separate, and already tested by
+the VM's `guardbad`). So the VM and the golden are right and the Ada side does
+not implement the guard at all. The classification flagged exactly the right
+fixture, and the investigation settled it.
+
+**It is a GATE, not a report.** Every non-corroborated outcome must be a
+RECORDED, reasoned Ada-side limit: an unlisted disagreement FAILS (so a new one
+cannot appear quietly), and an entry that stops applying FAILS too (so the list
+cannot outlive its cause). Verified by tampering — mis-recording one entry's code
+and adding a bogus entry for a corroborated fixture produced exactly the two
+expected failures, with nothing else.
 
 Coverage finds what no test reaches; the differential finds what a test reaches
 but the VM gets wrong. **Neither alone is enough** — that is the whole finding,
@@ -342,6 +404,8 @@ message while changing nothing; `git status` was clean. After any scripted edit,
     docs/bytecode-gaps.md      the checklist; section A is generated
     tests/bytecode_gaps.sh     the executable half — asserts the working set
     tests/coverage.sh          every lexer token kind is exercised, or a recorded gap
+    tests/differential.sh      both backends vs the golden, three ways — the gate
+    tests/ada_host/            the host console shim that lets the Ada side RUN
     tests/run_bc.sh            fixtures in tests/bc/ (.ob2 + .out golden)
     tests/run_m1.sh            the guest build and the Ada-vs-VM diff
     compiler/o2c_compiler.adb  ~11k lines; the FFI call sites are near the end
@@ -349,7 +413,8 @@ message while changing nothing; `git status` was clean. After any scripted edit,
     vm/obc_vm.adb              the VM; natives are in the native dispatch
     vm/vm_platform.ads         the seam spec
     vm/compat-host|aegir/      the two seam bodies
-    tools/o2c_bc_host.adb      the host front end; takes libs as extra args
+    tools/o2c_bc_host.adb      the host bytecode front end; libs as extra args
+    tools/o2c_ada_host.adb     the host Ada-text front end; prints the units
     tools/o2c_tokscan.adb      lexes a corpus and reports the kinds it finds
 
 ## 7. One thing to decide early — DECIDED

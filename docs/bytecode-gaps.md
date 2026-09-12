@@ -416,10 +416,40 @@ TERMINATE, which is why the fixtures are run under a timeout.
   BOTH backends and compare the output. Any disagreement is a gap, found
   empirically and with no list to maintain. The project already has this gate -
   run_m1 diffs Ada against the VM - but it covers one demo program, not the
-  corpus. The Ada side needs the guest toolchain, so extending it means running
-  the fixtures in the guest rather than a host-only sweep. That is the work, and
-  it is worth doing: it is the only check proposed so far that can find a gap
-  nobody has thought to look for.
+  corpus.
+
+  IT IS NOW BUILT, as tests/differential.sh, and it is a HOST SWEEP - which is
+  the correction to the paragraph that used to stand here, saying the Ada side
+  "needs the guest toolchain". It does not. The Ada side's output is Ada source,
+  and that source's entire runtime dependency across the corpus is the Aegir
+  console package: three subprograms. tests/ada_host/ supplies them on the host,
+  so 59 fixtures run through both backends and compare in 14 seconds.
+
+  THREE-WAY, not two-way: there is a checked-in golden as well, and it is what
+  makes the difference decidable.
+
+      ada == golden, vm != golden   ->  THE VM IS WRONG
+      vm  == golden, ada != golden  ->  THE GOLDEN IS SUSPECT
+      all three agree               ->  the golden is CORROBORATED
+
+  A two-way diff of the backends cannot tell those apart, and could not even be
+  stated without a third opinion. Which is the point of the golden.
+
+  WHAT IT FOUND, on its first run, over 59 fixtures: 41 corroborated, ZERO VM
+  bugs, one golden suspect (withguard, resolved as an Ada-side gap: the Ada
+  backend does not implement WITH's skip, and Oberon's WITH skips, so the VM and
+  the golden are right), 10 fixtures the Ada backend refuses outright (Threads,
+  procedure values) and 7 where it emits Ada that does not compile (name
+  collisions, a component used before its record ends, `list`/`newloop`'s type
+  reference, `realarr`'s Boolean). Every disagreement is the ADA side, and the
+  Ada backend is the one being retired - so they are recorded, with reasons, in
+  the script, and the gate FAILS on any outcome that is neither corroborated nor
+  on that list. An entry that stops applying fails too.
+
+  It earned its keep immediately by catching a regression of its own making: the
+  descending-FOR fix started emitting the step's source text, which Ada rejects
+  as `i := i + -(1)`. No other test writes a descending `by`, so nothing else
+  could have seen it.
 
 ### D. How each entry is verified
 
