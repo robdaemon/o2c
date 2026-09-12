@@ -150,6 +150,34 @@ array base is supposed to be before assuming either.
 Also found on the way: `Out.String (<CHAR array variable>)` does not merely emit
 nothing, it ends the run - no output at all, not even the following statement.
 
+### 4c. `Out.String (<CHAR array variable>)` ends the run
+
+It compiles and then dies: `operand-stack depth violation`, exit 1.  The native
+that prints a string takes an *offset into the const payload*, and a CHAR array
+variable is not in the const payload - so it cannot be handed over directly.
+
+**No new native can be added.**  `Max_Natives` is 5 and ids 0-4 are all taken
+(`Int`, `String`, `Ln`, `Real`, `LongReal`); foreign ids are computed as
+`Max_Natives + I - 1`, so a sixth builtin renumbers every foreign function
+starting with `labs` - which the append-only rule forbids, and which would
+break silently.  The comment beside that table claims the two tables "cannot
+collide and neither needs renumbering to grow"; bumping `Max_Natives` does
+renumber them.
+
+The route that needs nothing new: print the array a character at a time through
+**`Out.Char`'s native (id 4)**, which takes the character code directly.  That
+was built - a loop with a temporary index and value local, bounded by the array
+length and stopping at the terminator - and it **compiles and emits cleanly**,
+but the verifier rejects it with a depth violation while the *emitter's* own
+depth tracker accepts it.  **The two disagree**, and that disagreement is the
+thing to understand next, not the loop.
+
+The likely cause, to check rather than assume: the verifier walks a linear depth
+and a loop has two paths into its exit label, so their depths must match.  The
+factor pushes the array address before this code runs, so one path reaches the
+exit with a leftover the other does not.  The fix is probably a single exit that
+drops it, or not pushing the address where it is not wanted.
+
 ### 5. Inline (anonymous) array types
 
 `var v: array 4 of integer` fails with "a type name expected". An array type
