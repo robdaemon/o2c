@@ -284,6 +284,20 @@ fi
 #  ---- positive: hand-assembled Out.Char ------------------------------------
 #  Exercises native 4 independently of the emitter: two character codes go to
 #  the native, which prints the characters themselves.
+#  JOIN waits for a thread.  main prints 1, spawns Worker, and must not print
+#  3 until Worker has printed 2 - so the order of the output is the test.  A
+#  join that did not park would print 1, then 3, then 2.
+if python3 "$ASM" "$ROOT/tests/vm/join.asm" "$WORK/join.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/join.obc" >"$WORK/join.out" 2>"$WORK/join.err"; then
+   if diff -u "$ROOT/tests/vm/join.out" "$WORK/join.out"; then
+      note "positive: join.asm (JOIN) waits for the thread before continuing"
+   else
+      bad "join.asm output differs from tests/vm/join.out"
+   fi
+else
+   bad "join.asm failed: $(cat "$WORK/join.err")"
+fi
+
 #  SPAWN starts a thread.  main spawns Worker and halts, so Worker only
 #  produces its output if the scheduler gives a context other than the root
 #  a turn after the root is already done.

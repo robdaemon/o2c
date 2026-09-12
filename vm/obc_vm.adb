@@ -143,6 +143,9 @@ package body OBC_VM is
    --  a thread's entry point is fixed at the spawn, unlike an indirect call,
    --  where the callee is only known at run time.
    Op_Spawn         : constant := 16#E6#;
+   --  Wait for a thread to finish.  The join parks the calling thread rather
+   --  than spinning, so the scheduler can run someone else meanwhile.
+   Op_Join          : constant := 16#E7#;
 
    --  Instructions a thread may run before the VM takes the machine back.
    --  This is what makes scheduling preemptive: a thread that never calls
@@ -188,7 +191,15 @@ package body OBC_VM is
    --  A thread is runnable until its entry procedure returns.  Blocked and
    --  the rest arrive with synchronisation; adding states at the end keeps
    --  the existing ones meaningful.
-   type Thread_State is (Thread_Runnable, Thread_Done);
+   --  Runnable until it waits for something, then blocked until the wait is
+   --  satisfied, then done.  Not wire format and referenced by name, so the
+   --  order is free to read in the order things happen.
+   type Thread_State is (Thread_Runnable, Thread_Blocked, Thread_Done);
+
+   --  Handles handed to the program.  Monotonic, never reused, and 0 is not
+   --  a valid handle - so a join on an uninitialised variable is refused
+   --  rather than waiting on whatever thread happens to be first.
+   Next_Thread_Id : Natural := 1;
 
    type Context is record
       Stack       : U64_Array_Access := null;
@@ -211,12 +222,19 @@ package body OBC_VM is
       Budget      : Natural := 0;
       State       : Thread_State := Thread_Runnable;
       Resumed     : Boolean := False;
+      Thread_Id   : Natural := 0;      --  handle the program holds
+      Waiting_For : Natural := 0;      --  thread handle being waited on
       --  True for a context the program spawned, which has no caller to
       --  return to.  Its entry procedure returning ends the thread rather
       --  than being the frame underflow it would be for the main context -
       --  and keeping the main context's behaviour unchanged means a bad
       --  return there is still reported instead of quietly ending the run.
       Is_Thread   : Boolean := False;
+      --  True when the scheduler owns this context's registration for the
+      --  whole run.  The root and threads both need that: either can block,
+      --  and a blocked context that is not a root is collected while merely
+      --  waiting - and, worse here, cannot be found to be woken.
+      Scheduler_Owned : Boolean := False;
       --  Threads share the globals block: the interpreter keeps the root
       --  context's array, so only the root loads it from the DATA section.
       Loads_Globals : Boolean := True;
@@ -409,7 +427,7 @@ package body OBC_VM is
       --  Execute call.  A thread suspended at a yield is still a root, and
       --  this scope would drop it between quanta - its stack would then be
       --  collected while the thread was merely paused.
-      if S.Ctx.Is_Thread then
+      if S.Ctx.Is_Thread or else S.Ctx.Scheduler_Owned then
          return;
       end if;
       if N_Contexts = Max_Contexts then
@@ -422,7 +440,7 @@ package body OBC_VM is
 
    overriding procedure Finalize (S : in out Context_Scope) is
    begin
-      if S.Ctx.Is_Thread then
+      if S.Ctx.Is_Thread or else S.Ctx.Scheduler_Owned then
          return;
       end if;
       --  Removed by identity rather than by popping, so it stays correct even
@@ -934,8 +952,13 @@ package body OBC_VM is
                end;
                PC := PC + 5;
             when Op_Spawn =>
-               --  Consumes the procedure id.  The thread's own stack starts
-               --  empty, so nothing is left behind on this one.
+               --  Consumes the procedure id and leaves the new thread's
+               --  handle.  Net zero, but stated as the two steps because that
+               --  is what happens.
+               Depth := Depth + 0;
+               PC := PC + 1;
+            when Op_Join =>
+               --  Consumes the handle.
                Depth := Depth - 1;
                PC := PC + 1;
             when Op_Call_Indirect =>
@@ -1925,16 +1948,61 @@ package body OBC_VM is
                             new Natural_Array'(0 .. Max_Frames - 1 => 0),
                           State       => Thread_Runnable,
                           Resumed     => False,
+                          Thread_Id   => 0,
+                          Waiting_For => 0,
                           Is_Thread   => True,
+                          Scheduler_Owned => True,
                           --  Globals are the root's; only the root loads them.
                           Loads_Globals => False);
                   begin
                      T.Frame_Slots (0) := Img.Procs (Callee).Frame_Slots;
+                     T.Thread_Id := Next_Thread_Id;
+                     Next_Thread_Id := Next_Thread_Id + 1;
                      --  Registered here and released by the scheduler, so it
                      --  stays a root for as long as the thread exists.
                      N_Contexts := N_Contexts + 1;
                      Live_Contexts (N_Contexts) := T;
+                     --  The handle is how the program names this thread
+                     --  later, so it is the value the spawn leaves behind.
+                     Push (U64 (T.Thread_Id));
                   end;
+               end;
+               PC := PC + 1;
+            when Op_Join =>
+               declare
+                  Handle : constant Natural := Natural (Pop);
+                  Target : Context_Access := null;
+               begin
+                  if Handle = 0 then
+                     Note_At ("join on a thread that was never started", PC);
+                     return Bad_Target;
+                  end if;
+                  if Handle = Ctx.Thread_Id then
+                     Note_At ("a thread cannot join itself", PC);
+                     return Bad_Target;
+                  end if;
+                  for I in 1 .. N_Contexts loop
+                     if Live_Contexts (I) /= null
+                       and then Live_Contexts (I).Thread_Id = Handle
+                     then
+                        Target := Live_Contexts (I);
+                     end if;
+                  end loop;
+                  if Target = null then
+                     Note_At ("join on a thread that is not running", PC);
+                     return Bad_Target;
+                  end if;
+                  if Target.State /= Thread_Done then
+                     --  Park rather than spin.  The scheduler wakes this
+                     --  thread when the one it waits for finishes.
+                     Ctx.Waiting_For := Handle;
+                     Ctx.State := Thread_Blocked;
+                     --  Advance past the join *before* yielding.  The resume
+                     --  lands here, so leaving PC on the join would re-run it
+                     --  and pop a handle that is no longer on the stack.
+                     PC := PC + 1;
+                     return Yielded;
+                  end if;
                end;
                PC := PC + 1;
             when Op_Call_Indirect =>
@@ -2284,9 +2352,21 @@ package body OBC_VM is
    --  which is the shape a scheduler needs and the reason YIELD exists.
    function Run_Context (Data : Byte_Array; Img : Image_Info;
                          Ctx : Context_Access) return Status is
-      St   : Status;
-      Busy : Boolean;
+      St      : Status;
+      Busy    : Boolean;
+      Blocked : Boolean;
    begin
+      --  The root is a root for the whole run, not only while it runs: it
+      --  can block, and a blocked context has to be findable in order to be
+      --  woken.  Its Context_Scope deliberately does not do this, because a
+      --  scope finalizes when Execute returns and would drop it between turns.
+      if N_Contexts < Max_Contexts then
+         N_Contexts := N_Contexts + 1;
+         Live_Contexts (N_Contexts) := Ctx;
+      else
+         Roots_Refused := True;
+      end if;
+
       --  Round-robin over the root and every thread the program started,
       --  one quantum each.  N_Contexts is re-read on every pass because
       --  spawning grows it: a thread started during the run joins in.
@@ -2323,6 +2403,18 @@ package body OBC_VM is
                      --  A thread whose entry procedure returned is out of
                      --  turns.  Reaching HALT is the root's way of the same.
                      C.State := Thread_Done;
+                     --  Wake anyone waiting on it.  Done by scanning rather
+                     --  than by remembering joiners, so a thread that joined
+                     --  before this one was even spawned is still woken.
+                     for K in 1 .. N_Contexts loop
+                        if Live_Contexts (K) /= null
+                          and then Live_Contexts (K).State = Thread_Blocked
+                          and then Live_Contexts (K).Waiting_For = C.Thread_Id
+                        then
+                           Live_Contexts (K).State := Thread_Runnable;
+                           Live_Contexts (K).Waiting_For := 0;
+                        end if;
+                     end loop;
                   end if;
                end if;
             end;
@@ -2333,17 +2425,31 @@ package body OBC_VM is
          --  during is also what makes a voluntary YIELD and a spent quantum
          --  behave identically - both simply leave a context runnable.
          Busy := False;
+         Blocked := False;
          for I in 1 .. N_Contexts loop
             declare
                C : constant Context_Access := Live_Contexts (I);
             begin
-               if C /= null and then C.Is_Thread
-                 and then C.State = Thread_Runnable
-               then
-                  Busy := True;
+               if C /= null and then C.Is_Thread then
+                  if C.State = Thread_Runnable then
+                     Busy := True;
+                  elsif C.State = Thread_Blocked then
+                     Blocked := True;
+                  end if;
                end if;
             end;
          end loop;
+         if Ctx.State = Thread_Runnable then
+            Busy := True;
+         elsif Ctx.State = Thread_Blocked then
+            Blocked := True;
+         end if;
+         if not Busy and then Blocked then
+            --  Nothing can run and something is waiting: no future turn will
+            --  change that, because nothing is left to finish and wake it.
+            Note_At ("deadlock: every thread is waiting", 0);
+            return Bad_Stack;
+         end if;
          exit when not Busy and then Ctx.State = Thread_Done;
       end loop;
       return Ok;
@@ -2381,7 +2487,10 @@ package body OBC_VM is
                       Loads_Globals => True,
                       State       => Thread_Runnable,
                       Resumed     => False,
+                      Thread_Id   => 0,
+                      Waiting_For => 0,
                       Is_Thread   => False,
+                      Scheduler_Owned => True,
                       Which_Frame => 0,
                       Frame_Base  =>
                         new Natural_Array'(0 .. Max_Frames - 1 => 0),

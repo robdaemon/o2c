@@ -11,6 +11,7 @@ ENTRY main
 PROC main 0 0 0
   LOAD_CONST cworker
   SPAWN
+  DROP                      # the handle: this program does not join
   HALT
 PROC Worker 0 0 0
   LOAD_CONST c2

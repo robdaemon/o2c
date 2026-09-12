@@ -26,7 +26,7 @@ OPS = {
     "CALL_NATIVE": (0xC3, 3),
     "LOAD_L": (0x10, 2), "STORE_L": (0x11, 2),
     "CALL": (0xC0, 4), "RET": (0xC1, 0), "RET_VOID": (0xC2, 0),
-    "SPAWN": (0xE6, 0),
+    "SPAWN": (0xE6, 0), "JOIN": (0xE7, 0),
     #  FOR opcodes carry several operands including a label, so they are
     #  encoded specially below rather than through the width table.
     "FOR_ENTER_I": (0xA4, 0), "FOR_NEXT_I": (0xA5, 0),
