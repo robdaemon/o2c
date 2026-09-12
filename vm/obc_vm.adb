@@ -383,6 +383,7 @@ package body OBC_VM is
       --  native writes through.  Appended after labs, never renumbered.
       2 => (Sym => new String'("o2c_conv_toint"), Pops => 3),
       3 => (Sym => new String'("o2c_conv_fromint"), Pops => 2),
+      4 => (Sym => new String'("o2c_conv_toreal"), Pops => 3),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -395,6 +396,7 @@ package body OBC_VM is
       5 => 1,     --  labs
       6 => 3,     --  o2c_conv_toint: str, var x, var res
       7 => 2,     --  o2c_conv_fromint: x (value), var str
+      8 => 3,     --  o2c_conv_toreal: str, var x (REAL), var res
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -1209,6 +1211,78 @@ package body OBC_VM is
       end Put_Str;
    begin
       case Idx is
+         when Max_Natives + 3 =>
+            --  o2c_conv_toreal: id 8, foreign slot 4.  Void, like ToInt -
+            --  same three arguments, but the second is a REAL slot, so the
+            --  value is written as a Long_Float rather than a word.
+            declare
+               function Byte_At (A : U64; N : Natural) return Byte is
+                  B : Byte with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A)
+                       + System.Storage_Elements.Integer_Address (N));
+               begin
+                  return B;
+               end Byte_At;
+               procedure Park_R (A : U64; V : Long_Float) is
+                  X : Long_Float with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A));
+               begin
+                  X := V;
+               end Park_R;
+               procedure Park_I (A : U64; V : I64) is
+                  X : I64 with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A));
+               begin
+                  X := V;
+               end Park_I;
+               Zero : constant Byte := Byte (Character'Pos ('0'));
+               Nine : constant Byte := Byte (Character'Pos ('9'));
+               Dot  : constant Byte := Byte (Character'Pos ('.'));
+               Str  : constant U64 := Args (0);
+               XP   : constant U64 := Args (1);
+               RP   : constant U64 := Args (2);
+               Whole : Long_Float := 0.0;
+               Frac  : Long_Float := 0.0;
+               Scale : Long_Float := 1.0;
+               In_F  : Boolean := False;
+               Neg   : Boolean := False;
+               I     : Natural := 0;
+               B     : Byte;
+            begin
+               if Byte_At (Str, 0) = Byte (Character'Pos ('-')) then
+                  Neg := True;
+                  I := 1;
+               end if;
+               loop
+                  B := Byte_At (Str, I);
+                  exit when B = 0;
+                  if B = Dot then
+                     In_F := True;
+                  elsif B >= Zero and then B <= Nine then
+                     if In_F then
+                        Scale := Scale / 10.0;
+                        Frac := Frac
+                          + Long_Float (Natural (B - Zero)) * Scale;
+                     else
+                        Whole := Whole * 10.0
+                          + Long_Float (Natural (B - Zero));
+                     end if;
+                  else
+                     exit;
+                  end if;
+                  I := I + 1;
+               end loop;
+               if Neg then
+                  Park_R (XP, -(Whole + Frac));
+               else
+                  Park_R (XP, Whole + Frac);
+               end if;
+               Park_I (RP, 0);
+               return Ok;
+            end;
          when Max_Natives + 2 =>
             --  o2c_conv_fromint: id 7, foreign slot 3.  Void - the value is
             --  popped and the digits are written through the second argument,

@@ -7116,9 +7116,17 @@ package body O2c_Compiler is
                               --  native that exists is wired; the rest still
                               --  refuse rather than appending Ada text that
                               --  bytecode would discard.
+                              --  ToInt and ToReal take the same three
+                              --  arguments in the same order - string, the
+                              --  out slot, the status - and differ only in
+                              --  whether that slot holds an INTEGER or a
+                              --  REAL, which the native knows and the call
+                              --  site does not need to.
                               if Eq_No_Case (MNm, "Convert")
-                                and then Eq_No_Case
-                                  (To_String (MName), "ToInt")
+                                and then (Eq_No_Case
+                                            (To_String (MName), "ToInt")
+                                          or else Eq_No_Case
+                                            (To_String (MName), "ToReal"))
                                 and then N_A = 3
                               then
                                  declare
@@ -7145,9 +7153,12 @@ package body O2c_Compiler is
                                  O2c_BC.Load_Addr_G
                                    (O2c_BC.Global
                                       (Ada_Id (To_String (Arg_R (3).Text))));
-                                 --  id Max_Natives + 1: the second foreign
-                                 --  entry, appended after labs.
-                                 O2c_BC.Native_Call (6, 3);
+                                 --  Foreign entries 2 and 4: ToInt and
+                                 --  ToReal, native ids 6 and 8.
+                                 O2c_BC.Native_Call
+                                   ((if Eq_No_Case (To_String (MName),
+                                                    "ToInt")
+                                     then 6 else 8), 3);
                               elsif Eq_No_Case (MNm, "Convert")
                                 and then Eq_No_Case
                                   (To_String (MName), "FromInt")
