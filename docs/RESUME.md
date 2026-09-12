@@ -5,7 +5,7 @@ then corrected and extended by the two sessions that followed it - the unary
 operators, then construct coverage.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
-    HEAD            d8312f5 (bc: LOOP/EXIT were silent) - docs commit on top
+    HEAD            aad25dc (tests: construct coverage, from the lexer)
     commits         297
     fixtures        68 in tests/bc/
     foreign natives 21 in vm/obc_vm.adb
