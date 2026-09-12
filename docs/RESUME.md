@@ -7,7 +7,7 @@ Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
     commits         311
-    fixtures        77 in tests/bc/
+    fixtures        78 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -1433,6 +1433,46 @@ context-heavy, read-only question - which is what the explore subagent is for: i
 can read the whole designator/selector path and report the site without spending
 the editing budget on guesses.  Proposed rather than done, since it opens a new
 exploration path and the guard on this turn said to stop.
+
+
+### 3ac. DONE — item 1: multi-level arrays (and the site was not where I looked)
+
+A record field that is an ARRAY OF ARRAYS now works, verified by a new fixture
+(`tests/bc/nestedarr.ob2`, hand-computed golden, corroborated by both backends),
+and the progress metric moved:
+
+    hello.ob2 refuses at  'Tote'  ->  'Files.Rider'
+
+Two halves, as 3x said, but **1b was not the code I had patched three times**:
+
+    1a  `Total_Slots` for an array whose element is a user type is
+        `Arr_Len * Total_Slots (Elem_UT)`, not `Arr_Len` - one line.
+    1b  the `Elem_UT /= 0` branch inside `Parse_Rec_Ptr_Chain` (line 2073)
+        already advanced the type and appended Ada text, and emitted NO ROW
+        OFFSET.  The scalar-subscript branch I kept editing is never reached for
+        a user-typed element: the `DESIG` trace showed it firing only for `V4`.
+
+The fix lives at that branch and does not touch the wire format: scale the index
+by `Total_Slots (Elem_UT) * 8`, add the array's base if it is not already on the
+stack, then mark `D.Base_On_Stack` so the next subscript chains from THAT address
+instead of re-deriving the array's and dropping the row.
+
+**How it was found, because it is the part worth repeating**: four attempts of
+mine failed - three of them harness mistakes (stale line numbers, a regex that ate
+real code, anchors that matched more than one site), not wrong hypotheses - and
+the site was named in one read-only pass by the **explore subagent**, which could
+read the whole designator/selector path without spending the editing budget on
+rebuilds.  Two rules this item earned, now cheap to follow:
+
+- instrument by TEXT anchor, never by line number, and re-read the file for the
+  anchor after every preceding edit;
+- a NEGATIVE trace result is a result: "this branch never fires" (3aa) is what
+  made the search space small enough to hand to someone else.
+
+**Item 2 is already visible**: `Files.Rider`, an IMPORTED record
+(`record f: File; pos: longint; eof: boolean; res: integer; cur: A1 end`) - so the
+next question is how a record lays out when its description came from another
+module.
 
 
 ## 4. Method — what worked, and what did not

@@ -1077,9 +1077,10 @@ package body O2c_Compiler is
             --  terminator: a boolean array is a run of values, not a string.
             return (Natural (UTypes (UT).Arr_Len) + 7) / 8;
          end if;
-         --  An array of slot-scalars is its length: that is both its
-         --  footprint and what a variable of it needs nominating.  A record
-         --  has Arr_Len zero and falls through to the field walk.
+         if UTypes (UT).Elem_UT /= 0 then
+            return Natural (UTypes (UT).Arr_Len)
+              * Total_Slots (UTypes (UT).Elem_UT, Depth + 1);
+         end if;
          return Natural (UTypes (UT).Arr_Len);
       end if;
       if Depth > 8 then
@@ -1305,13 +1306,19 @@ package body O2c_Compiler is
          then
             null;                  --  one word: a pointer either way
          elsif UTypes (UTypes (U).F (J).UT).Arr_Len > 0 then
-            --  a fixed array of slot scalars
-            if not (UTypes (UTypes (U).F (J).UT).Elem = T_Int
+            if UTypes (UTypes (U).F (J).UT).Elem_UT /= 0 then
+               if not Fields_Allowed (UTypes (UTypes (U).F (J).UT).Elem_UT,
+                                      Depth + 1)
+               then
+                  return False;
+               end if;
+            elsif not (UTypes (UTypes (U).F (J).UT).Elem = T_Int
                     or else UTypes (UTypes (U).F (J).UT).Elem = T_Char
                     or else UTypes (UTypes (U).F (J).UT).Elem = T_Bool
                     or else UTypes (UTypes (U).F (J).UT).Elem = T_Set
                     or else UTypes (UTypes (U).F (J).UT).Elem = T_Real
-                    or else UTypes (UTypes (U).F (J).UT).Elem = T_LReal)
+                           or else UTypes (UTypes (U).F (J).UT).Elem
+                             = T_LReal)
             then
                return False;
             end if;
@@ -2064,6 +2071,23 @@ package body O2c_Compiler is
                Expect (Lex.Tok_RBracket, "']'");
                Next;
                if UTypes (UT).Elem_UT /= 0 then
+                  if O2c_BC.Bytecode_Mode then
+                     --  This subscript selects a ROW, not a slot, so the offset must be
+                     --  computed here: no opcode scales by anything but one slot
+                     --  (LOAD_IDX_* hard-code eight bytes).  The stack holds the index;
+                     --  scale it, add the array's base, and mark the base as being on
+                     --  the stack so the next subscript chains from THIS address instead
+                     --  of re-deriving the array's and dropping the row index - which is
+                     --  what made two rows alias.
+                     O2c_BC.Push_Int (Total_Slots (UTypes (UT).Elem_UT) * 8);
+                     O2c_BC.Bin (O2c_BC.Mul);
+                     if not D.Base_On_Stack then
+                        O2c_BC.Load_Addr_G
+                          (O2c_BC.Global_Array (Base_Name, Total_Slots (Base_UT)));
+                     end if;
+                     O2c_BC.Bin (O2c_BC.Add);
+                     D.Base_On_Stack := True;
+                  end if;
                   --  element is a user type: keep chaining on it
                   D.Text := D.Text & " (" & To_String (Ix.Text) & ")";
                   UT := UTypes (UT).Elem_UT;
@@ -5254,7 +5278,9 @@ package body O2c_Compiler is
                declare
                   Ok_Arr : constant Boolean :=
                     UTypes (UT).Arr_Len > 0
-                    and then (UTypes (UT).Elem = T_Int
+                    and then ((UTypes (UT).Elem_UT /= 0
+                               and then Fields_Allowed (UTypes (UT).Elem_UT))
+                              or else UTypes (UT).Elem = T_Int
                               or else UTypes (UT).Elem = T_Char
                               or else UTypes (UT).Elem = T_Bool
                               or else UTypes (UT).Elem = T_Real);
