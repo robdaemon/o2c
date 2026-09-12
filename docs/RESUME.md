@@ -1338,6 +1338,38 @@ Fixture, kept here because the commit that needs it will need it verbatim:
        0 1 2 3 10 11 12 13 *)
 
 
+### 3z. ITEM 1: three patches, no effect — so the branch is unverified
+
+Attempted item 1 whole - 1a (recursive size), 1b (the subscript step moves the
+base for a user-typed element), 1c (a locally declared array records
+`Elem_UT`) - and **reverted all of it**, because the fixture says the work is not
+doing what it claims:
+
+    m1 (two-level array)  expected: 0 1 2 3 10 11 12 13
+                          measured: 10 11 12 13 10 11 12 13     (unchanged)
+
+with the compiled image the same size (712 bytes) before and after 1b and 1c.
+**Unchanged output AND unchanged image size means the emitted code did not
+change**, i.e. the branch I patched is not the branch that runs for `m[i][j]`.
+That is the finding, and it is worth more than another patch: I was editing a
+subscript path on the strength of where it lives in the file, without evidence
+that it executes.
+
+1a alone is proven - the progress metric moved to `Files.Rider` with it and moved
+back when the whole attempt was reverted - and it is one line, reproduced below.
+
+**The next step is a trace, not a patch.**  The technique that cracked the earlier
+cross-module case was instrumenting the two candidate paths and reading which one
+fires (`PA in`/`PA out`).  The same applies here: instrument the designator's
+subscript step to report base type, element type, `Elem_UT` and which branch is
+taken, then run `m1`.  Until that says which code runs, any fix is a guess dressed
+as a change - which is exactly what 1b and 1c were.
+
+**State: item 1 is refused, not half-done** (`o2c_compiler.adb:5279`), so the safe
+behaviour is unchanged: a nested-array variable is refused loudly rather than
+laid out wrongly.  The fixture and 1a are kept in 3x/3y.
+
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
