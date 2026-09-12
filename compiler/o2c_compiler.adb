@@ -425,6 +425,18 @@ package body O2c_Compiler is
       return Nm;
    end Ada_Id;
 
+   --  Push an actual argument that is a VALUE.  A folded literal pushes its
+   --  constant; anything else loads by name.  Bc_Load alone is wrong for a
+   --  literal - it would look up a global called "1".
+   procedure Bc_Push_Arg (A : Expr_Rec) is
+   begin
+      if A.Folds and then A.Typ = T_Int then
+         O2c_BC.Push_Int (A.Val);
+      else
+         Bc_Load (Ada_Id (To_String (A.Text)));
+      end if;
+   end Bc_Push_Arg;
+
    --  Like Ada_Id, but for a qualified Oberon reference ('Math.Point'):
    --  only the final component is an Ada identifier emitted as-is.
    function Ada_Last (Q : String) return String is
@@ -3323,6 +3335,11 @@ package body O2c_Compiler is
                               declare
                                  Args : array (1 .. Max_Params)
                                    of Unbounded_String;
+                                 --  The parsed form too: a bytecode
+                                 --  emission needs the operand's type and
+                                 --  name, which the Ada text cannot give.
+                                 Arg_R : array (1 .. Max_Params)
+                                   of Expr_Rec;
                                  N_A  : Natural := 0;
                                  Call : Unbounded_String;
                               begin
@@ -3338,6 +3355,7 @@ package body O2c_Compiler is
                                          Parse_Actual (X_Formal (XI, N_A));
                                     begin
                                        Args (N_A) := A.Text;
+                                       Arg_R (N_A) := A;
                                     end;
                                     exit when Cur.Kind /= Lex.Tok_Comma;
                                     Next;
@@ -3359,6 +3377,25 @@ package body O2c_Compiler is
                                     Call := Call & Args (I);
                                  end loop;
                                  Call := Call & ")";
+                                 if O2c_BC.Bytecode_Mode
+                                   and then Eq_No_Case (FNm, "XYplane")
+                                   and then Eq_No_Case (MName, "IsDot")
+                                   and then N_A = 2
+                                 then
+                                    --  IsDot (x, y) is the one plane
+                                    --  primitive that RETURNS, so it is the
+                                    --  first thing to need a bytecode
+                                    --  emission on the expression path -
+                                    --  every earlier helper wrote through an
+                                    --  address and had no result to produce.
+                                    for K in 1 .. 2 loop
+                                       Bc_Push_Arg (Arg_R (K));
+                                    end loop;
+                                    O2c_BC.Native_Call (17, 2);
+                                    R.Typ := T_Bool;
+                                    R.Lit := False;
+                                    R.Folds := False;
+                                 end if;
                                  R.Text := Call;
                               end;
                            elsif Xs (XI).Params /= 0 then
@@ -7329,6 +7366,16 @@ package body O2c_Compiler is
                                     --  Native id 13: foreign entry 9.
                                     O2c_BC.Native_Call (13, 3);
                                  end;
+                              elsif Eq_No_Case (MNm, "XYplane")
+                                and then Eq_No_Case
+                                  (To_String (MName), "Dot")
+                                and then N_A = 3
+                              then
+                                 --  Dot (x, y, mode): three values.
+                                 for K in 1 .. 3 loop
+                                    Bc_Push_Arg (Arg_R (K));
+                                 end loop;
+                                 O2c_BC.Native_Call (16, 3);
                               else
                                  raise O2c_BC.Wrong_Construct with
                                    "bytecode backend: " & MNm & "."
@@ -7347,10 +7394,29 @@ package body O2c_Compiler is
                         if O2c_BC.Bytecode_Mode
                           and then Is_FFI_Mod (MNm)
                         then
-                           raise O2c_BC.Wrong_Construct with
-                             "bytecode backend: " & MNm & "."
-                             & To_String (MName)
-                             & " is an FFI primitive and is not yet supported";
+                           if Eq_No_Case (MNm, "XYplane")
+                             and then Eq_No_Case
+                               (To_String (MName), "Clear")
+                           then
+                              O2c_BC.Native_Call (15, 0);
+                           elsif Eq_No_Case (MNm, "XYplane")
+                             and then Eq_No_Case
+                               (To_String (MName), "Open")
+                           then
+                              --  Open's body sets four module globals and
+                              --  passes two on; nothing else reads them, so
+                              --  the constants are inlined and the globals
+                              --  are not needed at all.
+                              O2c_BC.Push_Int (640);
+                              O2c_BC.Push_Int (400);
+                              O2c_BC.Native_Call (14, 2);
+                           else
+                              raise O2c_BC.Wrong_Construct with
+                                "bytecode backend: " & MNm & "."
+                                & To_String (MName)
+                                & " is an FFI primitive and is not yet "
+                                & "supported";
+                           end if;
                         end if;
                         Append_Body ("      " & Ada_Id (MNm) & "."
                                      & Ada_Id (To_String (MName)) & ";");

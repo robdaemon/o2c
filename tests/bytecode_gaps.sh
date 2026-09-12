@@ -220,6 +220,43 @@ else
    bad "Args.Get no longer compiles: $(tail -1 "$WORK/args.log")"
 fi
 
+#  XYplane.  Dot and Clear are only observable through IsDot, so all four are
+#  asserted together - and IsDot is the first thing here to return a value,
+#  which is what makes it the probe for the expression path as well.
+cat > "$WORK/plane.ob2" <<'EOB'
+module PlaneT;
+import XYplane, Out;
+var i: integer;
+begin
+  i := 0;
+  if XYplane.IsDot(99, 99) then i := i + 1 end;
+  Out.Int(i, 0); Out.Ln;
+  XYplane.Open;
+  XYplane.Dot(10, 20, 0);
+  i := 0;
+  if XYplane.IsDot(10, 20) then i := i + 10 end;
+  if XYplane.IsDot(99, 99) then i := i + 1 end;
+  Out.Int(i, 0); Out.Ln;
+  XYplane.Clear;
+  i := 0;
+  if XYplane.IsDot(10, 20) then i := i + 100 end;
+  Out.Int(i, 0); Out.Ln
+end PlaneT.
+EOB
+if timeout 60 "$FRONT" "$WORK/plane.ob2" "$WORK/plane.obc" >"$WORK/plane.log" 2>&1; then
+   got="$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/plane.obc" 2>/dev/null \
+            | tr -d '\n\r')"
+   #  got has its newlines stripped: the three lines are 0 (never opened),
+   #  10 (set) and 0 (cleared).
+   if [ "$got" = "0100" ]; then
+      note "  ok  XYplane Dot/Clear/IsDot verified through IsDot"
+   else
+      bad "XYplane printed '$got', expected 0, 10 and 0 (unopened/set/cleared)"
+   fi
+else
+   bad "XYplane no longer compiles: $(tail -1 "$WORK/plane.log")"
+fi
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0

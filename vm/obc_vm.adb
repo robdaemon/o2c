@@ -197,6 +197,17 @@ package body OBC_VM is
    type U64_Array is array (Natural range <>) of U64;
    type U64_Array_Access is access U64_Array;
 
+   --  The drawing plane, as the Ada backend models it: a shadow bitmap in the
+   --  program rather than hardware, so no VM_Platform seam - there is no
+   --  host/guest difference to express.  Heap-allocated because the guest
+   --  stack is 256 KiB and 640x400 is most of that on its own.
+   Plane_Max : constant := 640 * 400;
+   type Plane_Array is array (0 .. Plane_Max - 1) of Byte;
+   type Plane_Access is access Plane_Array;
+   Plane   : Plane_Access := null;
+   Plane_W : Natural := 0;
+   Plane_H : Natural := 0;
+
    --  One interpreter invocation's root-bearing state.  It lives in a
    --  record rather than as locals of Execute because interpretation can
    --  nest - a C callback calling back into Oberon runs a second Execute
@@ -390,6 +401,10 @@ package body OBC_VM is
       7 => (Sym => new String'("o2c_envget"), Pops => 2),
       8 => (Sym => new String'("o2c_envset"), Pops => 2),
       9 => (Sym => new String'("o2c_argget"), Pops => 3),
+      10 => (Sym => new String'("o2c_planeopen"), Pops => 2),
+      11 => (Sym => new String'("o2c_planeclear"), Pops => 0),
+      12 => (Sym => new String'("o2c_planedot"), Pops => 3),
+      13 => (Sym => new String'("o2c_planeisdot"), Pops => 2),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -408,6 +423,10 @@ package body OBC_VM is
       11 => 2,    --  o2c_envget: name address, value address (out)
       12 => 2,    --  o2c_envset: name address, value address
       13 => 3,    --  o2c_argget: n (value), buf address, res address
+      14 => 2,    --  o2c_planeopen: w, h
+      15 => 0,    --  o2c_planeclear: nothing
+      16 => 3,    --  o2c_planedot: x, y, mode
+      17 => 2,    --  o2c_planeisdot: x, y
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -415,7 +434,11 @@ package body OBC_VM is
    --  which or the pushed value reads as a stack imbalance.  The interpreter
    --  learns the same thing from the native itself, via Native_Result.
    Native_Pushes : constant array (0 .. Native_Count - 1) of Boolean :=
-     (5 => True, others => False);
+     (5 => True,
+      --  o2c_planeisdot returns a BOOLEAN; the other plane ops only write
+      --  into the shadow and report nothing.
+      17 => True,
+      others => False);
 
    --  Arguments handed to a native, leftmost first.  The table above gives
    --  the arity per id and the verifier enforces it, so this is only the
@@ -1222,6 +1245,56 @@ package body OBC_VM is
       end Put_Str;
    begin
       case Idx is
+         when Max_Natives + 9 .. Max_Natives + 12 =>
+            --  The plane: Open (14), Clear (15), Dot (16), IsDot (17).
+            --  Bounds are checked exactly as the Ada backend's helpers check
+            --  them, because a program written against that behaviour has to
+            --  behave the same.  A plane that was never opened has
+            --  Plane_W = 0, which drops every Dot.
+            declare
+               function C (K : Natural) return Integer is
+                 (Integer (To_I64 (Args (K))));
+               function Live return Boolean is
+                 (Plane /= null
+                  and then Plane_W > 0
+                  and then C (0) >= 0
+                  and then C (1) >= 0
+                  and then C (0) < Plane_W
+                  and then C (1) < Plane_H);
+            begin
+               if Idx = Max_Natives + 9 then
+                  if C (0) > 0 and then C (1) > 0
+                    and then C (0) * C (1) <= Plane_Max
+                  then
+                     Plane_W := Natural (C (0));
+                     Plane_H := Natural (C (1));
+                  else
+                     Plane_W := 0;
+                     Plane_H := 0;
+                  end if;
+                  if Plane = null then
+                     Plane := new Plane_Array;
+                  end if;
+                  Plane.all := (others => 0);
+               elsif Idx = Max_Natives + 10 then
+                  if Plane /= null then
+                     Plane.all := (others => 0);
+                  end if;
+               elsif Idx = Max_Natives + 11 then
+                  if Live then
+                     Plane (C (1) * Plane_W + C (0)) := 1;
+                  end if;
+               else
+                  Result :=
+                    (Pushes => True,
+                     Value  => To_U64
+                       (I64 (Boolean'Pos
+                               (Live
+                                and then Plane
+                                  (C (1) * Plane_W + C (0)) /= 0))));
+               end if;
+               return Ok;
+            end;
          when Max_Natives + 8 =>
             --  o2c_argget: id 13, foreign slot 9.  Void, three arguments:
             --  n as a VALUE, then the buffer and the result as addresses -
