@@ -317,6 +317,68 @@ for probe in 'Math.cos (0.0)|var x: real; begin x := Math.cos(0.0) end' \
    fi
 done
 
+#  Unary operators - the gap that was NOT in this list, and why.
+#
+#  `not` / `~` and unary `-` were neither implemented nor refused: they
+#  compiled, ran, and stored the operand UNCHANGED, with no diagnostic.  The
+#  checklist could not see them because it is generated from the compiler's
+#  refusals, and a construct that never refuses is invisible to that
+#  generation.  A wrong number is worse than a refusal - it is the failure
+#  mode the rest of this file exists to prevent - so it is asserted by VALUE,
+#  the same way the Convert trio is: a version that compiles and still drops
+#  the operator must FAIL here.
+cat > "$WORK/un.ob2" <<'EOB'
+module UnT;
+import Out;
+var y, x, i, acc: integer; r, q: real; f: boolean;
+begin
+  y := 7;   x := -y;  Out.Int(x, 0); Out.Ln;
+  r := 2.5; q := -r;  Out.Real(q, 0); Out.Ln;
+  Out.Int(-42, 0); Out.Ln;
+  f := true;
+  if not f then Out.Int(1, 0) else Out.Int(0, 0) end; Out.Ln;
+  acc := 0; for i := -2 to 2 do acc := acc + i end; Out.Int(acc, 0); Out.Ln
+end UnT.
+EOB
+if timeout 60 "$FRONT" "$WORK/un.ob2" "$WORK/un.obc" >"$WORK/un.log" 2>&1; then
+   got="$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/un.obc" 2>/dev/null | tr -d '\n\r')"
+   #  -7, -2.500, -42, 0 (NOT of true) and 0 (-2-1+0+1+2)
+   if [ "$got" = "-7-2.500-4200" ]; then
+      note "  ok  unary '-' and 'not' compute (verified by value, not by compiling)"
+   else
+      bad "unary operators printed '$got', expected -7-2.500-4200"
+   fi
+else
+   bad "unary '-'/'not' no longer compile: $(tail -1 "$WORK/un.log")"
+fi
+
+#  LONGINT arithmetic still refuses, and unary minus is arithmetic.  Asserted
+#  so that the one place a sign is now an opcode cannot quietly start emitting
+#  a 32-bit NEG for a 64-bit value.
+cat > "$WORK/ln.ob2" <<'EOB'
+module LN;
+var n: longint;
+begin n := 5; n := -n end LN.
+EOB
+if timeout 60 "$FRONT" "$WORK/ln.ob2" "$WORK/ln.obc" >"$WORK/ln.log" 2>&1
+then
+   bad "unary minus on LONGINT compiled - it has no 64-bit opcode and must refuse"
+elif grep -q "LONGINT is not yet supported" "$WORK/ln.log"; then
+   note "  ok  unary minus on LONGINT still refuses loudly"
+else
+   bad "LONGINT unary minus failed for the wrong reason: $(tail -1 "$WORK/ln.log")"
+fi
+
+note "--- BOOLEAN operators: the divergences that DO refuse ---"
+#  The real remaining gap at the operator site.  Both are accepted by the Ada
+#  backend and refused, loudly, here.
+#
+#  `or` on a SET is deliberately NOT listed: both backends reject it (the
+#  operand-type check runs before the mode test), so it is a front-end limit
+#  rather than a backend divergence, and a differential could never see it.
+check "BOOLEAN or"  blocked 'module G40; import Out; var g: boolean; begin g := (1 = 1) or (2 = 3) end G40.'
+check "BOOLEAN &"   blocked 'module G41; import Out; var g: boolean; begin g := (1 = 1) & (2 = 3) end G41.'
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0

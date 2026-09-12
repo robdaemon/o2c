@@ -244,7 +244,7 @@ LOUDLY. Regenerate with:
 
     &                      string concatenation
     LONGINT                arithmetic (assignment and comparison DO work)
-    BOOLEAN operators      and/or/not on BOOLEAN values
+    BOOLEAN and/or         `&` and `or` on BOOLEAN values (NOT now works - A.1)
     mixed INTEGER/REAL     an operation needing an implicit I2R
     NEW of a ptr designator      assigning through a ptr designator
     a method on a VAR record receiver
@@ -264,6 +264,32 @@ accepts wider than the text claims:
   - "only INTEGER/CHAR/REAL comparisons are supported"     - also LONGINT
 
 Read the code, not the message. Correcting the text is outstanding work.
+
+### A.1 These refusals are NOT the whole gap - two constructs were SILENT
+
+Section A cannot be complete, and the way it was incomplete is worth recording
+because the generation command above is blind to it BY CONSTRUCTION. A construct
+that is neither implemented nor refused emits no opcode and raises nothing: it
+compiles, runs, and quietly keeps the operand. Two did:
+
+    unary -    x := -y     stored y      (y = 7 printed 7,   not -7)
+    not / ~    g := not f  stored f      (f = true printed 1, not 0)
+
+Neither appears in the list above, because neither refuses. They were found by
+PROBING, not by the grep - which is the point: `grep '"bytecode backend: ..."'`
+enumerates refusals, so it can only ever find constructs that already fail
+loudly, and the failure that matters most is the one that does not.
+
+Both are fixed (the unary operator commit): `Neg`/`Rneg` are emitted for a
+unary sign - raised from here, where bytecode was silent - and `not b` is
+emitted as `b = 0`, which needs no new opcode because a BOOLEAN is 0/1 in this
+VM. tests/bc/unops.ob2 locks both BY VALUE and bytecode_gaps.sh asserts them,
+so a regression reads as a wrong number in a golden rather than as a compile
+error.
+
+    REFUSAL COMPLETENESS and IMAGE CORRECTNESS are two different claims.
+    Section A is evidence for the first only, and only up to what the grep can
+    see. Nothing here is evidence for the second - the differential is.
 
 ### B. Modules
 
@@ -316,17 +342,35 @@ Read the code, not the message. Correcting the text is outstanding work.
     require a fixture for each. Finds UNEXERCISED constructs, which the
     differential cannot: a construct no test uses cannot disagree.
 
-  The second one is not theoretical. Running it against tests/bc, samples and
-  tests/vm found exactly two token kinds with no fixture anywhere - `>=` and
-  `or` - and probing those turned up a real gap:
+  The second one is not theoretical, but running it also shows why it is not
+  enough. It found exactly two token kinds with no fixture anywhere - `>=` and
+  `or` - and the first reading of the `or` result was WRONG:
 
       INTEGER >=   works        REAL >=   works
-      SET or       "OR needs BOOLEAN operands"   <- the Ada backend ACCEPTS this
-      BOOLEAN or   refused (known)
+      BOOLEAN or   Ada backend accepts, bytecode refuses   <- the REAL gap
+      SET or       rejected by BOTH backends
 
-  `or` on a SET is accepted by the Ada backend (its text is "a or b") and
-  rejected by the bytecode backend, and NO fixture used `or` at all, so the
-  differential had nothing to compare. That is the caveat, demonstrated.
+  The earlier version of this file recorded "SET or: the Ada backend ACCEPTS
+  this". It does not. The operand-type check at o2c_compiler.adb:4443 runs
+  BEFORE the Bytecode_Mode test, so SET operands raise the same O2c_Error in
+  either mode - a FRONT-END limit, not a backend divergence, and therefore
+  something no differential could ever have found, because both backends agree.
+  Measured by calling the Ada-text entry point `O2c_Compiler.Compile` (the M1
+  door, which never sets Bytecode_Requested): `c := a or b` raises, while
+  `c := a + b` and `b := (1=1) or (2=3)` both compile. The site's two mode
+  branches had been crossed - `" or "` is emitted on the BOOLEAN branch, which
+  bytecode refuses two lines earlier, while the SET branch is the one that
+  raises. `or` on a SET is not Oberon-2 set union either; `+` is, and works.
+
+  Coverage also counted a hit that does not cover the backend. `~` appears in
+  samples/hello.ob2, which NO test and NO Makefile target ever compiles, so
+  Tok_Tilde read as "covered" while `not` was silently wrong in bytecode (A.1).
+  A grep over "the corpus" is only as good as the corpus being the one the
+  backend actually runs.
+
+  So coverage found the construct with no fixture - but its verdict on what
+  that construct DOES was wrong, and it read a hit from a file the backend
+  never sees. Coverage says where to look; it does not say what is there.
 
   Both checks are cheap. Coverage is a grep over the corpus for each token kind;
   the differential is the guest gate already there. Neither is a list anyone has

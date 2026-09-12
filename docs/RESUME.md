@@ -3,9 +3,9 @@
 Written at the end of a long session on the bytecode backend's FFI surface.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
-    HEAD            2e3cc7b
-    commits         292
-    fixtures        64 in tests/bc/
+    HEAD            "bc: unary operators reach the stack" - see git log -1
+    commits         294
+    fixtures        65 in tests/bc/
     foreign natives 21 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -59,17 +59,62 @@ outlive its gap.
 
       grep -o '"bytecode backend: [^"]*"' compiler/o2c_compiler.adb | sort -u
 
+### ...and the session after that one: the unary operators
+
+- **`not`/`~` and unary `-` emitted no opcode.** They compiled, ran, and stored
+  the operand unchanged — `x := -y` printed the value of `y`, `if not f` took
+  the true branch for a true `f`. Silent wrong images, and invisible to section
+  A because they never *refuse*. Both now emit (`Neg`/`Rneg` for a sign,
+  `b = 0` for `not`), `tests/bc/unops.ob2` locks them by value, and
+  `bytecode_gaps.sh` asserts them — see §3a.
+- **The `SET or` entry this file used to carry was wrong**, and the way it was
+  wrong is the useful part: see §3a and `docs/bytecode-gaps.md` section C.
+
 ## 3. Next tasks, in order
 
-### 3a. Fix `SET or` — small, named, loud
+### 3a. DONE — but not the task this section named. Read the correction.
 
-`or` on a SET is **accepted by the Ada backend** (its emitted text is `"a or b"`)
-and **rejected by the bytecode backend** (`OR needs BOOLEAN operands`). Set
-union via `+` works; `or` does not. No fixture used `or` at all, which is why
-the differential could never have found it.
+**The entry this section used to carry was WRONG, and the wrongness is the
+finding.** It said `or` on a SET is "accepted by the Ada backend and rejected by
+the bytecode backend". It is accepted by NEITHER. The operand-type check at
+`o2c_compiler.adb:4443` runs **before** the `Bytecode_Mode` test, so SET operands
+raise the same `O2c_Error` in either mode — a front-end limit, not a backend
+divergence, and therefore something a differential could never have found: both
+backends agree.
 
-This is a real gap in a construct one backend supports and the other does not.
-Start here: it is small and it is already diagnosed.
+Measured, not inferred — by calling the Ada-text entry point
+`O2c_Compiler.Compile` (the M1 door, which never sets `Bytecode_Requested`):
+
+    c := a or b;          Ada mode: O2c_Error   bytecode: O2c_Error
+    c := a + b;           Ada mode: compiles    bytecode: compiles, runs
+    f := (1=1) or (2=3);  Ada mode: compiles    bytecode: refuses, loudly
+
+The site's two mode branches had been crossed: `" or "` is emitted on the
+BOOLEAN branch, which bytecode refuses two lines earlier, while the SET branch
+is the one that raises.
+
+**What that construct was actually hiding.** `not` / `~` and unary `-` emitted
+**no opcode at all** — neither implemented nor refused. They compiled, ran, and
+stored the operand unchanged:
+
+    x := -y     printed  7   for y = 7      (not -7)
+    g := not f  printed  1   for f = true   (not 0)
+
+Silent wrong images — the exact failure the "default is refusal" work exists to
+eliminate — and invisible to the checklist, which is generated from the
+compiler's *refusals* and so cannot see a construct that never refuses.
+
+**Both fixed.** `Neg`/`Rneg` are now emitted for a unary sign (`LONGINT` still
+refuses, consistently with its other arithmetic), and `not b` is emitted as
+`b = 0`, which needs no new opcode because a BOOLEAN is 0/1 in this VM.
+`tests/bc/unops.ob2` locks both by value and `bytecode_gaps.sh` asserts them.
+The change is depth-neutral by construction, so the `FOR` header's `BY`
+discard — and every other stack site — is unaffected.
+
+**What is left at this site** is the loud half, now recorded in
+`bytecode_gaps.sh` as `blocked`: `&` and `or` on BOOLEAN values. Both need
+AND/OR opcodes, and the spec has none — `docs/obc-image.md` puts BOOLEAN at
+0x66/0x67/0x68 (BEQ/BNE/BTEST) with 0x72–0x7F reserved.
 
 ### 3b. Coverage: a fixture per construct
 
@@ -80,6 +125,21 @@ checked by a differential, because a construct no test uses cannot disagree.
 A first pass over `tests/bc`, `samples` and `tests/vm` found exactly two token
 kinds with no fixture anywhere — `>=` and `or`. `>=` works; `or` is 3a. Make the
 check standing: **grep the corpus for each `Tok_*` spelling and require a hit.**
+
+Two corrections to that method, both learned by running it:
+
+- **Its verdict on a construct was wrong.** It found the construct with no
+  fixture, then recorded the wrong reason `or` failed; and it counted `~` as
+  covered because `samples/hello.ob2` contains one, although no test and no
+  Makefile target ever compiles that file. Coverage says *where to look*, not
+  what is there — and a hit only counts if the backend actually runs it.
+- **A second pass finds a third gap.** `for i := 3 to 1` never runs its body:
+  `Asc` comes from whether the `BY` text starts with `-`, and the way to ask for
+  a descent — `by -1` — is rejected with "FOR BY must be an integer constant",
+  because `-1` reaches the header as the text `-(1)`. The header's digit check
+  even allows a leading `-`, so `by -1` was *meant* to work; the unary-minus text
+  form defeats it. No fixture and no doc mentions either spelling. Not caused by
+  the unary-operator fix (that fix is depth-neutral); diagnosed, not fixed.
 
 ### 3c. Differential: run the corpus through both backends
 
@@ -183,11 +243,21 @@ message while changing nothing; `git status` was clean. After any scripted edit,
     vm/compat-host|aegir/      the two seam bodies
     tools/o2c_bc_host.adb      the host front end; takes libs as extra args
 
-## 7. One thing to decide early
+## 7. One thing to decide early — DECIDED
 
 The differential (3c) is the standing answer to "stop surprising me", but it
 only covers what the corpus exercises. **Ask whether the fixtures should be
 written per *construct* (3b) or per *feature*.** Per-construct is what makes
 coverage checkable mechanically against the lexer; per-feature is what the
-current 64 fixtures are. The answer probably changes how 3b is done, so decide
+previous 64 fixtures are. The answer probably changes how 3b is done, so decide
 it before writing fixtures.
+
+**Decided: per CONSTRUCT, mechanised against the lexer's `Tok_*` list.** The
+`or`/`not` work settled it. Both were invisible precisely because no fixture
+exercised the *token*: the corpus had 64 fixtures covering plenty of features
+and still never evaluated a unary operator. A feature-level list cannot be
+checked mechanically, and an uncheckable list is what let a silent wrong image
+survive. Two caveats to carry into the work, both measured above: the
+mechanical grep needs a per-token fixture **in `tests/bc`** (a hit in `samples`
+does not count — nothing runs it), and a hit only says *look here*, so each new
+fixture must assert the construct's **value**, not merely that it compiles.

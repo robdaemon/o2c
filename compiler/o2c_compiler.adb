@@ -2721,6 +2721,21 @@ package body O2c_Compiler is
                raise O2c_Error with "NOT needs a BOOLEAN operand (line "
                  & Natural'Image (Cur.Line) & ")";
             end if;
+            if O2c_BC.Bytecode_Mode then
+               --  The operand is already on the stack, put there while it was
+               --  parsed (Push_Bool for a literal, a load for anything else),
+               --  so NOT has to be an opcode here and not only text.  Leaving
+               --  it out stored the operand UNCHANGED and said nothing - the
+               --  silent wrong image this branch used to produce.
+               --
+               --  No new opcode is needed: a BOOLEAN is 0/1 in this VM (which
+               --  is why Op_Btest is a no-op), so `not b` IS `b = 0` - the
+               --  same integer EQ the BOOLEAN equality path already uses.
+               --  Push_Int is +1 and Bin is -1, so the pair is depth-neutral
+               --  and no caller's stack accounting changes.
+               O2c_BC.Push_Int (0);
+               O2c_BC.Bin (O2c_BC.Eq);
+            end if;
             R.Text := "not (" & R.Text & ")";
          when Lex.Tok_Minus | Lex.Tok_Plus =>
             declare
@@ -2734,6 +2749,28 @@ package body O2c_Compiler is
                   raise O2c_Error with "unary sign needs an INTEGER, "
                     & "LONGINT, REAL or LONGREAL (line "
                     & Natural'Image (Cur.Line) & ")";
+               end if;
+               if Neg and then O2c_BC.Bytecode_Mode then
+                  --  The operand is already on the stack - Push_Int or
+                  --  Push_Real put it there when the factor was parsed - so
+                  --  the sign is an opcode, not text.  Omitting it stored the
+                  --  unnegated value silently, which is the worse half: the
+                  --  program ran and printed a wrong number.
+                  --
+                  --  Un() leaves the depth alone, so emitting one here keeps
+                  --  every existing site's accounting, including the FOR
+                  --  header, which parses BY for its text and then Discards
+                  --  exactly the one value that parse pushed.
+                  if R.Typ = T_Long then
+                     --  Consistent with the other LONGINT arithmetic sites:
+                     --  assignment and comparison work, arithmetic refuses.
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & "LONGINT is not yet supported";
+                  elsif R.Typ = T_Real or else R.Typ = T_LReal then
+                     O2c_BC.Un (O2c_BC.Rneg);
+                  else
+                     O2c_BC.Un (O2c_BC.Neg);
+                  end if;
                end if;
                R.Text := (if Neg then "-" else "") & "(" & R.Text & ")";
                if Neg and then R.Folds then
