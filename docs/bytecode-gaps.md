@@ -364,12 +364,32 @@ statement branches that recognise them are unreachable and there is nothing to
 implement for them. Conversely `Files` reaches six primitives, not two, and four
 of those six were never on the list.
 
-`Files.FDel` is reachable as a primitive but is **not an exported procedure** of
-`module Files` - a program saying `Files.FDel (n)` gets "not exported by module
-Files". So implementing it means implementing the primitive for the module's own
-use, not exposing a new entry point. That is the same shape as Convert, where
-the exported name differs from the primitive (`ToInt` vs `ConvToInt`), and it is
-why probing by the primitive name is misleading.
+**Each primitive, and the exported procedure that reaches it.** Read from the
+`Oak_Files_Src` bodies rather than from the names, which is the only way that
+has worked here:
+
+    FStat  (name)              -> value        exported as Old
+    FRead  (name, pos, cur)    -> value        exported as Read
+    FWrite (name, pos, cur)    -> value        exported as Write, WriteString
+    FClose (name)              -> value        exported as Close
+    FRename(from, dst)         -> statement    exported as Rename
+    FDel   (name)              -> statement    exported as Delete
+
+So `Files.FDel` is not exported under that name, but `Files.Delete` **is** the
+exported procedure for it - calling the primitive name gives "not exported by
+module Files", which is what made it look absent. An earlier note in this file
+called `Files.Delete` a string delete; it is the file delete, and the body says
+so (`Delete (name) ... FDel (name)`).
+
+Two shapes, and both are already exercised: `Convert.ToInt` is the statement
+form taking addresses, `Convert.FromInt` the mixed value/address form. The
+four value-returning ones here (`FStat`, `FRead`, `FWrite`, `FClose`) are a
+third: a native that returns a result, which is what `labs` already does.
+
+**What has to be wired is the CALL SITE via M19, not the FFI statement branch.**
+The branches fire while compiling the module itself, and the module is compiled
+in Ada mode before `Begin_Mode` - so they stay unreachable, and the route user
+code takes is the imported-procedure path, exactly as for Convert.
 
 This is the first demonstration of the silent no-op rather than an argument that
 it must exist, and it needs no change to `Begin_Mode`, no new sources and no new
