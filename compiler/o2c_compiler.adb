@@ -5275,10 +5275,13 @@ package body O2c_Compiler is
                   if not (Ok_Arr or else Ok_Rec or else Ok_Ptr
                           or else Ok_Proc)
                   then
+                     --  Name the type: "not yet supported" with no subject
+                     --  is what makes a whole program's refusal unreadable.
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
                        & "non-INTEGER arrays, record extensions and records "
                        & "with non-INTEGER or user-typed fields are not yet "
-                       & "supported";
+                       & "supported ('" & To_String (UTypes (UT).Name)
+                       & "')";
                   end if;
                end;
             end if;

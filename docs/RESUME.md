@@ -1189,6 +1189,56 @@ real bytecode gaps closed, with `lenopen` as a new fixture and 48 fixtures
 corroborated by both backends.
 
 
+### 3w. TYPE COVERAGE — item 1, measured
+
+Decision: type coverage first, because that is what a real program refuses at
+BEFORE libraries or calls.  Scoped in public before any code, per the rule 3d
+cost us.
+
+**The boundary, read from the source.**  A variable declaration in bytecode mode
+is accepted only if its type is a pointer, a procedure value, an array whose
+element is `Int/Char/Bool/Real` with a non-zero length, or a record for which
+`Chain_Fields_Allowed` holds (`o2c_compiler.adb:5279`, `Fields_Allowed` at 1286).
+`Fields_Allowed` walks a record's fields, and for a field that is itself a
+user type it accepts exactly three shapes: the record itself (Oberon's implicit
+pointer), a POINTER, or a fixed array whose ELEMENT is a slot scalar
+(`Int/Char/Bool/Set/Real/LReal`).  Nested arrays are outside it.
+
+**Item 1, measured.**  The refusal now names the type it choked on - which is
+what made this measurable at all, and is the same lesson as
+`call to an unknown procedure`:
+
+    o2c error: bytecode backend: non-INTEGER arrays, record extensions and
+      records with non-INTEGER or user-typed fields are not yet supported
+      ('Tote')
+
+`samples/hello.ob2`:
+
+    type Vector = array 4 of integer;
+    type Mat    = array 2 of Vector;            <- element is an ARRAY
+    type Tote   = record m: Mat; k: integer end;
+    var  sac    : Tote;
+
+So item 1 is **a record field that is an array of arrays**, and it refuses
+correctly: the layout machinery carries one level of array-of-scalars, not two.
+Everything else in the program's type block is already fine - `Vector`, `Pair`,
+`Line`, `FLine`, the self-pointer chain `Node`/`NodeDesc`, and the local extension
+`Circle = record (Shape)`.
+
+**Named but NOT yet measured** (they come after item 1, so they cannot be
+measured until it lands): `P3 = record (Geom.Point) z: integer end` - an
+extension of an IMPORTED record - and whatever the refusal after that turns out
+to be.  Marked as unmeasured rather than listed as known.
+
+**The progress metric for this workstream**: `hello.ob2`'s refusal advances.
+Each item that lands moves that message later in the program, so the checklist is
+self-updating and the claim "item N is done" is checkable by anyone running one
+command.  That is the shape this work should have had from the start.
+
+**Item 1 is one level of array nesting in a record field.** The fixture that
+pins it comes with the fix, not before: the work order is item, test, commit.
+
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
