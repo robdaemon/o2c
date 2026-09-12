@@ -7148,6 +7148,36 @@ package body O2c_Compiler is
                                  --  id Max_Natives + 1: the second foreign
                                  --  entry, appended after labs.
                                  O2c_BC.Native_Call (6, 3);
+                              elsif Eq_No_Case (MNm, "Convert")
+                                and then Eq_No_Case
+                                  (To_String (MName), "FromInt")
+                                and then N_A = 2
+                              then
+                                 --  Value first, then the buffer address:
+                                 --  FromInt reads its argument and writes its
+                                 --  digits, where ToInt only writes.
+                                 Bc_Load
+                                   (Ada_Id (To_String (Arg_R (1).Text)));
+                                 declare
+                                    SNm : constant String :=
+                                      To_String (Arg_R (2).Text);
+                                    SId : constant Natural := Find (SNm);
+                                 begin
+                                    if SId = 0
+                                      or else Syms (SId).UT = 0
+                                    then
+                                       raise O2c_BC.Wrong_Construct with
+                                         "bytecode backend: Convert.FromInt "
+                                         & "needs a declared ARRAY OF CHAR "
+                                         & "variable";
+                                    end if;
+                                    O2c_BC.Load_Addr_G
+                                      (O2c_BC.Global_Array
+                                         (Ada_Id (SNm),
+                                          Total_Slots (Syms (SId).UT)));
+                                 end;
+                                 --  Native id 7: the third foreign entry.
+                                 O2c_BC.Native_Call (7, 2);
                               else
                                  raise O2c_BC.Wrong_Construct with
                                    "bytecode backend: " & MNm & "."

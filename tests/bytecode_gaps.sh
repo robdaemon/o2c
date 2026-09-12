@@ -82,15 +82,18 @@ var s: array 8 of char;
 begin
   s := "42";
   Convert.ToInt(s, x, r);
-  Out.Int(x, 0); Out.Ln
+  Out.Int(x, 0); Out.Ln;
+  x := 1234;
+  Convert.FromInt(x, s);
+  Out.String(s); Out.Ln
 end FFI.
 EOB
 if timeout 60 "$FRONT" "$WORK/ffi.ob2" "$WORK/ffi.obc" >"$WORK/ffi.log" 2>&1; then
    got="$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/ffi.obc" 2>/dev/null | tr -d '\n\r')"
-   if [ "$got" = "42" ]; then
-      note "  ok  Convert.ToInt converts (prints 42)"
+   if [ "$got" = "421234" ]; then
+      note "  ok  Convert.ToInt and FromInt convert (42 then 1234)"
    else
-      bad "Convert.ToInt printed '$got', expected 42"
+      bad "the FFI pair printed '$got', expected 421234"
    fi
 else
    bad "Convert.ToInt no longer compiles: $(tail -1 "$WORK/ffi.log")"

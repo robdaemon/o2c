@@ -382,6 +382,7 @@ package body OBC_VM is
       --  pair), so the call site pushes where the results go and the
       --  native writes through.  Appended after labs, never renumbered.
       2 => (Sym => new String'("o2c_conv_toint"), Pops => 3),
+      3 => (Sym => new String'("o2c_conv_fromint"), Pops => 2),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -393,6 +394,7 @@ package body OBC_VM is
      (0 => 2, 1 => 1, 2 => 0, 3 => 2, 4 => 1,
       5 => 1,     --  labs
       6 => 3,     --  o2c_conv_toint: str, var x, var res
+      7 => 2,     --  o2c_conv_fromint: x (value), var str
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -1207,6 +1209,52 @@ package body OBC_VM is
       end Put_Str;
    begin
       case Idx is
+         when Max_Natives + 2 =>
+            --  o2c_conv_fromint: id 7, foreign slot 3.  Void - the value is
+            --  popped and the digits are written through the second argument,
+            --  NUL-terminated, one byte per char, as the const pool stores
+            --  strings.  A leading minus, no padding: Oakwood's FromInt has
+            --  no width to honour.
+            declare
+               procedure Put_Byte (A : U64; N : Natural; V : Byte) is
+                  B : Byte with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A)
+                       + System.Storage_Elements.Integer_Address (N));
+               begin
+                  B := V;
+               end Put_Byte;
+               Zero : constant Character := '0';
+               V    : constant I64 := To_I64 (Args (0));
+               SP   : constant U64 := Args (1);
+               Buf  : String (1 .. 24);
+               N    : Natural := 0;
+               U    : U64;
+            begin
+               U := (if V < 0 then U64 (-V) else U64 (V));
+               if U = 0 then
+                  N := 1;
+                  Buf (1) := Zero;
+               else
+                  while U > 0 loop
+                     N := N + 1;
+                     Buf (N) := Character'Val (Character'Pos (Zero)
+                                               + Natural (U mod 10));
+                     U := U / 10;
+                  end loop;
+               end if;
+               if V < 0 then
+                  N := N + 1;
+                  Buf (N) := '-';
+               end if;
+               --  Buf holds the digits least-significant first.
+               for I in 1 .. N loop
+                  Put_Byte (SP, I - 1,
+                            Byte (Character'Pos (Buf (N - I + 1))));
+               end loop;
+               Put_Byte (SP, N, 0);
+               return Ok;
+            end;
          when Max_Natives + 1 =>
             --  o2c_conv_toint: id 6, foreign slot 2.  Void - it writes
             --  through the two out parameters - so it does not set Result.
