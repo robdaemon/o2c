@@ -9329,8 +9329,12 @@ package body O2c_Compiler is
                --  way for the most common statement in the language to fail.
                if O2c_BC.Bytecode_Mode then
                   if Syms (Idx).Bc_Proc = 0 then
-                     raise O2c_BC.Wrong_Construct with
-                       "bytecode backend: call to an unknown procedure";
+                     --  Name the procedure: "an unknown procedure" sent one
+                     --  hunt through every call site in the corpus to find out
+                     --  which one it meant.
+                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                       & "call to an unknown procedure '"
+                       & Head (1 .. H_Len) & "'";
                   end if;
                   O2c_BC.Call_Proc (Syms (Idx).Bc_Proc);
                end if;
@@ -11755,6 +11759,8 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
          end if;
          Res (C) := (File => To_Unbounded_String (File), Text => T);
       end Add;
+
+
       --  Which modules this call's sources import.
       --
       --  The builtin Oakwood modules are embedded SOURCE, so they must be

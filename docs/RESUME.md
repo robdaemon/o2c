@@ -646,53 +646,60 @@ native calls, and the four primitives are verified by effect. What is left of 3d
 is **step 3** — the `Begin_Mode` ordering — which is what lets a *user* program
 call `Files.Old`/`Read`/`Close` rather than only the module compiling.
 
-### 3m. MEASURED AND REVERTED — the ordering alone is not enough
+### 3m. MEASURED AND REVERTED — the ordering exposes a lost procedure id
 
 Step 3 was implemented as designed: `Begin_Mode` moved before the builtins, a
-`Scoped` flag per module, the main module switched on afterwards.  It builds
-clean.  **It regresses EVERY fixture**, and the suites caught it immediately:
+`Scoped` flag per module, the main module switched on afterwards, and the scoped
+set taken from the measurement below.  It builds clean.  **It regresses EVERY
+fixture**, and the suites caught it at once:
 
     run_bc: FAIL: sum: compile failed: o2c error: bytecode backend:
             call to an unknown procedure
-    run_bc: FAIL: ifelsif / vmgreet / proc / local / repeat / case / for ...
 
-Not "some" and not just the program that calls `Files.Old` — every program,
-including ones that never mention Files.  The reason is the one piece of step 3
-that is not ordering: **a bytecode procedure id is not exported.**  `X_Entry`
-(the export record) carries the name, kind, type, parameters and result type of
-an exported procedure, and **no bytecode id**:
+Not "some", and not just a program that calls `Files.Old` - every program,
+including ones that never mention Files.
 
-    type X_Entry is record      --  no Bc field
-       Owner, Name : Unbounded_String;
-       Kind  : Sym_Kind := S_Const;
-       ...
+**THE FIRST DIAGNOSIS WAS WRONG, and the correction is the useful part.**  The
+refusal used to say only "an unknown procedure", so the first write-up of this
+section blamed the export record (`X_Entry` carries no bytecode id, so an
+imported call cannot resolve).  Naming the procedure in the message settled it:
 
-`Bc_Proc` lives on the DECLARING module's `Syms` entry (`o2c_compiler.adb:5837`,
-set in `Decl_Procedure`).  Once the builtins' procedures are compiled into the
-image, a call site in the main module resolves its target through the export
-record, finds no id, and every call - including the ones that used to work -
-fails the `Bc_Proc = 0` check.
+    bytecode backend: call to an unknown procedure 'Bracket'
 
-So the dependency runs the other way from the way the plan assumed:
+`Bracket` is a procedure **in `Term`** - a LOCAL procedure, declared at line 13
+and called from line 30 on, so it is not a source-order forward reference either.
+The id assignment for a local procedure is `o2c_compiler.adb:5837`
+(`Syms (N_Sym).Bc_Proc := O2c_BC.Begin_Proc (...)`, in `Decl_Procedure`), and it
+does run.  The export record was never involved.
 
-    ids through the export record  ->  then  the ordering
-    (and NOT the ordering first, which breaks all seven suites)
+What the evidence actually says:
 
-**What is left is exactly two changes, in this order:**
+    Term compiled ALONE, bytecode mode, as the MAIN module ....... compiles
+    Term compiled as a BUILTIN (library) with bytecode on ........ 'Bracket' has
+                                                                  no id
 
-1. A bytecode id on `X_Entry`, set where a procedure is exported (from
-   `Syms (N_Sym).Bc_Proc`) and carried into the importing module's `Syms`
-   entry at the import site.  This is the prerequisite.
-2. Then the ordering change above, unscoped builtins (`Scoped => False`) set to
-   the modules measured to compile - which is what 3m measured and is recorded
-   in the reverted diff: **Texts, Files, Math, Term, MathL, Err compile;
-   Strings, Reals and Input hit an emitter gap ("operand-stack underflow"); Env,
-   Args, XYplane, In and Convert refuse at their intrinsic call sites, whose
-   natives already exist (6/7/8 and 11-21) and which therefore need only the
-   same wiring the Files intrinsics got in 3l.**
+Same source, same mode, different compile path.  So the blocker is narrower than
+3m first claimed and is **main-module vs library in bytecode mode**: something in
+the library path either never assigns the id for a locally declared procedure or
+wipes it, and `X_Entry` is not the reason.  That is the thing to find, and the
+`Term`/`Bracket` pair is the reproduction (it needs no filesystem, no natives and
+no main-module code - `sum`, which imports only `Out`, is enough).
 
-Verified after reverting: all SEVEN suites green, 47 corroborated, zero
-warnings, tree clean at dbd340a.
+**The scoped set below is still measured and still holds** (each module compiled
+alone, in bytecode mode, in library shape):
+
+    scoped (compile)   Texts, Files, Math, Term, MathL, Err
+    emitter gap        Strings, Reals, Input   (operand-stack underflow)
+    intrinsic sites    Env, Args, XYplane, In, Convert - whose natives
+                       (6/7/8, 11-21) already exist and need only the wiring
+                       the Files intrinsics got in 3l
+
+So the order of work is: find why the library path loses a local procedure's id,
+then re-apply the ordering (the reverted diff is reproducible from this note),
+then wire the five intrinsic-refusing modules.
+
+**Kept from this attempt:** the refusal now NAMES the procedure it cannot call -
+without that, this section would still be blaming the wrong thing.
 
 ## 4. Method — what worked, and what did not
 
