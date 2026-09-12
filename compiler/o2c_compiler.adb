@@ -2631,7 +2631,62 @@ package body O2c_Compiler is
                R.Text := (if Neg then "-" else "") & "(" & R.Text & ")";
             end;
          when Lex.Tok_Ident =>
-            if (To_String (Mod_Name) = "Math"
+            if Eq_No_Case (Cur.Text (1 .. Cur.Len), "THREADS") then
+               --  Threads.Start (p) in an expression: the value is the new
+               --  thread's handle, so a program can keep it and wait for the
+               --  thread later.  Without this a handle could only be guessed,
+               --  which makes Join unusable for the thing it is for.
+               Next;                          --  past Threads
+               Expect (Lex.Tok_Dot, "'.' after Threads");
+               Next;
+               Expect (Lex.Tok_Ident, "a member name after '.'");
+               if Cur.Text (1 .. Cur.Len) /= "Start" then
+                  raise O2c_Error with "Threads.Start is the only Threads "
+                    & "call that yields a value (found '"
+                    & Cur.Text (1 .. Cur.Len) & "')";
+               end if;
+               if not O2c_BC.Bytecode_Mode then
+                  raise O2c_Error with "Threads needs the bytecode backend "
+                    & "(the Ada backend has no threads)";
+               end if;
+               Next;                          --  past Start -> '('
+               Expect (Lex.Tok_LParen, "'(' after Threads.Start");
+               Next;
+               Expect (Lex.Tok_Ident, "a procedure or a PROCEDURE-typed "
+                       & "variable");
+               declare
+                  Arg : constant String := Cur.Text (1 .. Cur.Len);
+                  AI  : constant Natural := Find (Arg);
+               begin
+                  Next;                       --  past the argument
+                  Expect (Lex.Tok_RParen, "')' after Threads.Start");
+                  Next;
+                  if AI > 0
+                    and then Syms (AI).Kind = S_Proc
+                    and then not Syms (AI).Ret
+                    and then Syms (AI).Bc_Proc /= 0
+                  then
+                     O2c_BC.Push_BC_Proc (Syms (AI).Bc_Proc);
+                  elsif AI > 0 and then Syms (AI).UT > 0
+                    and then UTypes (Syms (AI).UT).Is_Proc
+                  then
+                     Bc_Load (Arg);
+                  else
+                     raise O2c_Error with "Threads.Start needs a "
+                       & "parameterless procedure or a PROCEDURE-typed "
+                       & "variable (found '" & Arg & "')";
+                  end if;
+                  O2c_BC.Spawn;
+               end;
+               R.Typ := T_Int;
+               R.Text := Null_Unbounded_String;
+               --  Return here.  Falling out of this branch would drop into the
+               --  rest of the arm, which resolves the name as a variable and
+               --  then parses another factor - the same fall-through that bit
+               --  the statement path, and it fails far from the cause: the
+               --  diagnostic names whatever token follows, not Threads.
+               return R;
+            elsif (To_String (Mod_Name) = "Math"
                 or else To_String (Mod_Name) = "MathL")
               and then (Eq_No_Case (Cur.Text (1 .. Cur.Len), "POWER")
                         or else Eq_No_Case (Cur.Text (1 .. Cur.Len), "EXP")
