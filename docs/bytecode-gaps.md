@@ -289,13 +289,31 @@ Read the code, not the message. Correcting the text is outstanding work.
   The default is refusal with the implemented set as the allowlist, so a new
   module or a new member cannot become a silent no-op.
 
-  NOT YET GUARANTEED: a LANGUAGE construct with no emission. The check attempted
-  here - refusing inside Append_Body/Append_Decl when Bytecode_Mode - was too
-  broad and broke 29 tests, because bytecode mode legitimately appends Ada text
-  it then discards, and the appender cannot tell a gap from a harmless call.
-  So for constructs the guarantee rests on the refusals in section A being
-  complete, which is verified by reading, not by construction. That is the one
-  remaining soft spot, and it is stated rather than papered over.
+  NOT YET GUARANTEED: a LANGUAGE construct with no emission - and the obvious
+  mechanical check does not work. Refusing inside Append_Body/Append_Decl when
+  Bytecode_Mode was tried three ways and fails for a reason worth recording:
+
+      64 fixtures compiled in bytecode mode; 61 of them reach an Append_Body.
+      29 tests failed outright with the guard in place.
+
+  The reason is structural: the compiler ALWAYS builds the Ada text - it is the
+  other backend's output - and a bytecode emission is added ALONGSIDE it at the
+  sites that have one. Appending is therefore not evidence of a gap; it happens
+  on working programs. The appender cannot tell "no bytecode counterpart" from
+  "bytecode counterpart, plus the Ada text as usual", and no amount of moving
+  the guard changes that.
+
+  So the guarantee for constructs rests on section A's refusals being complete,
+  verified by reading. That is the remaining soft spot.
+
+  THE CHECK THAT WOULD WORK is differential, not static: run a program through
+  BOTH backends and compare the output. Any disagreement is a gap, found
+  empirically and with no list to maintain. The project already has this gate -
+  run_m1 diffs Ada against the VM - but it covers one demo program, not the
+  corpus. The Ada side needs the guest toolchain, so extending it means running
+  the fixtures in the guest rather than a host-only sweep. That is the work, and
+  it is worth doing: it is the only check proposed so far that can find a gap
+  nobody has thought to look for.
 
 ### D. How each entry is verified
 
