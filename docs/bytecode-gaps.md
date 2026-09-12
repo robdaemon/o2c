@@ -232,6 +232,76 @@ compare op itself is written and correct.
 `var v: array 4 of integer` fails with "a type name expected". An array type
 must be named. Ergonomic rather than load-bearing.
 
+## THE CHECKLIST - what the bytecode backend does and does not do
+
+The authoritative list is the compiler's own refusals. Every one is a
+`raise O2c_BC.Wrong_Construct` in `o2c_compiler.adb`, so it is a gap that FAILS
+LOUDLY. Regenerate with:
+
+    grep -o '"bytecode backend: [^"]*"' compiler/o2c_compiler.adb | sort -u
+
+### A. Language constructs that refuse (loud, verified by construction)
+
+    &                      string concatenation
+    LONGINT                arithmetic (assignment and comparison DO work)
+    BOOLEAN operators      and/or/not on BOOLEAN values
+    mixed INTEGER/REAL     an operation needing an implicit I2R
+    NEW of a ptr designator      assigning through a ptr designator
+    a method on a VAR record receiver
+    an ARRAY OF actual that is a local array
+    forwarding a global ARRAY OF parameter
+    a field's owning record not on the variable's type chain
+    a record nesting too deeply to lay out
+    call to an unknown procedure
+    integer / real literal out of range
+
+Three of these say MORE than they mean, and the messages are stale - the code
+accepts wider than the text claims:
+
+  - "only INTEGER/CHAR/BOOLEAN assignments are supported"  - also SET, REAL,
+    LONGREAL and LONGINT
+  - "only INTEGER/CHAR/BOOLEAN variables are supported"    - likewise
+  - "only INTEGER/CHAR/REAL comparisons are supported"     - also LONGINT
+
+Read the code, not the message. Correcting the text is outstanding work.
+
+### B. Modules
+
+  Implemented (20 procedures, all verified by probe):
+    Convert.ToInt / ToReal / FromInt
+    Files.Delete / Rename
+    Env.Get / Set
+    Args.Get
+    XYplane.Open / Clear / Dot / IsDot / Key
+    In.Open / String / Name / Char / Int / LongInt / Real
+
+  Refused, and now LOUDLY rather than silently (see the default-refusal commit):
+    Math, MathL, Strings, Texts, Input, Term - every member
+    Convert.FromReal, and any Files procedure that is not a thin wrapper
+
+  Files.Old / Read / Write / Close / New are NOT inline-able: their bodies
+  allocate, call a primitive, copy and return. They need the module compiled to
+  bytecode - see the section above.
+
+### C. What is guaranteed, and what is not
+
+  GUARANTEED LOUD: an imported-module call with no bytecode emission refuses.
+  The default is refusal with the implemented set as the allowlist, so a new
+  module or a new member cannot become a silent no-op.
+
+  NOT YET GUARANTEED: a LANGUAGE construct with no emission. The check attempted
+  here - refusing inside Append_Body/Append_Decl when Bytecode_Mode - was too
+  broad and broke 29 tests, because bytecode mode legitimately appends Ada text
+  it then discards, and the appender cannot tell a gap from a harmless call.
+  So for constructs the guarantee rests on the refusals in section A being
+  complete, which is verified by reading, not by construction. That is the one
+  remaining soft spot, and it is stated rather than papered over.
+
+### D. How each entry is verified
+
+  tests/bytecode_gaps.sh is the executable half: it asserts the working set by
+  probe and fails when a gap is fixed, so an entry cannot outlive its gap.
+
 ## The ten FFI helpers with no bytecode emission
 
 `Env.EnvGet`, `Env.EnvSet`, `Convert.ConvToInt`, `Convert.ConvFromInt`,
