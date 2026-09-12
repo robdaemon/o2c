@@ -1928,10 +1928,6 @@ package body OBC_VM is
                   --  run time.  Same reason CALL_INDIRECT exists.
                   Callee : constant Natural := Natural (Pop);
                begin
-                  if Ctx.Is_Thread then
-                     Note_At ("a thread cannot start another thread yet", PC);
-                     return Bad_Target;
-                  end if;
                   if Callee = 0 or else Callee > Img.N_Procs then
                      Note_At ("spawn target is not a procedure", PC);
                      return Bad_Target;

@@ -284,6 +284,20 @@ fi
 #  ---- positive: hand-assembled Out.Char ------------------------------------
 #  Exercises native 4 independently of the emitter: two character codes go to
 #  the native, which prints the characters themselves.
+#  A thread starting a thread: main spawns A, A spawns B and prints 1, B
+#  prints 2.  Order is fixed because each runs to completion in turn.
+if python3 "$ASM" "$ROOT/tests/vm/nested.asm" "$WORK/nested.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/nested.obc" >"$WORK/nested.out" 2>"$WORK/nested.err"
+then
+   if diff -u "$ROOT/tests/vm/nested.out" "$WORK/nested.out"; then
+      note "positive: nested.asm spawns a thread from inside a thread"
+   else
+      bad "nested.asm output differs from tests/vm/nested.out"
+   fi
+else
+   bad "nested.asm failed: $(cat "$WORK/nested.err")"
+fi
+
 #  MUTEX_LOCK/MUTEX_UNLOCK used uncontended: the program completes.
 if python3 "$ASM" "$ROOT/tests/vm/mutex.asm" "$WORK/mutex.obc" >/dev/null \
    && timeout 60 "$VM" "$WORK/mutex.obc" >"$WORK/mutex.out" 2>"$WORK/mutex.err"; then
