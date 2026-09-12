@@ -3232,7 +3232,11 @@ package body O2c_Compiler is
                                     if D.K = D_Index then
                                        --  [base, index]: load the element.
                                        R.Typ := D.Sc;
-                                       O2c_BC.Bin (O2c_BC.Load_Idx_I);
+                                       if D.Sc = T_Char then
+                                          O2c_BC.Bin (O2c_BC.Load_Idx_B);
+                                       else
+                                          O2c_BC.Bin (O2c_BC.Load_Idx_I);
+                                       end if;
                                     elsif D.K = D_Field then
                                        --  [record]: the field at a known offset.
                                        R.Typ := D.Sc;
@@ -3712,7 +3716,11 @@ package body O2c_Compiler is
                      if D.K = D_Index then
                         --  [base, index]: load the element.
                         R.Typ := D.Sc;
-                        O2c_BC.Bin (O2c_BC.Load_Idx_I);
+                        if D.Sc = T_Char then
+                           O2c_BC.Bin (O2c_BC.Load_Idx_B);
+                        else
+                           O2c_BC.Bin (O2c_BC.Load_Idx_I);
+                        end if;
                      elsif D.K = D_Field then
                         --  [record]: the field at a known offset.
                         R.Typ := D.Sc;
@@ -3805,7 +3813,13 @@ package body O2c_Compiler is
                            O2c_BC.Jump (O2c_BC.Jnz, L_Ok);
                            O2c_BC.Trap (0);
                            O2c_BC.Mark (L_Ok);
-                           O2c_BC.Bin (O2c_BC.Load_Idx_I);
+                           --  An open array's element type comes from the
+                           --  parameter, not from a designator.
+                           if Syms (Id).Typ = T_Char then
+                              O2c_BC.Bin (O2c_BC.Load_Idx_B);
+                           else
+                              O2c_BC.Bin (O2c_BC.Load_Idx_I);
+                           end if;
                         end;
                      end if;
                      R.Text := To_Unbounded_String (Nm) & " ("
@@ -7000,7 +7014,11 @@ package body O2c_Compiler is
                                  declare
                                     V : Expr_Rec := Parse_Expr;
                                  begin
-                                    O2c_BC.Bin (O2c_BC.Store_Idx_I);
+                                    if D.Sc = T_Char then
+                                       O2c_BC.Bin (O2c_BC.Store_Idx_B);
+                                    else
+                                       O2c_BC.Bin (O2c_BC.Store_Idx_I);
+                                    end if;
                                  end;
                               elsif D.K = D_Field then
                                  --  [record]: evaluate the value, store it in the field.
@@ -7301,7 +7319,11 @@ package body O2c_Compiler is
                            declare
                               V : Expr_Rec := Parse_Expr;
                            begin
-                              O2c_BC.Bin (O2c_BC.Store_Idx_I);
+                              if D.Sc = T_Char then
+                                 O2c_BC.Bin (O2c_BC.Store_Idx_B);
+                              else
+                                 O2c_BC.Bin (O2c_BC.Store_Idx_I);
+                              end if;
                            end;
                         elsif D.K = D_Field then
                            --  [record]: evaluate the value, store it in the field.
@@ -7446,7 +7468,13 @@ package body O2c_Compiler is
                           & Head (1 .. H_Len) & " (" & Integer'Image (Cur.Len)
                           & " > " & Integer'Image (N) & ")";
                      end if;
-                     if Cur.Len = N then
+                     if O2c_BC.Bytecode_Mode then
+                        O2c_BC.Load_Addr_G
+                          (O2c_BC.Global_Array
+                             (Ada_Id (Head (1 .. H_Len)), Total_Slots (U)));
+                        O2c_BC.Push_Str (Cur.Text (1 .. Cur.Len));
+                        O2c_BC.Bin (O2c_BC.Copy_Str);
+                     elsif Cur.Len = N then
                         Append_Body ("      " & Head (1 .. H_Len) & " := "
                                      & Ada_String_Literal (Cur.Text (1 .. Cur.Len))
                                      & ";");

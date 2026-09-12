@@ -32,7 +32,8 @@ package O2c_BC is
       --  the byte numbers, and the byte numbers below are the spec's.
       Load_L, Store_L, Call, Ret, Ret_Void,
       Load_Addr_G, Load_Idx_I, Store_Idx_I,
-      Load_Idx_B, Store_Idx_B, Load_Fld_I, Store_Fld_I, Load_Fld_R, Store_Fld_R,
+      Load_Idx_B, Store_Idx_B,
+      Copy_Str, Load_Fld_I, Store_Fld_I, Load_Fld_R, Store_Fld_R,
       Load_Fld_P, Store_Fld_P, Load_Const_P,
       For_Enter_I, For_Next_I,
       Set_Union, Set_Intersect, Set_Diff, Set_Symdiff,

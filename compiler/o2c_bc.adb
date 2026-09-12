@@ -346,6 +346,7 @@ package body O2c_BC is
         when Load_Idx_I   => 16#1D#,
         when Load_Idx_B   => 16#EB#,
         when Store_Idx_B  => 16#EC#,
+        when Copy_Str     => 16#ED#,
         when Store_Idx_I  => 16#20#,
         when Load_G      => 16#12#,
         when Store_G     => 16#13#,

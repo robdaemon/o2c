@@ -156,6 +156,8 @@ package body OBC_VM is
    Op_Thread_Id     : constant := 16#EA#;
    Op_Load_Idx_B    : constant := 16#EB#;
    Op_Store_Idx_B   : constant := 16#EC#;
+   --  Copy a pool string into a packed CHAR array, NUL-terminating.
+   Op_Copy_Str      : constant := 16#ED#;
 
    --  Instructions a thread may run before the VM takes the machine back.
    --  This is what makes scheduling preemptive: a thread that never calls
@@ -950,6 +952,12 @@ package body OBC_VM is
                end if;
                Depth := Depth + 1;
                PC := PC + 5;
+            when Op_Copy_Str =>
+               if Depth < 2 then
+                  return Bad_Stack;
+               end if;
+               Depth := Depth - 2;
+               PC := PC + 1;
             when Op_Load_Idx_B =>
                if Depth < 2 then
                   return Bad_Stack;
@@ -1865,6 +1873,32 @@ package body OBC_VM is
                             (Globals (Natural (LE32 (Code, PC + 1)))
                                'Address)));
                PC := PC + 5;
+            when Op_Copy_Str =>
+               declare
+                  Src : constant Natural := Natural (Pop);
+                  Dst : constant U64 := Pop;
+                  K   : Natural := Src;
+                  D   : Natural := 0;
+                  procedure Put_At (N : Natural; V : Byte) is
+                     B : Byte with Address =>
+                       System.Storage_Elements.To_Address
+                         (System.Storage_Elements.Integer_Address (Dst)
+                          + System.Storage_Elements.Integer_Address (N));
+                  begin
+                     B := V;
+                  end Put_At;
+               begin
+                  if Src > Consts'Length then
+                     return Bad_Const;
+                  end if;
+                  while K < Consts'Length and then Consts (K) /= 0 loop
+                     Put_At (D, Consts (K));
+                     K := K + 1;
+                     D := D + 1;
+                  end loop;
+                  Put_At (D, 0);
+               end;
+               PC := PC + 1;
             when Op_Load_Idx_B =>
                declare
                   Idx : constant U64 := Pop;
