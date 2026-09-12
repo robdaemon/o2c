@@ -3402,6 +3402,19 @@ package body O2c_Compiler is
                               raise O2c_Error with "'" & FNm & "." & MName
                                 & "' needs arguments";
                            else
+                              --  A bare function call: XYplane.Key is the
+                              --  one, and it returns a CHAR - the same
+                              --  expression emission as IsDot with a
+                              --  different result type.
+                              if O2c_BC.Bytecode_Mode
+                                and then Eq_No_Case (FNm, "XYplane")
+                                and then Eq_No_Case (MName, "Key")
+                              then
+                                 O2c_BC.Native_Call (18, 0);
+                                 R.Typ := T_Char;
+                                 R.Lit := False;
+                                 R.Folds := False;
+                              end if;
                               R.Text := To_Unbounded_String
                                 (Ada_Id (FNm) & "." & Ada_Id (MName));
                            end if;

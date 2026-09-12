@@ -240,6 +240,8 @@ begin
   XYplane.Clear;
   i := 0;
   if XYplane.IsDot(10, 20) then i := i + 100 end;
+  Out.Int(i, 0); Out.Ln;
+  if XYplane.Key = CHR(0) then i := 1 else i := 0 end;
   Out.Int(i, 0); Out.Ln
 end PlaneT.
 EOB
@@ -248,10 +250,10 @@ if timeout 60 "$FRONT" "$WORK/plane.ob2" "$WORK/plane.obc" >"$WORK/plane.log" 2>
             | tr -d '\n\r')"
    #  got has its newlines stripped: the three lines are 0 (never opened),
    #  10 (set) and 0 (cleared).
-   if [ "$got" = "0100" ]; then
-      note "  ok  XYplane Dot/Clear/IsDot verified through IsDot"
+   if [ "$got" = "01001" ]; then
+      note "  ok  XYplane Dot/Clear/IsDot/Key all verified"
    else
-      bad "XYplane printed '$got', expected 0, 10 and 0 (unopened/set/cleared)"
+      bad "XYplane printed '$got', expected 0,10,0 (unopened/set/cleared) and 1 (NUL key)"
    fi
 else
    bad "XYplane no longer compiles: $(tail -1 "$WORK/plane.log")"

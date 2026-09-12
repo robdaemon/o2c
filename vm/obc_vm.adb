@@ -405,6 +405,7 @@ package body OBC_VM is
       11 => (Sym => new String'("o2c_planeclear"), Pops => 0),
       12 => (Sym => new String'("o2c_planedot"), Pops => 3),
       13 => (Sym => new String'("o2c_planeisdot"), Pops => 2),
+      14 => (Sym => new String'("o2c_planekey"), Pops => 0),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -427,6 +428,7 @@ package body OBC_VM is
       15 => 0,    --  o2c_planeclear: nothing
       16 => 3,    --  o2c_planedot: x, y, mode
       17 => 2,    --  o2c_planeisdot: x, y
+      18 => 0,    --  o2c_planekey: nothing
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -438,6 +440,7 @@ package body OBC_VM is
       --  o2c_planeisdot returns a BOOLEAN; the other plane ops only write
       --  into the shadow and report nothing.
       17 => True,
+      18 => True,   --  o2c_planekey returns a CHAR
       others => False);
 
    --  Arguments handed to a native, leftmost first.  The table above gives
@@ -1295,6 +1298,14 @@ package body OBC_VM is
                end if;
                return Ok;
             end;
+         when Max_Natives + 13 =>
+            --  o2c_planekey: id 18, foreign slot 14.  Returns a CHAR, and
+            --  NUL is the answer: the Ada backend's helper reads a keyboard
+            --  buffer that nothing fills - "no keyboard in this ABI" - and
+            --  returns Character'Val (0) for an empty one.  Matching that is
+            --  the point; inventing a keystroke would be worse than a NUL.
+            Result := (Pushes => True, Value => 0);
+            return Ok;
          when Max_Natives + 8 =>
             --  o2c_argget: id 13, foreign slot 9.  Void, three arguments:
             --  n as a VALUE, then the buffer and the result as addresses -
