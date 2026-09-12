@@ -41,6 +41,12 @@ package OBC_VM is
    --  emitted, in-process.
    function Run_Image (Image : String) return Status;
 
+   --  Instructions a thread may run before the VM takes the machine back.
+   --  Settable only so a test can drive it to 1, which forces a switch at
+   --  every instruction boundary - where resumption bugs hide and where the
+   --  default quantum never goes.  0 leaves it alone.
+   procedure Set_Quantum (N : Natural);
+
    --  Human-readable status text, for the driver's exit diagnostic.
    function Image (S : Status) return String;
 

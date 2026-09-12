@@ -160,7 +160,7 @@ package body OBC_VM is
    --  YIELD still cannot freeze the others, so a busy worker cannot stall a
    --  user interface.  YIELD is the same mechanism, asked for voluntarily -
    --  which is why preemption needs no opcode of its own.
-   Budget_Quantum : constant := 10_000;
+   Budget_Quantum : Natural := 10_000;
    Op_Dispatch     : constant := 16#E2#;
    Op_Alloc_New    : constant := 16#2A#;
    Op_Load_Fld_R   : constant := 16#24#;
@@ -2621,6 +2621,13 @@ package body OBC_VM is
       end loop;
       return Ok;
    end Run_Context;
+
+   procedure Set_Quantum (N : Natural) is
+   begin
+      if N > 0 then
+         Budget_Quantum := N;
+      end if;
+   end Set_Quantum;
 
    function Run_Buffer (Data : Byte_Array) return Status is
       St    : Status;

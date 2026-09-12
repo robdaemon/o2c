@@ -27,6 +27,10 @@ package body VM_Platform is
      (30000);
    --  50 min: longer than any boot
 
+   --  No environment in the guest: the override is a host-test facility.
+   function Quantum_Override return Natural is
+     (0);
+
    procedure Exit_With (Ok : Boolean) is
    begin
       if Ok then

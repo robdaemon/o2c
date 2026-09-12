@@ -19,6 +19,7 @@ procedure VM_Main is
      (if Argument_Count >= 1 then Argument (1) else Default_Image);
 begin
    VM_Platform.Init;
+   OBC_VM.Set_Quantum (VM_Platform.Quantum_Override);
    if Argument_Count > 1 then
       Ada.Text_IO.Put_Line
         (Ada.Text_IO.Standard_Error, "usage: vm [image.obc]");

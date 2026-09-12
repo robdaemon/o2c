@@ -26,4 +26,10 @@ package VM_Platform is
    --  so the VM waits for the compiler to finish writing the image.
    function Max_Input_Attempts return Natural;
 
+   --  A test may ask for a smaller scheduling quantum by setting
+   --  O2C_QUANTUM in the environment.  0 means "no opinion".  The guest has
+   --  no environment, so its body always answers 0 - which is the point of
+   --  the seam: the shared driver asks, and only the host can answer.
+   function Quantum_Override return Natural;
+
 end VM_Platform;
