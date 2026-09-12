@@ -6394,7 +6394,19 @@ package body O2c_Compiler is
               and then (Eq_No_Case (Head (1 .. H_Len), "ENVGET")
                         or else Eq_No_Case (Head (1 .. H_Len), "ENVSET"))
             then
-               --  M51 FFI: environment access (builtin Env only)
+               --  M51 FFI: environment access (builtin Env only).
+               --  Refused in bytecode mode rather than silently emitting
+               --  nothing: this branch appends to the Ada body and makes no
+               --  O2c_BC call at all, so a bytecode program would compile,
+               --  run, and quietly not read its environment.  Today that is
+               --  masked - an ARRAY OF CHAR module variable is itself
+               --  rejected in bytecode mode, so control never arrives here -
+               --  which is exactly why it is worth refusing now: the moment
+               --  that restriction is lifted, this becomes a silent no-op.
+               if O2c_BC.Bytecode_Mode then
+                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
+                    & "Env.EnvGet/EnvSet are not yet supported";
+               end if;
                declare
                   Is_Get : constant Boolean :=
                     Eq_No_Case (Head (1 .. H_Len), "ENVGET");
