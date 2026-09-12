@@ -1,0 +1,75 @@
+MAXSTACK 4
+GLOBALS 0
+POOL cworker 2
+POOL c9 9
+POOL cw 0
+
+ENTRY main
+PROC main 0 0 0
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  LOAD_CONST cworker
+  SPAWN
+  DROP
+  HALT
+PROC Worker 0 0 0
+  LOAD_CONST c9
+  LOAD_CONST cw
+  CALL_NATIVE 0 2
+  CALL_NATIVE 2 0
+  RET_VOID

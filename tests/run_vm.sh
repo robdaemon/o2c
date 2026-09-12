@@ -284,6 +284,19 @@ fi
 #  ---- positive: hand-assembled Out.Char ------------------------------------
 #  Exercises native 4 independently of the emitter: two character codes go to
 #  the native, which prints the characters themselves.
+#  More threads alive at once than the table starts with, so the table has to
+#  grow.  Twenty are spawned without joining any, and each prints once.
+if python3 "$ASM" "$ROOT/tests/vm/manythreads.asm" "$WORK/many.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/many.obc" >"$WORK/many.out" 2>"$WORK/many.err"; then
+   if diff -u "$ROOT/tests/vm/manythreads.out" "$WORK/many.out"; then
+      note "positive: manythreads.asm (20 live) grows the context table"
+   else
+      bad "manythreads.asm output differs: $(wc -l < "$WORK/many.out") lines"
+   fi
+else
+   bad "manythreads.asm failed: $(cat "$WORK/many.err")"
+fi
+
 #  A thread starting a thread: main spawns A, A spawns B and prints 1, B
 #  prints 2.  Order is fixed because each runs to completion in turn.
 if python3 "$ASM" "$ROOT/tests/vm/nested.asm" "$WORK/nested.obc" >/dev/null \

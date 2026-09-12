@@ -251,9 +251,18 @@ package body OBC_VM is
    --  all of them, because interpretation nests: a C callback calling back
    --  into Oberon runs an inner Execute whose caller's frames are still
    --  roots.  A thread will contribute one of these too.
-   Max_Contexts : constant := 16;
-   type Context_Table is array (1 .. Max_Contexts) of Context_Access;
-   Live_Contexts : Context_Table := (others => null);
+   --  The context table grows on demand rather than being capped.  Each live
+   --  context is a root and a thread at once, and the table holds the root,
+   --  every running thread, and every nested FFI callback - so a fixed
+   --  ceiling is a limit on how many threads a program may have alive, which
+   --  is not a number a program should be able to hit by accident.
+   Initial_Contexts : constant := 16;
+   type Context_Table is array (Positive range <>) of Context_Access;
+   type Context_Table_Access is access Context_Table;
+   --  Access components default to null, so a constrained allocator is all
+   --  the initialisation an empty table needs.
+   Live_Contexts : Context_Table_Access :=
+     new Context_Table (1 .. Initial_Contexts);
    N_Contexts    : Natural := 0;
 
    --  Set when a context could not be registered.  Its roots would be
@@ -261,6 +270,22 @@ package body OBC_VM is
    --  so marking is abandoned instead - the same give-up-safely path the
    --  worklist uses.
    Roots_Refused : Boolean := False;
+
+   --  Double the table.  Called only when the last slot is about to be used,
+   --  so the common path is a comparison and never an allocation.
+   procedure Grow_Contexts is
+      Bigger : Context_Table_Access;
+   begin
+      Bigger := new Context_Table (1 .. Live_Contexts'Last * 2);
+      Bigger (Live_Contexts'Range) := Live_Contexts.all;
+      Live_Contexts := Bigger;
+   exception
+      when others =>
+         --  Out of memory for the table itself.  Recorded rather than
+         --  raised: a collection with incomplete roots must know, and the
+         --  caller turns it into a status further up.
+         Roots_Refused := True;
+   end Grow_Contexts;
 
    --  Registers a context for the duration of one Execute call.  Finalization
    --  is what makes this right: Execute returns early from dozens of places
@@ -436,9 +461,11 @@ package body OBC_VM is
       if S.Ctx.Is_Thread or else S.Ctx.Scheduler_Owned then
          return;
       end if;
-      if N_Contexts = Max_Contexts then
-         Roots_Refused := True;
-         return;
+      if N_Contexts = Live_Contexts'Last then
+         Grow_Contexts;
+         if N_Contexts = Live_Contexts'Last then
+            return;                    --  growth failed; Roots_Refused is set
+         end if;
       end if;
       N_Contexts := N_Contexts + 1;
       Live_Contexts (N_Contexts) := S.Ctx;
@@ -1932,9 +1959,12 @@ package body OBC_VM is
                      Note_At ("spawn target is not a procedure", PC);
                      return Bad_Target;
                   end if;
-                  if N_Contexts = Max_Contexts then
-                     Note_At ("too many threads", PC);
-                     return Bad_Stack;
+                  if N_Contexts = Live_Contexts'Last then
+                     Grow_Contexts;
+                     if N_Contexts = Live_Contexts'Last then
+                        Note_At ("cannot grow the thread table", PC);
+                        return Bad_Stack;
+                     end if;
                   end if;
                   declare
                      T : constant Context_Access :=
@@ -2438,11 +2468,12 @@ package body OBC_VM is
       --  can block, and a blocked context has to be findable in order to be
       --  woken.  Its Context_Scope deliberately does not do this, because a
       --  scope finalizes when Execute returns and would drop it between turns.
-      if N_Contexts < Max_Contexts then
+      if N_Contexts = Live_Contexts'Last then
+         Grow_Contexts;
+      end if;
+      if N_Contexts < Live_Contexts'Last then
          N_Contexts := N_Contexts + 1;
          Live_Contexts (N_Contexts) := Ctx;
-      else
-         Roots_Refused := True;
       end if;
 
       --  Round-robin over the root and every thread the program started,
