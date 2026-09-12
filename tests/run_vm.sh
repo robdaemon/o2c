@@ -284,6 +284,20 @@ fi
 #  ---- positive: hand-assembled Out.Char ------------------------------------
 #  Exercises native 4 independently of the emitter: two character codes go to
 #  the native, which prints the characters themselves.
+#  SPAWN starts a thread.  main spawns Worker and halts, so Worker only
+#  produces its output if the scheduler gives a context other than the root
+#  a turn after the root is already done.
+if python3 "$ASM" "$ROOT/tests/vm/spawn.asm" "$WORK/spawn.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/spawn.obc" >"$WORK/spawn.out" 2>"$WORK/spawn.err"; then
+   if diff -u "$ROOT/tests/vm/spawn.out" "$WORK/spawn.out"; then
+      note "positive: spawn.asm (SPAWN) runs the thread after main halts"
+   else
+      bad "spawn.asm output differs from tests/vm/spawn.out"
+   fi
+else
+   bad "spawn.asm failed: $(cat "$WORK/spawn.err")"
+fi
+
 #  CALL_INDIRECT: the callee's id arrives on the stack, since the callee is
 #  only known at run time - which is exactly what a PROCEDURE-typed value is.
 if python3 "$ASM" "$ROOT/tests/vm/callind.asm" "$WORK/callind.obc" >/dev/null \

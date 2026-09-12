@@ -139,6 +139,10 @@ package body OBC_VM is
    --  Operand-free: the procedure type is parameterless and resultless by
    --  definition, so the stack effect is fixed - pop the id and call it.
    Op_Call_Indirect : constant := 16#E5#;
+   --  Start a thread running a procedure.  The procedure id is an operand -
+   --  a thread's entry point is fixed at the spawn, unlike an indirect call,
+   --  where the callee is only known at run time.
+   Op_Spawn         : constant := 16#E6#;
 
    --  Instructions a thread may run before the VM takes the machine back.
    --  This is what makes scheduling preemptive: a thread that never calls
@@ -206,6 +210,7 @@ package body OBC_VM is
       --  without giving the others a turn.
       Budget      : Natural := 0;
       State       : Thread_State := Thread_Runnable;
+      Resumed     : Boolean := False;
       --  True for a context the program spawned, which has no caller to
       --  return to.  Its entry procedure returning ends the thread rather
       --  than being the frame underflow it would be for the main context -
@@ -400,6 +405,13 @@ package body OBC_VM is
    --  offset in TYPES, written by ALLOC_NEW.
    overriding procedure Initialize (S : in out Context_Scope) is
    begin
+      --  A thread is registered by the scheduler for the whole run, not per
+      --  Execute call.  A thread suspended at a yield is still a root, and
+      --  this scope would drop it between quanta - its stack would then be
+      --  collected while the thread was merely paused.
+      if S.Ctx.Is_Thread then
+         return;
+      end if;
       if N_Contexts = Max_Contexts then
          Roots_Refused := True;
          return;
@@ -410,6 +422,9 @@ package body OBC_VM is
 
    overriding procedure Finalize (S : in out Context_Scope) is
    begin
+      if S.Ctx.Is_Thread then
+         return;
+      end if;
       --  Removed by identity rather than by popping, so it stays correct even
       --  if scopes were ever finalized out of order.
       for I in 1 .. N_Contexts loop
@@ -917,6 +932,15 @@ package body OBC_VM is
                   end if;
                   Depth := Depth - NArgs - 1 + NRes;
                end;
+               PC := PC + 5;
+            when Op_Spawn =>
+               if not Fits (PC + 1, 4) then
+                  Note_At ("malformed code", PC);
+                  return Bad_Code;
+               end if;
+               --  The procedure id is an operand, not a stack value, so this
+               --  changes nothing here: the thread starts with an empty stack
+               --  and the spawning context keeps everything it had.
                PC := PC + 5;
             when Op_Call_Indirect =>
                --  The callee is not statically known, so the depth effect
@@ -1864,6 +1888,61 @@ package body OBC_VM is
                   end if;
                end;
                PC := PC + 5;
+            when Op_Spawn =>
+               if PC + 4 >= Code'Length then
+                  return Bad_Code;
+               end if;
+               declare
+                  --  A procedure id, the same one CALL and DISPATCH use, so
+                  --  a thread's entry point is named the way the compiler
+                  --  already names it.
+                  Callee : constant Natural := Natural (LE32 (Code, PC + 1));
+               begin
+                  if Ctx.Is_Thread then
+                     Note_At ("a thread cannot start another thread yet", PC);
+                     return Bad_Target;
+                  end if;
+                  if Callee = 0 or else Callee > Img.N_Procs then
+                     Note_At ("spawn target is not a procedure", PC);
+                     return Bad_Target;
+                  end if;
+                  if N_Contexts = Max_Contexts then
+                     Note_At ("too many threads", PC);
+                     return Bad_Stack;
+                  end if;
+                  declare
+                     T : constant Context_Access :=
+                       new Context'
+                         (Stack       => new U64_Array (0 .. Max_Stack - 1),
+                          SP          => 0,
+                          Locals      =>
+                            new U64_Array (0 .. Max_VM_Locals - 1),
+                          Pool_Used   => 0,
+                          --  Shared, not copied: threads see the same globals.
+                          Globals     => Ctx.Globals,
+                          PC          => Img.Procs (Callee).Code_Off,
+                          Budget      => Budget_Quantum,
+                          Which_Frame => 0,
+                          Frame_Base  =>
+                            new Natural_Array'(0 .. Max_Frames - 1 => 0),
+                          Frame_Slots =>
+                            new Natural_Array'(0 .. Max_Frames - 1 => 0),
+                          Return_PC   =>
+                            new Natural_Array'(0 .. Max_Frames - 1 => 0),
+                          State       => Thread_Runnable,
+                          Resumed     => False,
+                          Is_Thread   => True,
+                          --  Globals are the root's; only the root loads them.
+                          Loads_Globals => False);
+                  begin
+                     T.Frame_Slots (0) := Img.Procs (Callee).Frame_Slots;
+                     --  Registered here and released by the scheduler, so it
+                     --  stays a root for as long as the thread exists.
+                     N_Contexts := N_Contexts + 1;
+                     Live_Contexts (N_Contexts) := T;
+                  end;
+               end;
+               PC := PC + 5;
             when Op_Call_Indirect =>
                declare
                   Callee : constant Natural := Natural (Pop);
@@ -2211,18 +2290,69 @@ package body OBC_VM is
    --  which is the shape a scheduler needs and the reason YIELD exists.
    function Run_Context (Data : Byte_Array; Img : Image_Info;
                          Ctx : Context_Access) return Status is
-      St       : Status;
-      Resuming : Boolean := False;
+      St   : Status;
+      Busy : Boolean;
    begin
+      --  Round-robin over the root and every thread the program started,
+      --  one quantum each.  N_Contexts is re-read on every pass because
+      --  spawning grows it: a thread started during the run joins in.
       loop
-         --  Refill at each turn: a thread that yields voluntarily gets a
-         --  fresh quantum, so YIELD and preemption cost the same.
-         Ctx.Budget := Budget_Quantum;
-         St := Execute (Data, Img, Ctx, Resuming);
-         exit when St /= Yielded;
-         Resuming := True;
+         --  The root is run by name, not looked up in the table: it is not
+         --  registered until its own Execute is entered, so on the first pass
+         --  the table is still empty and looking it up would run nothing at
+         --  all - which reads as a program that silently produces no output.
+         if Ctx.State = Thread_Runnable then
+            Ctx.Budget := Budget_Quantum;
+            St := Execute (Data, Img, Ctx, Ctx.Resumed);
+            Ctx.Resumed := True;
+            if St /= Yielded and then St /= Ok then
+               return St;
+            end if;
+            if St = Ok then
+               Ctx.State := Thread_Done;
+            end if;
+         end if;
+         for I in 1 .. N_Contexts loop
+            declare
+               C : constant Context_Access := Live_Contexts (I);
+            begin
+               if C /= null and then C.Is_Thread
+                 and then C.State = Thread_Runnable
+               then
+                  C.Budget := Budget_Quantum;
+                  St := Execute (Data, Img, C, C.Resumed);
+                  C.Resumed := True;
+                  if St /= Yielded and then St /= Ok then
+                     return St;
+                  end if;
+                  if St = Ok then
+                     --  A thread whose entry procedure returned is out of
+                     --  turns.  Reaching HALT is the root's way of the same.
+                     C.State := Thread_Done;
+                  end if;
+               end if;
+            end;
+         end loop;
+         --  A pass is finished, not the run: a context spawned during the
+         --  pass is runnable but was past the loop bound, which was fixed
+         --  when the pass began.  Asking afterwards rather than tracking
+         --  during is also what makes a voluntary YIELD and a spent quantum
+         --  behave identically - both simply leave a context runnable.
+         Busy := False;
+         for I in 1 .. N_Contexts loop
+            declare
+               C : constant Context_Access := Live_Contexts (I);
+            begin
+               if C /= null and then C.Is_Thread
+                 and then C.State = Thread_Runnable
+               then
+                  Busy := True;
+               end if;
+            end;
+         end loop;
+         exit when not Busy and then Ctx.State = Thread_Done;
       end loop;
-      return St;
+      return Ok;
    end Run_Context;
 
    function Run_Buffer (Data : Byte_Array) return Status is
@@ -2256,6 +2386,7 @@ package body OBC_VM is
                       Budget      => Budget_Quantum,
                       Loads_Globals => True,
                       State       => Thread_Runnable,
+                      Resumed     => False,
                       Is_Thread   => False,
                       Which_Frame => 0,
                       Frame_Base  =>
