@@ -392,10 +392,18 @@ backend's regression still passes **and** the new VM path is exercised.
     a build error rather than a call to the wrong function; and
     `tests/vm/ffilabs.asm` runs `labs(-7)` end to end through Ada's
     `pragma Import (C, ...)`.
-  - **Remaining:** parse `PROCEDURE f (...) EXTERN "sym";` in a stub module and
-    resolve it at the call site; anchor pointer arguments as roots so a
-    re-entrant collection cannot free a buffer a native holds; and the first
-    producer of `Wants_More` plus the park, which waits on threads.
+  - **Landed since:** the stub surface end to end - `PROCEDURE f (...)
+    EXTERN "sym";` parses, the symbol resolves to a native id, a foreign
+    procedure needs no Oberon body, and a call emits `CALL_NATIVE`.  Verified
+    by `tests/bc/ffi.ob2`, which calls `labs` and prints 7.
+  - **Pointer arguments are anchored.** A native's arguments are roots while
+    the call runs.  Today this is insurance rather than a live fix: the only
+    pointer a native can receive is an offset into the CONST pool, which is
+    image data the collector never reclaims.  It matters the moment an arena
+    address becomes passable, because the failure - a native reading freed
+    memory - is one that hides.
+  - **Remaining:** the first producer of `Wants_More` plus the park, which
+    waits on threads; and the libressl stub itself.
   - **Decided:** foreign structs stay opaque for now — libressl is used through
     handles (`SSL_CTX*`, `SSL*`) that the caller never dereferences, and o2c
     records are one 8-byte slot per field with no padding, so they are *not* C

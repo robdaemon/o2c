@@ -289,6 +289,15 @@ package body OBC_VM is
    Max_Native_Args : constant := 8;
    type Arg_Block is array (0 .. Max_Native_Args - 1) of U64;
 
+   --  The arguments of the native call currently in flight, kept as roots
+   --  while it runs.  Today the only pointer a native can receive is an
+   --  offset into the CONST pool, which the collector never reclaims, so this
+   --  is insurance rather than a live fix - but a native holding an arena
+   --  object's address across a re-entrant collection would read freed memory,
+   --  and that failure hides.  Set and cleared around Call_Native.
+   Current_Args : Arg_Block := (others => 0);
+   Have_Args    : Boolean := False;
+
    --  What a native hands back.  Most are void - Out.Int writes and returns
    --  nothing - but a foreign function usually produces a value, and
    --  Call_Native sits outside Execute and cannot push it itself.  So the
@@ -1280,6 +1289,11 @@ package body OBC_VM is
          --  each context now rather than frozen when it registered, which is
          --  what makes an outer frame's SP correct while an inner Execute
          --  runs.
+         if Have_Args then
+            for K in 0 .. Max_Native_Args - 1 loop
+               Mark_Word (Current_Args (K));
+            end loop;
+         end if;
          for I in 1 .. N_Contexts loop
             declare
                C : Context renames Live_Contexts (I).all;
@@ -1567,7 +1581,12 @@ package body OBC_VM is
                      Args (K) := Pop;
                   end loop;
                   Res := (Pushes => False, Value => 0);
+                  --  Keep the arguments alive for the call: a native may hold
+                  --  an address across something that re-enters the VM.
+                  Current_Args := Args;
+                  Have_Args := True;
                   St := Call_Native (Idx, Args, NArgs, Consts, Res);
+                  Have_Args := False;
                   if St /= Ok then
                      Note_At ("native call failed", PC);
                      return St;
