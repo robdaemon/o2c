@@ -2872,12 +2872,10 @@ package body O2c_Compiler is
                   --  every existing site's accounting, including the FOR
                   --  header, which parses BY for its text and then Discards
                   --  exactly the one value that parse pushed.
-                  if R.Typ = T_Long then
-                     --  Consistent with the other LONGINT arithmetic sites:
-                     --  assignment and comparison work, arithmetic refuses.
-                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                       & "LONGINT is not yet supported";
-                  elsif R.Typ = T_Real or else R.Typ = T_LReal then
+                  --  LONGINT needs no refusal and no second opcode: it
+                  --  is the same 8-byte slot as an INTEGER, so NEG is
+                  --  the LONGINT negation.
+                  if R.Typ = T_Real or else R.Typ = T_LReal then
                      O2c_BC.Un (O2c_BC.Rneg);
                   else
                      O2c_BC.Un (O2c_BC.Neg);
@@ -4282,10 +4280,10 @@ package body O2c_Compiler is
                   R.Lit := False;
                   Fold_Bin (R, X, '*');
                   if O2c_BC.Bytecode_Mode then
-                     if Res = T_Long then
-                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                          & "LONGINT is not yet supported";
-                     elsif Res = T_Int then
+                     if Res = T_Int or else Res = T_Long then
+                        --  LONGINT is the same 8-byte slot as INTEGER, so this
+                        --  integer opcode IS the LONGINT opcode.  It used to be
+                        --  refused here as a precaution never revisited.
                         O2c_BC.Bin (O2c_BC.Mul);
                      elsif R.Typ /= T_Int and then X.Typ /= T_Int then
                         --  REAL and LONGREAL share the ops; both operands must be
@@ -4348,10 +4346,10 @@ package body O2c_Compiler is
                R.Lit := False;
                Fold_Bin (R, X, '/');
                if O2c_BC.Bytecode_Mode then
-                  if Res = T_Long then
-                     raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                       & "LONGINT is not yet supported";
-                  elsif Res = T_Int then
+                  if Res = T_Int or else Res = T_Long then
+                     --  LONGINT is the same 8-byte slot as INTEGER, so this
+                     --  integer opcode IS the LONGINT opcode.  It used to be
+                     --  refused here as a precaution never revisited.
                      O2c_BC.Bin (O2c_BC.IDiv);
                   elsif R.Typ /= T_Int and then X.Typ /= T_Int then
                      --  REAL and LONGREAL share the ops; both operands must be
@@ -4378,9 +4376,9 @@ package body O2c_Compiler is
                R.Lit := False;
                Fold_Bin (R, X, 'm');
                if O2c_BC.Bytecode_Mode then
-                  if Res /= T_Int then
+                  if Res /= T_Int and then Res /= T_Long then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                       & "MOD needs INTEGER operands";
+                       & "MOD needs INTEGER or LONGINT operands";
                   end if;
                   O2c_BC.Bin (O2c_BC.IMod);
                end if;
@@ -4479,10 +4477,10 @@ package body O2c_Compiler is
                   R.Lit := False;
                   Fold_Bin (R, X, '+');
                   if O2c_BC.Bytecode_Mode then
-                     if Res = T_Long then
-                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                          & "LONGINT is not yet supported";
-                     elsif Res = T_Int then
+                     if Res = T_Int or else Res = T_Long then
+                        --  LONGINT is the same 8-byte slot as INTEGER, so this
+                        --  integer opcode IS the LONGINT opcode.  It used to be
+                        --  refused here as a precaution never revisited.
                         O2c_BC.Bin (O2c_BC.Add);
                      elsif R.Typ /= T_Int and then X.Typ /= T_Int then
                         --  REAL and LONGREAL share the ops; both operands must be
@@ -4549,10 +4547,10 @@ package body O2c_Compiler is
                   R.Lit := False;
                   Fold_Bin (R, X, '-');
                   if O2c_BC.Bytecode_Mode then
-                     if Res = T_Long then
-                        raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                          & "LONGINT is not yet supported";
-                     elsif Res = T_Int then
+                     if Res = T_Int or else Res = T_Long then
+                        --  LONGINT is the same 8-byte slot as INTEGER, so this
+                        --  integer opcode IS the LONGINT opcode.  It used to be
+                        --  refused here as a precaution never revisited.
                         O2c_BC.Bin (O2c_BC.Sub);
                      elsif R.Typ /= T_Int and then X.Typ /= T_Int then
                         --  REAL and LONGREAL share the ops; both operands must be

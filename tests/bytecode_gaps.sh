@@ -352,21 +352,31 @@ else
    bad "unary '-'/'not' no longer compile: $(tail -1 "$WORK/un.log")"
 fi
 
-#  LONGINT arithmetic still refuses, and unary minus is arithmetic.  Asserted
-#  so that the one place a sign is now an opcode cannot quietly start emitting
-#  a 32-bit NEG for a 64-bit value.
+#  Unary minus on LONGINT.  This used to assert a REFUSAL, on the reasoning
+#  that a sign on a 64-bit value must not silently become a 32-bit NEG.  It now
+#  works, because LONGINT arithmetic works (see the LONGINT section further
+#  down), so the assertion is inverted - and asserted by VALUE, since "it
+#  compiles" is exactly what the old refusal could not be told apart from.
 cat > "$WORK/ln.ob2" <<'EOB'
 module LN;
+import Out;
 var n: longint;
-begin n := 5; n := -n end LN.
+begin
+  n := 5;
+  n := -n;
+  if n = -5 then Out.String("neg-ok") else Out.String("neg-bad") end; Out.Ln
+end LN.
 EOB
-if timeout 60 "$FRONT" "$WORK/ln.ob2" "$WORK/ln.obc" >"$WORK/ln.log" 2>&1
-then
-   bad "unary minus on LONGINT compiled - it has no 64-bit opcode and must refuse"
-elif grep -q "LONGINT is not yet supported" "$WORK/ln.log"; then
-   note "  ok  unary minus on LONGINT still refuses loudly"
+if timeout 60 "$FRONT" "$WORK/ln.ob2" "$WORK/ln.obc" >"$WORK/ln.log" 2>&1; then
+   got="$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/ln.obc" 2>/dev/null \
+            | tr -d '\n\r')"
+   if [ "$got" = "neg-ok" ]; then
+      note "  ok  unary minus on LONGINT negates (value verified)"
+   else
+      bad "LONGINT unary minus printed '$got', expected neg-ok"
+   fi
 else
-   bad "LONGINT unary minus failed for the wrong reason: $(tail -1 "$WORK/ln.log")"
+   bad "LONGINT unary minus no longer compiles: $(tail -1 "$WORK/ln.log")"
 fi
 
 note "--- BOOLEAN operators: the divergences that DO refuse ---"
@@ -409,6 +419,18 @@ note "--- pointer FIELDS, and the spelling that was unusable ---"
 check "pointer field: assignment"     ok 'module G45; type R = record n: integer end; type P = pointer to R; type H = record p: P end; var h: H; q: P; begin new(q); h.p := q end G45.'
 check "pointer field: read through it" ok 'module G46; type R = record n: integer end; type P = pointer to R; type H = record p: P end; var h: H; q: P; k: integer; begin new(q); h.p := q; k := h.p^.n end G46.'
 check "pointer field: the linked-list spelling still works" ok 'module G47; type Node = record v: integer; next: Node end; type P = pointer to Node; var p, q: P; begin new(p); new(q); q^.next := p; p^.v := 1 end G47.'
+
+note "--- LONGINT: arithmetic works, its own literals do not ---"
+#  Every operator was refused with one message.  Assignment and comparison
+#  worked, so no test could notice, and the existing longint.ob2 only did
+#  those two.  A LONGINT is the same 8-byte slot as an INTEGER here, so the
+#  integer opcodes were always the LONGINT opcodes.
+check "LONGINT add/sub/mul/DIV/MOD and unary -" ok 'module G48; var n: longint; begin n := 6; n := n + 1; n := n - 1; n := n * 2; n := n DIV 2; n := n MOD 2; n := -n end G48.'
+#  What is left is the LITERAL, which is a different thing: the parser types an
+#  integer literal as INTEGER, so a value above INTEGER'"'"'Last cannot be
+#  written.  The Ada backend accepts it, so this IS a divergence - recorded so
+#  it is not mistaken for the arithmetic gap again.
+check "LONGINT literal above INTEGER'Last" blocked 'module G49; var n: longint; begin n := 3000000000 end G49.'
 
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"

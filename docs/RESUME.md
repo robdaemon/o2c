@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         302
-    fixtures        71 in tests/bc/
+    commits         303
+    fixtures        72 in tests/bc/
     foreign natives 21 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -481,6 +481,39 @@ the wrong shape from the TYPE having been recorded wrong. And
 `D.K := (if D.Ptr_Field and then UTypes (...) ...)` is load-bearing, not
 decoration: without `D.Ptr_Field and then` it indexes `UTypes (0)` and crashed on
 every record with an INTEGER in it.
+
+### 3i. DONE — LONGINT arithmetic, which was refused wholesale
+
+The first thing step 2 needed, and a whole language gap. **Every** LONGINT
+operator refused with one message — `+`, `-`, `*`, `DIV`, `MOD` and unary `-` —
+while assignment and comparison worked.
+
+That was a **precaution, not a limitation**: a LONGINT is the same 8-byte slot as
+an INTEGER in this VM, so the integer opcode *is* the LONGINT opcode. The check
+was written when that was not yet certain and never revisited — the same shape as
+the record-field list in 3g, costing the same thing: a construct the language has
+that one backend will not compile. Mixed INTEGER/LONGINT needs nothing either, as
+`Int_Like` only mixes when the other side is a literal, and a literal is already
+the wider type's slot.
+
+`tests/bc/longarith.ob2` asserts each operator by **result**, because the existing
+`longint.ob2` only ever assigned and compared — no test could have noticed. Its
+last case is the point of a LONGINT: `1000000000 * 3` does not fit in 32 bits, so
+anything quietly narrowed would print `WIDE-BAD`.
+
+**What is left is the LITERAL, which is a different thing**, and is recorded so
+it is not mistaken for the arithmetic gap again. A LONGINT literal above
+`INTEGER'Last` cannot be written, because the parser types an integer literal as
+INTEGER; the Ada backend accepts it, so this *is* a divergence — and it is why
+`longarith.ob2` builds 3e9 by multiplication instead of writing it.
+
+One entry in `bytecode_gaps.sh` had to change hands rather than merely be added,
+which is that file working as intended: the assertion that unary minus on LONGINT
+**refuses** is now an assertion that it negates, checked by value.
+
+**Measured result:** `Files` gets past LONGINT too and now stops at
+**`Files.FRename`** — an intrinsic. That is step 2's actual subject: what remains
+is the ~15 intrinsic primitives, not anything about the language.
 
 ## 4. Method — what worked, and what did not
 

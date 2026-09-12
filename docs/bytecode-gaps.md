@@ -243,10 +243,15 @@ LOUDLY. Regenerate with:
 ### A. Language constructs that refuse (loud, verified by construction)
 
     &                      string concatenation
-    LONGINT                arithmetic (assignment and comparison DO work)
+    LONGINT literal        above INTEGER'Last (ARITHMETIC now works - see 3i)
     BOOLEAN and/or         `&` and `or` on BOOLEAN values (NOT now works - A.1)
     mixed INTEGER/REAL     an operation needing an implicit I2R
-    NEW of a ptr designator      assigning through a ptr designator
+    NEW of a ptr designator   SHARED with the front end: BOTH backends refuse
+                              `new(p^.next)` with "NEW needs a POINTER value",
+                              so it is not a bytecode gap.  Kept so that the
+                              entry which used to cover ASSIGNMENT through a
+                              designator as well does not vanish with it - that
+                              half is fixed, see 3h in RESUME.
     a method on a VAR record receiver
     an ARRAY OF actual that is a local array
     forwarding a global ARRAY OF parameter
