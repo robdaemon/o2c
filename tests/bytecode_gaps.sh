@@ -69,6 +69,32 @@ check "string comparison"  ok 'module G24; import Out; type T = array 8 of char;
 check "Out.String on a CHAR array"  ok 'module G23; import Out; type T = array 8 of char; var v: T; begin v := "hi"; Out.String(v) end G23.'
 check "string literal assign"   ok 'module G22; import Out; type T = array 8 of char; var v: T; begin v := "hi"; Out.Char(v[0]) end G22.'
 
+#  The generated built-in module sources are the ONLY way to reach an FFI
+#  branch: reaching one needs a module whose own name is the builtin's, since
+#  the branches fire on unqualified calls while compiling that module.  So
+#  these files are also the one probe that demonstrates an FFI branch is
+#  reachable at all - previously it was reasoned and could not be shown.
+#  A failure that is NOT the refusal means the generated source stopped
+#  parsing, which is the thing most likely to rot.
+for f in "$ROOT"/samples/convert.ob2; do
+   [ -f "$f" ] || { bad "samples/convert.ob2 is missing (run: make libs)"; continue; }
+   #  Generating is the point: the checked-in file must be exactly what the
+   #  table produces, or the two have drifted and the sync is a fiction.
+   python3 "$ROOT/tools/o2c_libgen.py" "$WORK/gen" >/dev/null 2>&1 \
+     || { bad "o2c_libgen.py failed to run"; continue; }
+   if ! diff -q "$f" "$WORK/gen/$(basename "$f")" >/dev/null 2>&1; then
+      bad "$(basename "$f") differs from the generator output (run: make libs)"
+      continue
+   fi
+   if timeout 60 "$FRONT" "$f" "$WORK/lib.obc" >"$WORK/lib.log" 2>&1; then
+      bad "$(basename "$f") compiled, but its FFI branch must refuse"
+   elif grep -q "not yet supported" "$WORK/lib.log"; then
+      note "  ok  $(basename "$f") parses and reaches its FFI branch"
+   else
+      bad "$(basename "$f") failed unexpectedly: $(tail -1 "$WORK/lib.log")"
+   fi
+done
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0

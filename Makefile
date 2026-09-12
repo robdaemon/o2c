@@ -16,7 +16,17 @@ RTS_ARCHIVES := $(AEGIR_ROOT)/userspace/gnat-rts/adalib/libgnat.a \
 
 .PHONY: build clean
 
-build:
+#  The built-in FFI modules' dialect sources are GENERATED from the API
+#  table in tools/o2c_libgen.py, not hand-written: the names, arities and
+#  types are the compiler's own knowledge of those modules, and a copy
+#  kept by hand would drift from it silently.  The aegir Makefile copies
+#  samples/ into initrd/root/Tests/O2cLib/, so generating here keeps the
+#  guest's copies in sync as well.
+.PHONY: libs
+libs:
+	python3 tools/o2c_libgen.py samples
+
+build: libs
 	@for f in $(RTS_ARCHIVES); do \
 	  if [ -f "$$f" ] && [ "$$f" -nt crate/bin/o2c.elf ]; then \
 	     echo "o2c: $$f is newer than the ELF; forcing a relink"; \
