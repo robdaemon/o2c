@@ -64,6 +64,7 @@ check "parameterless call"      ok 'module G12; procedure P; begin end P; begin 
 note "--- CHAR arrays and strings ---"
 check "ARRAY OF CHAR variable"  ok 'module G20; type T = array 8 of char; var v: T; begin end G20.'
 check "element store and load"  ok 'module G21; import Out; type T = array 8 of char; var v: T; c: char; begin c := "z"; v[2] := c; Out.Char(v[2]) end G21.'
+check "string comparison"  ok 'module G24; import Out; type T = array 8 of char; var a: T; b: T; f: boolean; begin a := "x"; b := "y"; f := a < b end G24.'
 check "Out.String on a CHAR array"  ok 'module G23; import Out; type T = array 8 of char; var v: T; begin v := "hi"; Out.String(v) end G23.'
 check "string literal assign"   ok 'module G22; import Out; type T = array 8 of char; var v: T; begin v := "hi"; Out.Char(v[0]) end G22.'
 

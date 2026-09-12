@@ -2008,6 +2008,15 @@ package body O2c_Compiler is
          --  the base and index were left on the stack with no access op:
          --  Out.Char then printed the *index*.  Unreachable until CHAR
          --  arrays stopped being refused, which is why it went unnoticed.
+         --  Push the array's address: the packed bytes ARE the string, and
+         --  both consumers - the comparison and Out.String - need the
+         --  address on the stack.  Returning the designator without pushing
+         --  is why `f := s = t` compared nothing, and why discarding an
+         --  address there underflowed: there was never one to discard.
+         if O2c_BC.Bytecode_Mode then
+            O2c_BC.Load_Addr_G
+              (O2c_BC.Global_Array (Base_Name, Total_Slots (Base_UT)));
+         end if;
          D.K := D_Str;
          return D;
       end if;
@@ -4345,6 +4354,14 @@ package body O2c_Compiler is
                  when others        => " >= ");
             Is_LE : constant Boolean := Cur.Kind = Lex.Tok_LE;
             Is_GE : constant Boolean := Cur.Kind = Lex.Tok_GE;
+            Bc_O  : constant O2c_BC.Op :=
+              (case Cur.Kind is
+                 when Lex.Tok_Equal => O2c_BC.Eq,
+                 when Lex.Tok_NE    => O2c_BC.Ne,
+                 when Lex.Tok_LT    => O2c_BC.Lt,
+                 when Lex.Tok_LE    => O2c_BC.Le,
+                 when Lex.Tok_GT    => O2c_BC.Gt,
+                 when others        => O2c_BC.Ge);
          begin
             Next;
             declare
@@ -4355,6 +4372,14 @@ package body O2c_Compiler is
                   --  M33: string equality/ordering over NUL-terminated
                   --  content (char arrays may be padded with NULs)
                   Used_StrCmp := True;
+                  if O2c_BC.Bytecode_Mode then
+                     --  Both addresses are on the stack.  The three-way
+                     --  compare gives -1/0/1; the relational against zero
+                     --  gives whichever operator was asked for.
+                     O2c_BC.Bin (O2c_BC.Str_Cmp);
+                     O2c_BC.Push_Int (1);   --  0 less, 1 equal, 2 greater
+                     O2c_BC.Bin (Bc_O);
+                  end if;
                   R.Text := To_Unbounded_String
                     ("(O2c_S_Cmp (" & To_String (R.Text) & ", "
                      & To_String (X.Text) & ")" & Op & "0)");
@@ -8011,6 +8036,10 @@ package body O2c_Compiler is
                                           L_Bdy : constant Natural :=
                                             New_Bc_Label;
                                        begin
+                                          --  The chain pushed the array's
+                                          --  address; this loop derives its
+                                          --  own, so drop that one.
+                                          O2c_BC.Discard;
                                           O2c_BC.Push_Int (0);
                                           O2c_BC.Store_Local (I_Sl);
                                           O2c_BC.Mark (L_Top);

@@ -1912,21 +1912,22 @@ package body OBC_VM is
                   K   : Natural := 0;
                   A   : Byte;
                   Bx  : Byte;
-                  Res : I64 := 0;
+                  --  0 less, 1 equal, 2 greater - never negative, because a
+                  --  negative I64 will not convert to U64 under a checking
+                  --  build, and this is not worth a wrapping conversion.
+                  Res : U64 := 1;
                begin
                   loop
                      A  := At1 (K);
                      Bx := At2 (K);
                      if A /= Bx then
-                        Res := (if A < Bx then -1 else 1);
+                        Res := (if A < Bx then 0 else 2);
                         exit;
                      end if;
                      exit when A = 0;
                      K := K + 1;
                   end loop;
-                  --  Signed, so the compiler's Lt/Gt compare the sign
-                  --  correctly: -1 survives the round trip through U64.
-                  Push (U64 (Res));
+                  Push (Res);
                end;
                PC := PC + 1;
             when Op_Copy_Str =>
