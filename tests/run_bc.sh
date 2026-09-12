@@ -89,7 +89,7 @@ fi
 #  ---- Threads.Start, with a procedure value and with a name ---------------
 #  The point of the procedure type: Start takes a procedure *value*, so the
 #  thread body may be chosen at run time by assigning to the variable.
-for TN in threadstart threadname threadjoin threadmutex; do
+for TN in threadstart threadname threadjoin threadmutex callplain localprocv; do
    if ! timeout 120 "$FRONT" "$ROOT/tests/bc/$TN.ob2" "$WORK/$TN.obc" \
         >"$WORK/$TN.compile" 2>&1; then
       bad "$TN.ob2 did not compile: $(cat "$WORK/$TN.compile")"
@@ -97,7 +97,7 @@ for TN in threadstart threadname threadjoin threadmutex; do
    then
       bad "$TN.ob2 failed to run: $(cat "$WORK/$TN.err")"
    elif diff -u "$ROOT/tests/bc/$TN.out" "$WORK/$TN.out" >/dev/null; then
-      note "positive: $TN.ob2 starts a thread and prints the golden"
+      note "positive: $TN.ob2 compiles, runs, and prints the golden"
    else
       bad "$TN.ob2 output differs: $(cat "$WORK/$TN.out")"
    fi

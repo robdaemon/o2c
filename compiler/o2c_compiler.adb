@@ -8109,6 +8109,18 @@ package body O2c_Compiler is
                     & Natural'Image (Cur.Line) & ")";
                end if;
                Append_Body ("      " & Head (1 .. H_Len) & ";");
+               --  A parameterless procedure is called without parentheses,
+               --  so this is the only place such a call is seen.  Emitting
+               --  just the Ada body made it a silent no-op in bytecode mode:
+               --  parsed, accepted, and never called - which is the worst
+               --  way for the most common statement in the language to fail.
+               if O2c_BC.Bytecode_Mode then
+                  if Syms (Idx).Bc_Proc = 0 then
+                     raise O2c_BC.Wrong_Construct with
+                       "bytecode backend: call to an unknown procedure";
+                  end if;
+                  O2c_BC.Call_Proc (Syms (Idx).Bc_Proc);
+               end if;
             end if;
             end if;            --  close the NEW / regular dispatch split
          else
