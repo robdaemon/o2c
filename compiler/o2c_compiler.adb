@@ -59,6 +59,7 @@ package body O2c_Compiler is
       Name    : Unbounded_String;
       Is_Rec  : Boolean := True;
       Is_Ptr  : Boolean := False;   --  POINTER TO (target in Ptr_Tgt)
+      Is_Proc : Boolean := False;   --  PROCEDURE type: a value is a proc id
       Is_Ext  : Boolean := False;   --  RECORD (T0) extension (M13)
       Parent  : Natural := 0;       --  parent record UT (when Is_Ext)
       Ptr_Tgt : Natural := 0;       --  record UT a pointer designates
@@ -4519,6 +4520,9 @@ package body O2c_Compiler is
                     UTypes (UT).Arr_Len > 0
                     and then UTypes (UT).Elem = T_Int;
                   Ok_Ptr : constant Boolean := UTypes (UT).Is_Ptr;
+                  --  A procedure value is one slot - a procedure id - so a
+                  --  variable of that type is as ordinary as a pointer.
+                  Ok_Proc : constant Boolean := UTypes (UT).Is_Proc;
                   Ok_Rec : constant Boolean :=
                     UTypes (UT).Is_Rec
                     and then not UTypes (UT).Is_Ptr
@@ -4529,7 +4533,9 @@ package body O2c_Compiler is
                     --  default is null and which is how a list is built.
                     and then Chain_Fields_Allowed (UT);
                begin
-                  if not (Ok_Arr or else Ok_Rec or else Ok_Ptr) then
+                  if not (Ok_Arr or else Ok_Rec or else Ok_Ptr
+                          or else Ok_Proc)
+                  then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
                        & "non-INTEGER arrays, record extensions and records "
                        & "with non-INTEGER or user-typed fields are not yet "
@@ -4650,7 +4656,19 @@ package body O2c_Compiler is
                        others => <>);
       Spec_Decl := UTypes (UTI).ExpT;
 
-      if Cur.Kind = Lex.Tok_Array then
+      if Cur.Kind = Lex.Tok_Procedure then
+         --  A procedure type.  Minimal on purpose: no parameters and no
+         --  result, so a value is just a procedure id with no environment.
+         --  That is what makes it cheap - no closures, and the VM already
+         --  numbers procedures.  Parameter lists are a later extension.
+         Next;
+         if Cur.Kind = Lex.Tok_LParen then
+            raise O2c_Error with "procedure types with parameters are not "
+              & "supported yet (line " & Natural'Image (Cur.Line) & ")";
+         end if;
+         UTypes (UTI).Is_Rec := False;
+         UTypes (UTI).Is_Proc := True;
+      elsif Cur.Kind = Lex.Tok_Array then
          Next;
          Expect (Lex.Tok_Number, "an array length");
          declare

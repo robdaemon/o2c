@@ -1,0 +1,5 @@
+MODULE PtOk;
+TYPE Body = PROCEDURE;
+VAR b: Body;
+BEGIN
+END PtOk.

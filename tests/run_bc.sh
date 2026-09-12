@@ -86,6 +86,30 @@ else
    bad "gclive.ob2 did not compile: $(cat "$WORK/glive.compile")"
 fi
 
+#  ---- procedure types: the minimal form, and its refusal -----------------
+#  A procedure type with no parameters and no result: a value is a procedure
+#  id with no environment, which is what makes it cheap.  Parameter lists are
+#  refused by name rather than mis-parsed.
+if timeout 120 "$FRONT" "$ROOT/tests/bc/proctype.ob2" "$WORK/pt.obc" \
+   >"$WORK/pt.log" 2>&1
+then
+   note "positive: proctype.ob2 (a PROCEDURE type) compiles"
+else
+   bad "proctype.ob2 did not compile: $(cat "$WORK/pt.log")"
+fi
+
+if timeout 120 "$FRONT" "$ROOT/tests/bc/proctype_bad.ob2" "$WORK/ptb.obc" \
+   >"$WORK/ptb.log" 2>&1
+then
+   bad "proctype_bad.ob2 compiled, but parameterised procedure types are not supported"
+else
+   if grep -aq 'procedure types with parameters' "$WORK/ptb.log"; then
+      note "negative: parameterised procedure type rejected by name"
+   else
+      bad "proctype_bad.ob2 failed without a clear diagnostic: $(cat "$WORK/ptb.log")"
+   fi
+fi
+
 #  ---- foreign modules: EXTERN binds, and an unknown symbol is rejected ---
 #  A foreign module is an ordinary Oberon module - it has a body - whose
 #  procedures bind to C symbols instead of having Oberon bodies.
