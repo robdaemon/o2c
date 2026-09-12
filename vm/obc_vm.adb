@@ -1581,9 +1581,17 @@ package body OBC_VM is
             end loop;
          end if;
 
-         Frame_Slots (0) := Img.Procs (Img.Body_Proc).Frame_Slots;
-         Locals_Used := Frame_Slots (0);
-         Cur_Frame := 0;
+         --  Frame 0 belongs to the module body, and only the root starts
+         --  there.  A thread's frame 0 was sized for its own entry procedure
+         --  when it was spawned, and re-sizing it from the body would hand
+         --  the thread the wrong number of locals - so a thread with a local
+         --  of its own would read past its frame at run time.  The thread's
+         --  frame index and local mark are already 0 from the spawn.
+         if Ctx.Loads_Globals then
+            Frame_Slots (0) := Img.Procs (Img.Body_Proc).Frame_Slots;
+            Locals_Used := Frame_Slots (0);
+            Cur_Frame := 0;
+         end if;
       end if;
 
       loop
@@ -2107,14 +2115,17 @@ package body OBC_VM is
                      --  thread hands nothing back, so there is nothing to
                      --  wait for and nothing to collect.  Handles below the
                      --  next one are issued; the rest never existed.
-                     if Handle < Next_Thread_Id then
-                        PC := PC + 1;
-                        return Ok;
+                     if Handle >= Next_Thread_Id then
+                        Note_At ("join on a thread that was never started",
+                                 PC);
+                        return Bad_Target;
                      end if;
-                     Note_At ("join on a thread that was never started", PC);
-                     return Bad_Target;
-                  end if;
-                  if Target.State /= Thread_Done then
+                     --  Otherwise fall through: PC is advanced once at the
+                     --  end of this case.  Returning Ok here would mean "the
+                     --  program halted", which is how a join on an already
+                     --  finished thread used to end the run silently.
+                     null;
+                  elsif Target.State /= Thread_Done then
                      --  Park rather than spin.  The scheduler wakes this
                      --  thread when the one it waits for finishes.
                      Ctx.Waiting_For := Handle;
