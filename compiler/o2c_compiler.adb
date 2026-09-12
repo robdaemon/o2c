@@ -3883,6 +3883,7 @@ package body O2c_Compiler is
                   and then Syms (Id).Typ /= T_Set
                   and then Syms (Id).Typ /= T_Real
                   and then Syms (Id).Typ /= T_LReal
+                  and then Syms (Id).Typ /= T_Long
                   then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
                        & "only INTEGER/CHAR/BOOLEAN variables are supported";
@@ -4526,6 +4527,13 @@ package body O2c_Compiler is
                        and then (Op = " = " or else Op = " /= ");
                   begin
                      if not ((R.Typ = T_Int and then X.Typ = T_Int)
+                             --  LONGINT is a 64-bit slot as INTEGER is, so
+                             --  the same signed comparisons apply - and the
+                             --  two mix, because a LONGINT against an integer
+                             --  literal is the ordinary way to compare one.
+                             or else ((R.Typ = T_Long or else R.Typ = T_Int)
+                                      and then (X.Typ = T_Long
+                                                or else X.Typ = T_Int))
                              or else (R.Typ = T_Char
                                       and then X.Typ = T_Char)
                              or else (Rl
@@ -8329,12 +8337,16 @@ package body O2c_Compiler is
                      V : Expr_Rec := Parse_Expr;
                   begin
                      if O2c_BC.Bytecode_Mode then
+                        --  LONGINT is a 64-bit slot, the same as INTEGER:
+                        --  no conversion is needed to assign one.  It was
+                        --  missing from this list when the list was written.
                         if Syms (Idx).Typ /= T_Int
                           and then Syms (Idx).Typ /= T_Char
                           and then Syms (Idx).Typ /= T_Bool
                           and then Syms (Idx).Typ /= T_Set
-                        and then Syms (Idx).Typ /= T_Real
-                        and then Syms (Idx).Typ /= T_LReal
+                          and then Syms (Idx).Typ /= T_Real
+                          and then Syms (Idx).Typ /= T_LReal
+                          and then Syms (Idx).Typ /= T_Long
                         then
                            raise O2c_BC.Wrong_Construct with "bytecode "
                              & "backend: only INTEGER/CHAR/BOOLEAN "
