@@ -376,6 +376,12 @@ package body OBC_VM is
    end record;
    Foreign : constant array (1 .. Max_Foreign) of Foreign_Rec :=
      (1 => (Sym => new String'("labs"), Pops => 1),
+      --  The Oakwood FFI surface.  These take ADDRESSES of the caller's
+      --  variables, not values: the surface is written in terms of out
+      --  parameters (Convert.ToInt's two `var` formals, Env's key/value
+      --  pair), so the call site pushes where the results go and the
+      --  native writes through.  Appended after labs, never renumbered.
+      2 => (Sym => new String'("o2c_conv_toint"), Pops => 3),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -386,6 +392,7 @@ package body OBC_VM is
    Native_Pops : constant array (0 .. Native_Count - 1) of Natural :=
      (0 => 2, 1 => 1, 2 => 0, 3 => 2, 4 => 1,
       5 => 1,     --  labs
+      6 => 3,     --  o2c_conv_toint: str, var x, var res
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -1200,6 +1207,60 @@ package body OBC_VM is
       end Put_Str;
    begin
       case Idx is
+         when Max_Natives + 1 =>
+            --  o2c_conv_toint: id 6, foreign slot 2.  Void - it writes
+            --  through the two out parameters - so it does not set Result.
+            --  The three arguments are addresses into the VM's own Globals,
+            --  which is what Load_Addr_G pushed.
+            declare
+               function Byte_At (A : U64; N : Natural) return Byte is
+                  B : Byte with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A)
+                       + System.Storage_Elements.Integer_Address (N));
+               begin
+                  return B;
+               end Byte_At;
+               procedure Park (A : U64; V : I64) is
+                  X : I64 with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A));
+               begin
+                  X := V;
+               end Park;
+               Zero : constant Byte := Byte (Character'Pos ('0'));
+               Nine : constant Byte := Byte (Character'Pos ('9'));
+               Str  : constant U64 := Args (0);
+               XP   : constant U64 := Args (1);
+               RP   : constant U64 := Args (2);
+               V    : I64 := 0;
+               Neg  : Boolean := False;
+               I    : Natural := 0;
+               B    : Byte;
+               Any  : Boolean := False;
+            begin
+               if Byte_At (Str, 0) = Byte (Character'Pos ('-')) then
+                  Neg := True;
+                  I := 1;
+               end if;
+               loop
+                  B := Byte_At (Str, I);
+                  exit when B = 0;
+                  exit when B < Zero or else B > Nine;
+                  V := V * 10 + I64 (B - Zero);
+                  Any := True;
+                  I := I + 1;
+               end loop;
+               if not Any then
+                  V := 0;
+               elsif Neg then
+                  V := -V;
+               end if;
+               Park (XP, V);
+               --  res is the Oakwood status: 0 for success.
+               Park (RP, 0);
+               return Ok;
+            end;
          when Max_Natives =>
             --  labs, the first foreign function: id 5, the first entry in
             --  the foreign table.  It returns a value, so it sets Result and
