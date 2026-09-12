@@ -161,12 +161,24 @@ package body OBC_VM is
    --  whose frames are roots while it runs - and because a thread will
    --  contribute a second one of these.  The collection walks the contexts
    --  that are live, not a fixed set of locals.
+   type Natural_Array is array (Natural range <>) of Natural;
+   type Natural_Array_Access is access Natural_Array;
+
    type Context is record
       Stack       : U64_Array_Access := null;
       SP          : Natural := 0;
       Locals      : U64_Array_Access := null;
       Pool_Used   : Natural := 0;
       Globals     : U64_Array_Access := null;
+      --  Everything else the interpreter needs in order to be suspended and
+      --  resumed: where it is, which frame is current, and the frame
+      --  bookkeeping.  With these a Context is a whole thread rather than
+      --  just its roots, which is what a VM-scheduled green thread must be.
+      PC          : Natural := 0;
+      Which_Frame : Natural := 0;
+      Frame_Base  : Natural_Array_Access := null;
+      Frame_Slots : Natural_Array_Access := null;
+      Return_PC   : Natural_Array_Access := null;
    end record;
    type Context_Access is access Context;
 
@@ -194,8 +206,6 @@ package body OBC_VM is
      limited new Ada.Finalization.Limited_Controlled with null record;
    overriding procedure Initialize (S : in out Context_Scope);
    overriding procedure Finalize (S : in out Context_Scope);
-   type Natural_Array is array (Natural range <>) of Natural;
-   type Natural_Array_Access is access Natural_Array;
    Heap       : array (0 .. Heap_Words - 1) of aliased U64;
    --  One bit per arena slot, marking what a collection reached.  Packed
    --  rather than one Boolean per slot: the arena is large next to the guest
@@ -1095,7 +1105,7 @@ package body OBC_VM is
       --  program declared and no more.
       Globals : U64_Array_Access renames Ctx.Globals;
       SP      : Natural renames Ctx.SP;
-      PC      : Natural := Img.Body_Off;
+      PC      : Natural renames Ctx.PC;
 
       procedure Push (V : U64) is
       begin
@@ -1136,20 +1146,14 @@ package body OBC_VM is
       --  array got zero from its initialiser; an access does not, so the
       --  aggregate is spelled out rather than relying on a default that
       --  never arrives.
-      Frame_Base  : Natural_Array_Access :=
-        new Natural_Array'(0 .. Max_Frames - 1 => 0);
-      --  Written for frame 0 before any read, so the default never
-      --  mattered here - but it is spelled out anyway, since the same
-      --  omission made Frame_Base read an uninitialised slot.
-      Frame_Slots : Natural_Array_Access :=
-        new Natural_Array'(0 .. Max_Frames - 1 => 0);
-      Return_PC   : Natural_Array_Access :=
-        new Natural_Array'(0 .. Max_Frames - 1 => 0);
+      Frame_Base  : Natural_Array_Access renames Ctx.Frame_Base;
+      Frame_Slots : Natural_Array_Access renames Ctx.Frame_Slots;
+      Return_PC   : Natural_Array_Access renames Ctx.Return_PC;
       --  Registers this call's context for as long as it runs, by
       --  finalization rather than by hand at each return.
       Scope       : Context_Scope (Ctx);
       pragma Unreferenced (Scope);   --  its whole effect is finalization
-      Cur_Frame   : Natural := 0;
+      Cur_Frame   : Natural renames Ctx.Which_Frame;
       Locals_Used : Natural renames Ctx.Pool_Used;
 
       --  Push the frame for Callee, so the body resumes at the instruction
@@ -2131,7 +2135,15 @@ package body OBC_VM is
                       Pool_Used   => 0,
                       Globals     =>
                         new U64_Array
-                          (0 .. Natural'Max (Img.N_Globals, 1) - 1)));
+                          (0 .. Natural'Max (Img.N_Globals, 1) - 1),
+                      PC          => Img.Body_Off,
+                      Which_Frame => 0,
+                      Frame_Base  =>
+                        new Natural_Array'(0 .. Max_Frames - 1 => 0),
+                      Frame_Slots =>
+                        new Natural_Array'(0 .. Max_Frames - 1 => 0),
+                      Return_PC   =>
+                        new Natural_Array'(0 .. Max_Frames - 1 => 0)));
    exception
       --  A malformed image must be *rejected*, never crash the VM: the
       --  spec's verification rules are checked, but a bug in the checks
