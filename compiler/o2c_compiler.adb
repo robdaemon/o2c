@@ -4118,8 +4118,15 @@ package body O2c_Compiler is
                   Sl : constant Integer := O2c_BC.Local_Slot (Ada_Id (Nm));
                begin
                   Next;              --  past the parameter name
-                  if Syms (Id).Typ = T_Char then
-                     if Cur.Kind /= Lex.Tok_LBracket then
+                  --  An ARRAY OF CHAR that is NOT indexed is a string VALUE
+                  --  (the caller's address).  An INDEXED one is an ordinary
+                  --  element access and belongs with the array case below, which
+                  --  knows how to emit it.  It used to take a branch of its own
+                  --  that built only the Ada text: `name[i]` pushed NOTHING in
+                  --  bytecode mode and read as a blank character - silently.
+                  if Syms (Id).Typ = T_Char
+                    and then Cur.Kind /= Lex.Tok_LBracket
+                  then
                         if O2c_BC.Bytecode_Mode then
                            --  A bare ARRAY OF CHAR is a string VALUE, and the
                            --  address of the caller's characters is in the
@@ -4145,22 +4152,6 @@ package body O2c_Compiler is
                         R.Typ := T_Str;
                         R.CStr := True;
                         return R;
-                     end if;
-                     Next;      --  past '['
-                     declare
-                        Ix : Expr_Rec := Parse_Expr;
-                     begin
-                        if Ix.Typ /= T_Int then
-                           raise O2c_Error
-                             with "string index must be INTEGER";
-                        end if;
-                        R.Text := To_Unbounded_String (Nm) & " ("
-                          & Ix.Text & " + 1)";
-                        R.Typ := T_Char;
-                     end;
-                     Expect (Lex.Tok_RBracket, "']'");
-                     Next;
-                     return R;
                   end if;
                   Expect (Lex.Tok_LBracket, "'[' to index an array");
                   Next;
@@ -4210,8 +4201,11 @@ package body O2c_Compiler is
                            end if;
                         end;
                      end if;
-                     R.Text := To_Unbounded_String (Nm) & " ("
-                       & Ix.Text & ")";
+                     R.Text := (if Syms (Id).Typ = T_Char
+                                then To_Unbounded_String (Nm) & " ("
+                                  & Ix.Text & " + 1)"
+                                else To_Unbounded_String (Nm) & " ("
+                                  & Ix.Text & ")");
                      R.Typ := Syms (Id).Typ;
                   end;
                   Expect (Lex.Tok_RBracket, "']'");

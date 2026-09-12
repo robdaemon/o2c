@@ -919,6 +919,53 @@ the open array: the same store from a global array works.  So the next step is
 the open-array element READ, and `d3` is its minimal reproduction.
 
 
+### 3r. DONE — indexing an ARRAY OF CHAR (and a correction)
+
+**Correction first, because 3q stated it too broadly.**  "Reading an element of
+an ARRAY OF parameter is silently broken" was wrong, and a fair question exposed
+it: `openarr.ob2` has indexed an open-array parameter all along -
+
+    procedure Sum6 (a: array of integer): integer;
+       for i := 0 to 5 do s := s + a[i] end;
+
+- and it passes.  So do passing an open array, printing one with `Out.String`,
+and (after 3q) taking its `len`.  Open arrays were working.  What was missing was
+narrower: **indexing an `ARRAY OF CHAR`**.
+
+**The cause** is a branch of its own that built only the Ada text:
+
+    if Syms (Id).Typ = T_Char then
+       if Cur.Kind /= Lex.Tok_LBracket then <bare string value ...> return R; end if;
+       Next;      --  past '['
+       R.Text := To_Unbounded_String (Nm) & " (" & Ix.Text & " + 1)";
+       R.Typ  := T_Char;
+       return R;                    --  and NOTHING was pushed
+    end if;
+
+The `+ 1` is there because a CHAR element is 1-based in the emitted Ada, while an
+INTEGER array is not - which is exactly why this branch existed, and exactly why
+it never reached the array path below it that knows how to EMIT.  In bytecode
+mode `name[i]` therefore pushed nothing, the surrounding expression was a value
+short, and the character read as blank - silently.
+
+**The fix**: the bare-value shortcut now applies only when there is no `[`, so an
+indexed CHAR access falls through to the shared array path (base load, bounds
+check against the length that travelled with the array, then `Load_Idx_B` - the
+same path that made the INTEGER case work).  The Ada text keeps its `+ 1`.
+
+**Verified**: `d3` prints `abc` (constant and variable index), `c3` prints `ab`
+(the store from an open-array element), the `Old`-shaped probe prints `abc`,
+`openarr`'s image output is byte-identical to its golden, all seven suites green,
+48 corroborated, zero warnings.  (Introducing a duplicate `return R;` on the way
+warned as unreachable code; it was removed - zero warnings is not optional.)
+
+**Next, and narrower again**: the end-to-end check now says `Files.Length` does
+not report 0 for a file `Files.New` just made ("NOT zero" from `/tmp/probe/u3.ob2`).
+That rules out what `Old` stores and points at what travels BACK across the module
+boundary - a LONGINT result, or the pointer argument - rather than at any
+construct inside the callee.
+
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
