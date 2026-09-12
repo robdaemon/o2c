@@ -217,6 +217,63 @@ package body OBC_VM is
    In_Len : Natural := 0;
    In_Pos : Natural := 1;
    In_Rdy : Boolean := False;
+   In_Tok : String (1 .. 256);
+   In_Tok_Len : Natural := 0;
+
+   --  Read the input to the end, joining lines with a space, exactly as the
+   --  Ada backend's O2c_In_Load does.  Once only: successive reads then walk
+   --  the same stream.
+   procedure In_Load is
+      S : String (1 .. 512);
+      L : Natural;
+      E : Boolean;
+   begin
+      if In_Rdy then
+         return;
+      end if;
+      In_Rdy := True;
+      loop
+         VM_Platform.Get_Line (S, L, E);
+         exit when E;
+         exit when In_Len + L + 1 > In_Max;
+         for I in 1 .. L loop
+            In_Len := In_Len + 1;
+            In_Buf (In_Len) := S (I);
+         end loop;
+         In_Len := In_Len + 1;
+         In_Buf (In_Len) := ' ';
+      end loop;
+   end In_Load;
+
+   procedure In_Skip is
+   begin
+      In_Load;
+      while In_Pos <= In_Len and then In_Buf (In_Pos) = ' ' loop
+         In_Pos := In_Pos + 1;
+      end loop;
+   end In_Skip;
+
+   --  Take the next token into In_Tok.  Alpha selects Name's rule - only
+   --  identifier characters - against String's, which takes the whole token.
+   procedure In_Take (Alpha : Boolean) is
+      Ch : Character;
+   begin
+      In_Skip;
+      In_Tok_Len := 0;
+      while In_Pos <= In_Len and then In_Buf (In_Pos) /= ' ' loop
+         Ch := In_Buf (In_Pos);
+         if Alpha
+           and then not (Ch in 'A' .. 'Z' or else Ch in 'a' .. 'z'
+                         or else Ch in '0' .. '9' or else Ch = '_')
+         then
+            exit;
+         end if;
+         exit when In_Tok_Len = In_Tok'Last;
+         In_Tok_Len := In_Tok_Len + 1;
+         In_Tok (In_Tok_Len) := Ch;
+         In_Pos := In_Pos + 1;
+      end loop;
+   end In_Take;
 
    --  One interpreter invocation's root-bearing state.  It lives in a
    --  record rather than as locals of Execute because interpretation can
@@ -419,6 +476,10 @@ package body OBC_VM is
       15 => (Sym => new String'("o2c_inreset"), Pops => 0),
       16 => (Sym => new String'("o2c_instring"), Pops => 1),
       17 => (Sym => new String'("o2c_inname"), Pops => 1),
+      18 => (Sym => new String'("o2c_inchar"), Pops => 1),
+      19 => (Sym => new String'("o2c_inint"), Pops => 1),
+      20 => (Sym => new String'("o2c_inlong"), Pops => 1),
+      21 => (Sym => new String'("o2c_inreal"), Pops => 1),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -445,6 +506,10 @@ package body OBC_VM is
       19 => 0,    --  o2c_inreset: nothing
       20 => 1,    --  o2c_instring: the buffer address
       21 => 1,    --  o2c_inname: the buffer address
+      22 => 1,    --  o2c_inchar: the out slot
+      23 => 1,    --  o2c_inint: the out slot
+      24 => 1,    --  o2c_inlong: the out slot
+      25 => 1,    --  o2c_inreal: the out slot
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -1311,6 +1376,91 @@ package body OBC_VM is
                                (Live
                                 and then Plane
                                   (C (1) * Plane_W + C (0)) /= 0))));
+               end if;
+               return Ok;
+            end;
+         when Max_Natives + 17 .. Max_Natives + 20 =>
+            --  In.Char (22), In.Int (23), In.LongInt (24) and In.Real (25).
+            --  Void, one out slot each: the token is taken, converted and
+            --  written at the width that slot holds.  A token that is not a
+            --  number reads as zero, matching the dialect's lack of a
+            --  failure status for these.
+            declare
+               procedure Park_I (A : U64; V : I64) is
+                  X : I64 with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A));
+               begin
+                  X := V;
+               end Park_I;
+               procedure Park_R (A : U64; V : Long_Float) is
+                  X : Long_Float with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A));
+               begin
+                  X := V;
+               end Park_R;
+               V    : I64 := 0;
+               Whole : Long_Float := 0.0;
+               Frac  : Long_Float := 0.0;
+               Scale : Long_Float := 1.0;
+               In_F  : Boolean := False;
+               Neg   : Boolean := False;
+            begin
+               In_Take (False);
+               if Idx = Max_Natives + 17 then
+                  --  In.Char: the first character of the token.
+                  if In_Tok_Len > 0 then
+                     Park_I (Args (0),
+                             I64 (Character'Pos (In_Tok (1))));
+                  else
+                     Park_I (Args (0), 0);
+                  end if;
+                  return Ok;
+               end if;
+               declare
+                  I : Natural := 1;
+                  C : Character;
+               begin
+                  if In_Tok_Len > 0 and then In_Tok (1) = '-' then
+                     Neg := True;
+                     I := 2;
+                  end if;
+                  while I <= In_Tok_Len loop
+                     C := In_Tok (I);
+                     if C = '.' then
+                        In_F := True;
+                     elsif C in '0' .. '9' then
+                        declare
+                           D : constant Long_Float :=
+                             Long_Float (Character'Pos (C)
+                                         - Character'Pos ('0'));
+                        begin
+                           if In_F then
+                              Scale := Scale / 10.0;
+                              Frac := Frac + D * Scale;
+                           else
+                              Whole := Whole * 10.0 + D;
+                           end if;
+                        end;
+                     else
+                        exit;
+                     end if;
+                     I := I + 1;
+                  end loop;
+               end;
+               if Idx = Max_Natives + 20 then
+                  Park_R (Args (0),
+                          (if Neg then -(Whole + Frac) else Whole + Frac));
+               else
+                  --  Whole holds the digits accumulated as a float; the
+                  --  integer converters take its integral part.  A token that
+                  --  was not a number leaves it 0.
+                  V := I64 (Whole);
+                  if Neg then
+                     V := -V;
+                  end if;
+                  Park_I (Args (0), V);
                end if;
                return Ok;
             end;

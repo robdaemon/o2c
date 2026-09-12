@@ -267,21 +267,32 @@ module InT;
 import In, Out;
 var s: array 64 of char;
     n: array 64 of char;
+    i: integer;
+    c: char;
+    r: real;
 begin
   In.Open;
   In.String(s);
   Out.String(s); Out.Ln;
   In.Name(n);
-  Out.String(n); Out.Ln
+  Out.String(n); Out.Ln;
+  In.Int(i);
+  Out.Int(i, 0); Out.Ln;
+  In.Char(c);
+  Out.Int(ORD(c), 0); Out.Ln;
+  In.Real(r);
+  Out.Real(r, 0); Out.Ln
 end InT.
 EOB
 if timeout 60 "$FRONT" "$WORK/in.ob2" "$WORK/in.obc" >"$WORK/in.log" 2>&1; then
-   got="$(echo "hello world" | timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/in.obc" \
+   got="$(echo "hello world 42 X 2.5" | \
+            timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/in.obc" \
             2>/dev/null | tr -d '\n\r')"
-   if [ "$got" = "helloworld" ]; then
-      note "  ok  In.String and In.Name tokenise piped input"
+   #  hello, world, 42, 88 (ORD X) and 2.500
+   if [ "$got" = "helloworld42882.500" ]; then
+      note "  ok  In tokenises and converts (String/Name/Int/Char/Real)"
    else
-      bad "In printed '$got', expected hello then world"
+      bad "In printed '$got', expected helloworld42882.500"
    fi
 else
    bad "In.Open/String/Name no longer compile: $(tail -1 "$WORK/in.log")"

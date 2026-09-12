@@ -7383,34 +7383,69 @@ package body O2c_Compiler is
                                 and then (Eq_No_Case
                                             (To_String (MName), "String")
                                           or else Eq_No_Case
-                                            (To_String (MName), "Name"))
+                                            (To_String (MName), "Name")
+                                          or else Eq_No_Case
+                                            (To_String (MName), "Char")
+                                          or else Eq_No_Case
+                                            (To_String (MName), "Int")
+                                          or else Eq_No_Case
+                                            (To_String (MName), "LongInt")
+                                          or else Eq_No_Case
+                                            (To_String (MName), "Real"))
                                 and then N_A = 1
                               then
                                  --  In.String / In.Name (var buf): one out
                                  --  slot, and the primitive decides which
                                  --  characters land in it.
                                  declare
-                                    ANm : constant String :=
+                                    ANm  : constant String :=
                                       To_String (Arg_R (1).Text);
-                                    AId : constant Natural := Find (ANm);
+                                    AId  : constant Natural := Find (ANm);
+                                    Is_B : constant Boolean :=
+                                      Eq_No_Case (To_String (MName),
+                                                  "String")
+                                      or else Eq_No_Case
+                                        (To_String (MName), "Name");
                                  begin
-                                    if AId = 0
-                                      or else Syms (AId).UT = 0
-                                    then
+                                    if AId = 0 then
                                        raise O2c_BC.Wrong_Construct with
                                          "bytecode backend: In."
-                                         & To_String (MName) & " needs a "
-                                         & "declared ARRAY OF CHAR variable";
+                                         & To_String (MName)
+                                         & " needs a declared variable";
                                     end if;
-                                    O2c_BC.Load_Addr_G
-                                      (O2c_BC.Global_Array
-                                         (Ada_Id (ANm),
-                                          Total_Slots (Syms (AId).UT)));
+                                    if Is_B then
+                                       if Syms (AId).UT = 0 then
+                                          raise O2c_BC.Wrong_Construct with
+                                            "bytecode backend: In."
+                                            & To_String (MName) & " needs a "
+                                            & "declared ARRAY OF CHAR "
+                                            & "variable";
+                                       end if;
+                                       O2c_BC.Load_Addr_G
+                                         (O2c_BC.Global_Array
+                                            (Ada_Id (ANm),
+                                             Total_Slots (Syms (AId).UT)));
+                                    else
+                                       --  The converters write a scalar
+                                       --  through the slot's address.
+                                       O2c_BC.Load_Addr_G
+                                         (O2c_BC.Global (Ada_Id (ANm)));
+                                    end if;
                                  end;
+                                 --  Ids 20-25: String, Name, Char, Int,
+                                 --  LongInt, Real.
                                  O2c_BC.Native_Call
                                    ((if Eq_No_Case (To_String (MName),
-                                                    "String")
-                                     then 20 else 21), 1);
+                                                    "String") then 20
+                                     elsif Eq_No_Case (To_String (MName),
+                                                       "Name") then 21
+                                     elsif Eq_No_Case (To_String (MName),
+                                                       "Char") then 22
+                                     elsif Eq_No_Case (To_String (MName),
+                                                       "Int") then 23
+                                     elsif Eq_No_Case (To_String (MName),
+                                                       "LongInt") then 24
+                                     else 25), 1);
                               elsif Eq_No_Case (MNm, "XYplane")
                                 and then Eq_No_Case
                                   (To_String (MName), "Dot")
