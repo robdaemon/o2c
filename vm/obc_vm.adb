@@ -1959,6 +1959,17 @@ package body OBC_VM is
                      Note_At ("spawn target is not a procedure", PC);
                      return Bad_Target;
                   end if;
+                  --  A thread's entry must fit what a procedure value can
+                  --  name: parameterless and resultless.  Checked rather than
+                  --  assumed, because a body reading parameters it was never
+                  --  given reads a frame that was never filled - silently.
+                  if Img.Procs (Callee).NParams /= 0
+                    or else Img.Procs (Callee).NResults /= 0
+                  then
+                     Note_At ("a thread's procedure must take no arguments "
+                              & "and return nothing", PC);
+                     return Bad_Target;
+                  end if;
                   if N_Contexts = Live_Contexts'Last then
                      Grow_Contexts;
                      if N_Contexts = Live_Contexts'Last then

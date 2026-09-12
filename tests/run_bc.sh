@@ -103,6 +103,23 @@ for TN in threadstart threadname threadjoin threadmutex callplain localprocv; do
    fi
 done
 
+#  A thread's entry must fit what a procedure value can name: parameterless
+#  and resultless.  Rejected at compile time rather than discovered as a body
+#  reading parameters it was never given.
+for BN in threadstart_bad procval_bad; do
+   if timeout 120 "$FRONT" "$ROOT/tests/bc/$BN.ob2" "$WORK/$BN.obc" \
+        >"$WORK/$BN.log" 2>&1
+   then
+      bad "$BN.ob2 compiled, but it names a procedure that cannot be a value"
+   else
+      if grep -aq 'take' "$WORK/$BN.log"; then
+         note "negative: $BN.ob2 rejected for taking arguments"
+      else
+         bad "$BN.ob2 failed without the expected diagnostic: $(cat "$WORK/$BN.log")"
+      fi
+   fi
+done
+
 #  A mutex must be module-level: the VM names it by its globals slot, and a
 #  local has none.  Refused rather than silently becoming a global of its own.
 if timeout 120 "$FRONT" "$ROOT/tests/bc/threadmutex_bad.ob2" "$WORK/mmb.obc" \

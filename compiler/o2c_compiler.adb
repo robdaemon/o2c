@@ -7615,6 +7615,18 @@ package body O2c_Compiler is
                                 and then Syms (LS).UT > 0
                                 and then UTypes (Syms (LS).UT).Is_Proc
                                 and then Syms (RS).Kind = S_Proc
+                                and then Syms (RS).Params /= 0
+                              then
+                                 raise O2c_Error with "'"
+                                   & Cur.Text (1 .. Cur.Len)
+                                   & "' takes arguments, so it cannot be a "
+                                   & "PROCEDURE value (a procedure type is "
+                                   & "parameterless)";
+                              elsif O2c_BC.Bytecode_Mode
+                                and then LS > 0 and then RS > 0
+                                and then Syms (LS).UT > 0
+                                and then UTypes (Syms (LS).UT).Is_Proc
+                                and then Syms (RS).Kind = S_Proc
                                 and then not Syms (RS).Ret
                               then
                                  O2c_BC.Push_BC_Proc (Syms (RS).Bc_Proc);
@@ -7667,6 +7679,13 @@ package body O2c_Compiler is
                         Next;                  --  past the argument
                         Expect (Lex.Tok_RParen, "')' after Threads.Start");
                         Next;
+                        if AI > 0 and then Syms (AI).Kind = S_Proc
+                          and then Syms (AI).Params /= 0
+                        then
+                           raise O2c_Error with "Threads.Start needs a "
+                             & "procedure that takes no arguments ('" & Arg
+                             & "' takes some)";
+                        end if;
                         if AI > 0
                           and then Syms (AI).Kind = S_Proc
                           and then not Syms (AI).Ret

@@ -1,0 +1,11 @@
+MAXSTACK 4
+GLOBALS 0
+POOL cp 2
+ENTRY main
+PROC main 0 0 0
+  LOAD_CONST cp
+  SPAWN
+  DROP
+  HALT
+PROC Needs 0 1 0
+  RET_VOID

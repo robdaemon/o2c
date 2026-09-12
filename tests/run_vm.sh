@@ -297,6 +297,21 @@ else
    bad "manythreads.asm failed: $(cat "$WORK/many.err")"
 fi
 
+#  The VM checks the same shape for hand-written bytecode, which never went
+#  through the compiler.  A body reading arguments it was never handed reads a
+#  frame that was never filled.
+if python3 "$ASM" "$ROOT/tests/vm/spawnbad.asm" "$WORK/sb.obc" >/dev/null 2>&1; then
+   if timeout 60 "$VM" "$WORK/sb.obc" >/dev/null 2>"$WORK/sb.err"; then
+      bad "spawnbad.asm ran, but SPAWN on a 1-argument procedure must be refused"
+   else
+      if grep -aq 'take no arguments' "$WORK/sb.err"; then
+         note "negative: SPAWN on a procedure with parameters is refused"
+      else
+         bad "spawnbad.asm failed without the expected reason: $(cat "$WORK/sb.err")"
+      fi
+   fi
+fi
+
 #  A thread starting a thread: main spawns A, A spawns B and prints 1, B
 #  prints 2.  Order is fixed because each runs to completion in turn.
 if python3 "$ASM" "$ROOT/tests/vm/nested.asm" "$WORK/nested.obc" >/dev/null \
