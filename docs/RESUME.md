@@ -966,6 +966,43 @@ boundary - a LONGINT result, or the pointer argument - rather than at any
 construct inside the callee.
 
 
+### 3s. IN PROGRESS — the fault is the cross-module CALL, not the constructs
+
+The end-to-end failure is now pinned to the call, by elimination rather than by
+argument:
+
+    e1  Files.New + Files.Length rewritten as LOCAL procedures ... "local: zero"
+    u3  the same code called across the module boundary ......... "NOT zero"
+
+Same source, same shapes - `new(f)`, `f^.size := 0`, `len(name)`, the open-array
+element copy, `f^.name[i] := name[i]`, a pointer return, a pointer parameter, a
+field read through that parameter - and it works when the callee is local.  So
+every construct inside `New` and `Length` is fine, and so is the result/parameter
+machinery in general.  What breaks is calling them ACROSS the module boundary.
+
+**The one thing measured about that call:** the unqualified call path emits its
+call with NO argument code of its own (`o2c_compiler.adb:9266-9288` - just
+`Call_Proc` or `Native_Call`), because `Parse_Actual` has already pushed the
+actual: the value, or for an OPEN formal its address and length.  The qualified
+path I added also pushed with `Bc_Push_Arg`, i.e. a second copy of every scalar
+argument.
+
+**Removing that second push did NOT fix the symptom** - `u3` still says "NOT
+zero" - so the extra push is not the cause, and the change was reverted rather
+than landed on reasoning alone.  It is still the right shape on the evidence
+(the local path is the reference implementation and it pushes nothing), but a
+change that alters nothing observable and is covered by no test is not a commit.
+
+**Next, and it is a narrow question now**: is the CALL TARGET the right
+procedure?  `Call_Proc` patches its operand from the fixup table at Encode, and
+the id it is given is `Xs (XI).Bc`, captured when the exporting module was
+compiled.  A wrong target would explain a callee that runs, returns a value and
+returns the WRONG one without trapping - which is exactly what is observed.
+`Proc_Entry` (`o2c_bc.adb:81`, filled in `Begin_Proc` at 677) is where to look,
+and a trace of the target's identity at the call site is the cheapest way to
+settle it.
+
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
