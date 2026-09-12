@@ -646,6 +646,54 @@ native calls, and the four primitives are verified by effect. What is left of 3d
 is **step 3** — the `Begin_Mode` ordering — which is what lets a *user* program
 call `Files.Old`/`Read`/`Close` rather than only the module compiling.
 
+### 3m. MEASURED AND REVERTED — the ordering alone is not enough
+
+Step 3 was implemented as designed: `Begin_Mode` moved before the builtins, a
+`Scoped` flag per module, the main module switched on afterwards.  It builds
+clean.  **It regresses EVERY fixture**, and the suites caught it immediately:
+
+    run_bc: FAIL: sum: compile failed: o2c error: bytecode backend:
+            call to an unknown procedure
+    run_bc: FAIL: ifelsif / vmgreet / proc / local / repeat / case / for ...
+
+Not "some" and not just the program that calls `Files.Old` — every program,
+including ones that never mention Files.  The reason is the one piece of step 3
+that is not ordering: **a bytecode procedure id is not exported.**  `X_Entry`
+(the export record) carries the name, kind, type, parameters and result type of
+an exported procedure, and **no bytecode id**:
+
+    type X_Entry is record      --  no Bc field
+       Owner, Name : Unbounded_String;
+       Kind  : Sym_Kind := S_Const;
+       ...
+
+`Bc_Proc` lives on the DECLARING module's `Syms` entry (`o2c_compiler.adb:5837`,
+set in `Decl_Procedure`).  Once the builtins' procedures are compiled into the
+image, a call site in the main module resolves its target through the export
+record, finds no id, and every call - including the ones that used to work -
+fails the `Bc_Proc = 0` check.
+
+So the dependency runs the other way from the way the plan assumed:
+
+    ids through the export record  ->  then  the ordering
+    (and NOT the ordering first, which breaks all seven suites)
+
+**What is left is exactly two changes, in this order:**
+
+1. A bytecode id on `X_Entry`, set where a procedure is exported (from
+   `Syms (N_Sym).Bc_Proc`) and carried into the importing module's `Syms`
+   entry at the import site.  This is the prerequisite.
+2. Then the ordering change above, unscoped builtins (`Scoped => False`) set to
+   the modules measured to compile - which is what 3m measured and is recorded
+   in the reverted diff: **Texts, Files, Math, Term, MathL, Err compile;
+   Strings, Reals and Input hit an emitter gap ("operand-stack underflow"); Env,
+   Args, XYplane, In and Convert refuse at their intrinsic call sites, whose
+   natives already exist (6/7/8 and 11-21) and which therefore need only the
+   same wiring the Files intrinsics got in 3l.**
+
+Verified after reverting: all SEVEN suites green, 47 corroborated, zero
+warnings, tree clean at dbd340a.
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
