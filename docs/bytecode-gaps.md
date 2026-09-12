@@ -254,13 +254,28 @@ takes the M19 library path, which requires a compiled module *source* that
 exports the member. Probing with `import Files; ... Files.FDel(n);` now fails
 earlier, at `'Files.FDel' is not exported by module Files`, not at the FFI branch.
 
-**So the harness is the real blocker, and it is a source tree, not a switch.**
-Nothing named `Files.ob2`, `Convert.ob2` or `Env.ob2` exists in either repository
-(the reference implementation is in the Aegir guest's Ada library, not in this
-repo's dialect). Building the harness means writing those module sources in the
-dialect, exporting the helper procedures, and compiling them with the program
-through `Compile_Multi`'s `Libs`. Until that exists none of the ten can be
-tested, and neither can their eventual implementations.
+**CORRECTED, and the harness already exists.** The built-in module sources are
+embedded in the compiler as `Oak_Convert_Src`, `Oak_Files_Src`, `Oak_Env_Src`,
+`Oak_Args_Src`, `Oak_XYplane_Src`, `Oak_In_Src` and the rest
+(`o2c_compiler.adb:10178` onward). They are compiled by `Compile_Multi` on every
+call. Nothing named `Files.ob2` or `Convert.ob2` exists on disk because the
+sources live in the compiler, not in a file - "no file found" was read as "no
+source exists", which led to a generated duplicate with wrong public names
+(reverted: `53fc125`). There is nothing to write, and nothing to generate.
+
+**The real blocker is one flag set too late.** `Compile_Multi` compiles every
+builtin and every user library, and only THEN calls `O2c_BC.Begin_Mode`
+(`o2c_compiler.adb:11273`). So all of them are parsed in Ada mode,
+`Bytecode_Mode` is false throughout, and their FFI branches take the Ada path -
+appending to a body that `Emits` then discards in bytecode mode. That is why the
+refusals cannot fire and why the suites pass.
+
+So reaching an FFI branch in bytecode mode means calling `Begin_Mode` before the
+builtin and library compiles, not before the main source alone. That in turn
+requires the builtins' procedures to be interned as bytecode procedures like any
+other (`Begin_Proc`/`End_Proc`), with `Provided` registration still happening so
+user code can import them. That is a real but bounded piece of work, and it is
+the next one - see the corrected plan above.
 
 ## Not gaps
 
