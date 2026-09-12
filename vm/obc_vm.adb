@@ -146,6 +146,11 @@ package body OBC_VM is
    --  Wait for a thread to finish.  The join parks the calling thread rather
    --  than spinning, so the scheduler can run someone else meanwhile.
    Op_Join          : constant := 16#E7#;
+   --  A mutex is an INTEGER the program owns: 0 is free, anything else is the
+   --  id of the thread holding it.  So there is no mutex table to size, and
+   --  the state is where the program can see it.
+   Op_Mutex_Lock    : constant := 16#E8#;
+   Op_Mutex_Unlock  : constant := 16#E9#;
 
    --  Instructions a thread may run before the VM takes the machine back.
    --  This is what makes scheduling preemptive: a thread that never calls
@@ -224,6 +229,7 @@ package body OBC_VM is
       Resumed     : Boolean := False;
       Thread_Id   : Natural := 0;      --  handle the program holds
       Waiting_For : Natural := 0;      --  thread handle being waited on
+      Waiting_Mutex : Natural := 0;    --  global slot of the mutex waited on
       --  True for a context the program spawned, which has no caller to
       --  return to.  Its entry procedure returning ends the thread rather
       --  than being the frame underflow it would be for the main context -
@@ -957,6 +963,13 @@ package body OBC_VM is
                --  is what happens.
                Depth := Depth + 0;
                PC := PC + 1;
+            when Op_Mutex_Lock | Op_Mutex_Unlock =>
+               if not Fits (PC + 1, 4) then
+                  Note_At ("malformed code", PC);
+                  return Bad_Code;
+               end if;
+               --  The slot is an operand, so the stack is untouched.
+               PC := PC + 5;
             when Op_Join =>
                --  Consumes the handle.
                Depth := Depth - 1;
@@ -1950,6 +1963,7 @@ package body OBC_VM is
                           Resumed     => False,
                           Thread_Id   => 0,
                           Waiting_For => 0,
+                          Waiting_Mutex => 0,
                           Is_Thread   => True,
                           Scheduler_Owned => True,
                           --  Globals are the root's; only the root loads them.
@@ -1968,6 +1982,59 @@ package body OBC_VM is
                   end;
                end;
                PC := PC + 1;
+            when Op_Mutex_Lock =>
+               if PC + 4 >= Code'Length then
+                  return Bad_Code;
+               end if;
+               declare
+                  Slot  : constant Natural := Natural (LE32 (Code, PC + 1));
+                  Owner : constant U64 := Globals (Slot);
+               begin
+                  if Owner = 0 then
+                     Globals (Slot) := U64 (Ctx.Thread_Id);
+                     PC := PC + 5;
+                  elsif Owner = U64 (Ctx.Thread_Id) then
+                     --  Not recursive.  A second lock by the holder would
+                     --  deadlock against itself, which is worth saying out
+                     --  loud rather than discovering as a hang.
+                     Note_At ("a thread locked a mutex it already holds", PC);
+                     return Bad_Target;
+                  else
+                     --  Block, leaving PC on the lock: resuming must acquire
+                     --  it, so this one deliberately does not advance - the
+                     --  instruction has no stack effect, so re-running it is
+                     --  safe, unlike a join, which pops.
+                     Ctx.Waiting_Mutex := Slot;
+                     Ctx.State := Thread_Blocked;
+                     return Yielded;
+                  end if;
+               end;
+            when Op_Mutex_Unlock =>
+               if PC + 4 >= Code'Length then
+                  return Bad_Code;
+               end if;
+               declare
+                  Slot : constant Natural := Natural (LE32 (Code, PC + 1));
+               begin
+                  if Globals (Slot) /= U64 (Ctx.Thread_Id) then
+                     Note_At ("a thread unlocked a mutex it does not hold",
+                              PC);
+                     return Bad_Target;
+                  end if;
+                  Globals (Slot) := 0;
+                  PC := PC + 5;
+                  --  Wake every waiter.  All but one will re-block, which is
+                  --  correct and simpler than a queue of waiters would be.
+                  for K in 1 .. N_Contexts loop
+                     if Live_Contexts (K) /= null
+                       and then Live_Contexts (K).State = Thread_Blocked
+                       and then Live_Contexts (K).Waiting_Mutex = Slot
+                     then
+                        Live_Contexts (K).State := Thread_Runnable;
+                        Live_Contexts (K).Waiting_Mutex := 0;
+                     end if;
+                  end loop;
+               end;
             when Op_Join =>
                declare
                   Handle : constant Natural := Natural (Pop);
@@ -2365,6 +2432,12 @@ package body OBC_VM is
       Busy    : Boolean;
       Blocked : Boolean;
    begin
+      --  The root takes an id like any thread.  A mutex records its holder by
+      --  that id, and 0 means free - so a root with id 0 could never own one,
+      --  and would appear to release what it held merely by being the root.
+      Ctx.Thread_Id := Next_Thread_Id;
+      Next_Thread_Id := Next_Thread_Id + 1;
+
       --  The root is a root for the whole run, not only while it runs: it
       --  can block, and a blocked context has to be findable in order to be
       --  woken.  Its Context_Scope deliberately does not do this, because a
@@ -2482,7 +2555,8 @@ package body OBC_VM is
          if not Busy and then Blocked then
             --  Nothing can run and something is waiting: no future turn will
             --  change that, because nothing is left to finish and wake it.
-            Note_At ("deadlock: every thread is waiting", 0);
+            Note_At ("deadlock: nothing is runnable and every thread is "
+                     & "waiting", 0);
             return Bad_Stack;
          end if;
          exit when not Busy and then Ctx.State = Thread_Done;
@@ -2524,6 +2598,7 @@ package body OBC_VM is
                       Resumed     => False,
                       Thread_Id   => 0,
                       Waiting_For => 0,
+                      Waiting_Mutex => 0,
                       Is_Thread   => False,
                       Scheduler_Owned => True,
                       Which_Frame => 0,

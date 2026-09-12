@@ -284,6 +284,34 @@ fi
 #  ---- positive: hand-assembled Out.Char ------------------------------------
 #  Exercises native 4 independently of the emitter: two character codes go to
 #  the native, which prints the characters themselves.
+#  MUTEX_LOCK/MUTEX_UNLOCK used uncontended: the program completes.
+if python3 "$ASM" "$ROOT/tests/vm/mutex.asm" "$WORK/mutex.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/mutex.obc" >"$WORK/mutex.out" 2>"$WORK/mutex.err"; then
+   if diff -u "$ROOT/tests/vm/mutex.out" "$WORK/mutex.out"; then
+      note "positive: mutex.asm locks and unlocks, and completes"
+   else
+      bad "mutex.asm output differs from tests/vm/mutex.out"
+   fi
+else
+   bad "mutex.asm failed: $(cat "$WORK/mutex.err")"
+fi
+
+#  And contended: main holds the lock while waiting for the thread that can
+#  only wait for the lock.  Nothing is runnable, which is a deadlock - so the
+#  deadlock *is* the evidence that the lock blocked.  A lock that let the
+#  second thread in would complete and print 21.
+if python3 "$ASM" "$ROOT/tests/vm/mutexwait.asm" "$WORK/mw.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/mw.obc" >"$WORK/mw.out" 2>"$WORK/mw.err"
+then
+   bad "mutexwait.asm completed, so the mutex did not exclude: $(cat "$WORK/mw.out")"
+else
+   if grep -aq 'deadlock' "$WORK/mw.err"; then
+      note "negative: a held mutex blocks, reported as deadlock"
+   else
+      bad "mutexwait.asm failed without a deadlock: $(cat "$WORK/mw.err")"
+   fi
+fi
+
 #  A finished thread must not hold a slot forever.  This starts and joins
 #  twenty threads against a table that holds sixteen: it passes only if each
 #  finished thread is released, so it fails the moment releasing regresses.
