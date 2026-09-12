@@ -129,6 +129,11 @@ package body OBC_VM is
    Op_Guard        : constant := 16#E0#;
    Op_Type_Test    : constant := 16#E1#;
    Op_Desc_Of      : constant := 16#E3#;
+   --  Give up the VM so the scheduler can run another thread.  A no-operand
+   --  instruction, and the safepoint: the interpreter sees every bytecode
+   --  boundary, so stopping the world here costs nothing - no signals, no
+   --  write barrier.  That is what choosing VM-scheduled green threads buys.
+   Op_Yield        : constant := 16#E4#;
    Op_Dispatch     : constant := 16#E2#;
    Op_Alloc_New    : constant := 16#2A#;
    Op_Load_Fld_R   : constant := 16#24#;
@@ -487,6 +492,7 @@ package body OBC_VM is
         when Bad_Native      => "bad native call",
         when Not_Implemented => "opcode not implemented in this slice",
         when Wants_More      => "a native call would block",
+        when Yielded         => "the thread yielded the VM",
         when Trap_Index      => "index out of range",
         when Trap_Nil        => "NIL dereference",
         when Trap_Guard      => "type guard failure",
@@ -881,6 +887,8 @@ package body OBC_VM is
                   Depth := Depth - NArgs - 1 + NRes;
                end;
                PC := PC + 5;
+            when Op_Yield =>
+               PC := PC + 1;
             when Op_Desc_Of =>
                PC := PC + 1;
             when Op_Alloc_New =>
@@ -1796,6 +1804,9 @@ package body OBC_VM is
                   end if;
                end;
                PC := PC + 5;
+            when Op_Yield =>
+               PC := PC + 1;
+               return Yielded;
             when Op_Desc_Of =>
                declare
                   Obj : constant U64 := Pop;
