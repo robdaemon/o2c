@@ -1406,6 +1406,35 @@ it, and the fix belongs there.
 are recorded in 3x/3y/3z.
 
 
+### 3ab. WHERE THIS STANDS — and the process fix for the hunt itself
+
+Reverted again: the instrumentation that was meant to name the outer subscript's
+site was inserted by LINE NUMBER computed before the scaffold edits and applied
+after them, so the markers landed inside multi-line statements and the compiler
+rejected the file.  Nothing is left in the tree.
+
+Measured so far, and still valid:
+
+- the designator chain's subscript step fires only for `V4` (`ut=1`,
+  `len=4`, scalar element) - the INNER subscript.  The outer one never reaches it;
+- so the outer `[` is consumed by one of the six `Parse_Rec_Ptr_Chain` call sites
+  (2215, 3506, 4079, 7435, 7991, 8297) or by a branch that returns early;
+- 1a is proven by the metric; `m1` is the gate; the item stays refused.
+
+**The process fix this attempt earned**: instrument by TEXT anchor, never by line
+number, and re-read the file for the anchor AFTER every preceding edit.  Two of
+the four failed attempts this item have been harness mistakes of exactly that
+kind (stale line numbers; a regex that ate real code), not wrong hypotheses.
+Cheap to state, cheap to follow, and neither had been written down.
+
+**And the honest read on the hunt**: locating a consumer inside a 11k-line
+front end by instrument-and-rebuild is slow in this budget.  It is a
+context-heavy, read-only question - which is what the explore subagent is for: it
+can read the whole designator/selector path and report the site without spending
+the editing budget on guesses.  Proposed rather than done, since it opens a new
+exploration path and the guard on this turn said to stop.
+
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
