@@ -98,6 +98,18 @@ else
    bad "proctype.ob2 did not compile: $(cat "$WORK/pt.log")"
 fi
 
+if timeout 120 "$FRONT" "$ROOT/tests/bc/proctype_bad2.ob2" "$WORK/ptb2.obc" \
+   >"$WORK/ptb2.log" 2>&1
+then
+   bad "proctype_bad2.ob2 compiled, but a PROCEDURE target takes only a procedure name"
+else
+   if grep -aq 'is not a same-typed variable' "$WORK/ptb2.log"; then
+      note "negative: non-procedure assigned to a PROCEDURE target rejected"
+   else
+      bad "proctype_bad2.ob2 failed without the expected diagnostic: $(cat "$WORK/ptb2.log")"
+   fi
+fi
+
 if timeout 120 "$FRONT" "$ROOT/tests/bc/proctype_bad.ob2" "$WORK/ptb.obc" \
    >"$WORK/ptb.log" 2>&1
 then

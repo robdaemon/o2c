@@ -589,6 +589,11 @@ package body O2c_BC is
       end if;
    end Native_Call;
 
+   procedure Push_BC_Proc (Proc_Id : Natural) is
+   begin
+      Push_Int (Integer (Proc_Id));
+   end Push_BC_Proc;
+
    --  ---- procedures and frames -----------------------------------------
    function Begin_Proc (NParams : Natural; NResults : Natural) return Natural is
    begin

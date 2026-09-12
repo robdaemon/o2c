@@ -131,6 +131,11 @@ package O2c_BC is
    procedure Store_Fld (Off : Natural);
    procedure Un (O : Op);
    procedure Native_Call (Idx : Natural; NArgs : Natural);
+
+   --  Push a procedure id: what a PROCEDURE-typed value is.  One slot, and
+   --  the VM already numbers procedures, so a procedure value needs no
+   --  environment and nothing from the collector.
+   procedure Push_BC_Proc (Proc_Id : Natural);
    procedure Halt_Program;
 
    --  ---- procedures and frames ------------------------------------------

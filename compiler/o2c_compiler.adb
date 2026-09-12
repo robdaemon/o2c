@@ -7544,10 +7544,33 @@ package body O2c_Compiler is
                            end;
                         end if;
                         if Length (Rhs) = 0 then
-                           raise O2c_Error with "'"
-                             & Cur.Text (1 .. Cur.Len)
-                             & "' is not a same-typed variable (copy of "
-                             & Head (1 .. H_Len) & ")";
+                           --  A procedure value: the right-hand side names a
+                           --  procedure rather than reading a variable, so
+                           --  the value is its id.  Only accepted when the
+                           --  target is PROCEDURE-typed - nothing else takes
+                           --  a bare name here.
+                           declare
+                              LS : constant Natural :=
+                                Find (Head (1 .. H_Len));
+                              RS : constant Natural :=
+                                Find (Cur.Text (1 .. Cur.Len));
+                           begin
+                              if O2c_BC.Bytecode_Mode
+                                and then LS > 0 and then RS > 0
+                                and then Syms (LS).UT > 0
+                                and then UTypes (Syms (LS).UT).Is_Proc
+                                and then Syms (RS).Kind = S_Proc
+                                and then not Syms (RS).Ret
+                              then
+                                 O2c_BC.Push_BC_Proc (Syms (RS).Bc_Proc);
+                                 Next;
+                              else
+                                 raise O2c_Error with "'"
+                                   & Cur.Text (1 .. Cur.Len)
+                                   & "' is not a same-typed variable "
+                                   & "(copy of " & Head (1 .. H_Len) & ")";
+                              end if;
+                           end;
                         end if;
                         Append_Body ("      " & Head (1 .. H_Len) & " := "
                                      & To_String (Rhs) & ";");
