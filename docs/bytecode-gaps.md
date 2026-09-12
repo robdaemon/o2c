@@ -319,10 +319,28 @@ CONST/VAR/TYPE/PROCEDURE/BEGIN/END`, and `Out` is the one module with special
 handling (`Imported_Mod` returns False for it by construction), so the two import
 kinds are not composing.
 
-This is reachable TODAY, needs no change to `Begin_Mode`, and is a real
-reproducible defect with a one-line repro. It is the first thing to fix, and it
-is upstream of everything in the fork below: until a program can import an FFI
-module and `Out` in the same unit, no FFI helper can be exercised at all.
+**And there is no import bug either.** `import Convert, Out;` - one clause,
+comma-separated - compiles, runs and prints. The dialect takes ONE import
+clause, exactly as `samples/hello.ob2` shows; my probes wrote two separate
+`import` statements, which it does not accept. The clause parser is an `if`, not
+a `while` (`o2c_compiler.adb:9100`), which is what made a second clause fail
+with "expected CONST/VAR/TYPE/PROCEDURE/BEGIN/END". My syntax was wrong, not
+the compiler's - for the fourth time in this stretch.
+
+**The gap is now demonstrated end to end**, which it never was before:
+
+    module FFI;  import Convert, Out;
+    s := "42";  Convert.ToInt (s, x, r);  Out.Int (x, 0)
+
+prints `0`. The same program without the Convert call prints `42`. So an
+imported builtin's exported procedure compiles, runs, and silently does nothing:
+x is never set, and nothing reports it. `tests/bytecode_gaps.sh` asserts this as
+the current state and will FAIL once ToInt works, per that script's contract.
+
+This is the first demonstration of the silent no-op rather than an argument that
+it must exist, and it needs no change to `Begin_Mode`, no new sources and no new
+harness. It is upstream of the fork below only in the sense that it is the thing
+to fix.
 
 My earlier names were guesses (`ConvToInt`); the embedded source's own are
 `ToInt`/`ToReal`/`FromInt`/`FromReal`, and the FFI branches match the *primitive*

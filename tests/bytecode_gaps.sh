@@ -69,6 +69,34 @@ check "string comparison"  ok 'module G24; import Out; type T = array 8 of char;
 check "Out.String on a CHAR array"  ok 'module G23; import Out; type T = array 8 of char; var v: T; begin v := "hi"; Out.String(v) end G23.'
 check "string literal assign"   ok 'module G22; import Out; type T = array 8 of char; var v: T; begin v := "hi"; Out.Char(v[0]) end G22.'
 
+#  The FFI silent no-op, demonstrated end to end rather than reasoned.  An
+#  imported builtin's exported procedure compiles, runs, and does nothing, so
+#  the program prints 0 instead of 42.  This is asserted as the CURRENT state:
+#  making Convert.ToInt work makes this FAIL, which is what the entry is for.
+cat > "$WORK/ffi.ob2" <<'EOB'
+module FFI;
+import Convert, Out;
+var s: array 8 of char;
+    x: integer;
+    r: integer;
+begin
+  s := "42";
+  Convert.ToInt(s, x, r);
+  Out.Int(x, 0); Out.Ln
+end FFI.
+EOB
+if timeout 60 "$FRONT" "$WORK/ffi.ob2" "$WORK/ffi.obc" >"$WORK/ffi.log" 2>&1; then
+   got="$(timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/ffi.obc" 2>/dev/null | tr -d '\n\r')"
+   if [ "$got" = "0" ]; then
+      note "  ok  Convert.ToInt is a silent no-op (prints 0, not 42)"
+   else
+      bad "Convert.ToInt no longer prints 0 (got '$got') - if it works now,"
+      bad "     remove this probe and record it as working"
+   fi
+else
+   bad "the FFI probe no longer compiles: $(tail -1 "$WORK/ffi.log")"
+fi
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0
