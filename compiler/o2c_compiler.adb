@@ -40,6 +40,14 @@ package body O2c_Compiler is
       CStr   : Boolean := False;   --  whole ARRAY OF CHAR variable value
       Ptr_UT : Natural := 0;       --  pointer user-type index when T_Ptr
       Lit    : Boolean := False;   --  a plain numeric literal (widening)
+      --  A constant INTEGER value, folded as the expression is parsed.
+      --  The canonical Ada text is NOT parenthesized for arithmetic
+      --  ("2 + 3 * 4"), so recovering the value by re-parsing it would
+      --  need a second parser with its own precedence - and would get
+      --  "2 + 3 * 4" wrong unless it were perfect.  Carrying the value
+      --  through the one real parser is both simpler and exact.
+      Val    : Integer := 0;
+      Folds  : Boolean := False;
    end record;
 
    Max_Fields : constant := 32;
@@ -2483,6 +2491,15 @@ package body O2c_Compiler is
                end if;
             end;
             R.Lit := True;
+            if R.Typ = T_Int then
+               begin
+                  R.Val := Integer'Value (To_String (R.Text));
+                  R.Folds := True;
+               exception
+                  when others =>
+                     R.Folds := False;
+               end;
+            end if;
             Next;
          when Lex.Tok_String =>
             if Cur.Len = 1 then
@@ -2696,6 +2713,9 @@ package body O2c_Compiler is
                     & Natural'Image (Cur.Line) & ")";
                end if;
                R.Text := (if Neg then "-" else "") & "(" & R.Text & ")";
+               if Neg and then R.Folds then
+                  R.Val := -R.Val;
+               end if;
             end;
          when Lex.Tok_Ident =>
             if Eq_No_Case (Cur.Text (1 .. Cur.Len), "THREADS") then
@@ -3854,15 +3874,23 @@ package body O2c_Compiler is
                      --  computed constant is refused here rather than becoming
                      --  a zero.
                      if not Syms (Id).Const_Usable then
+                        --  A constant is not storage: the bytecode backend
+                        --  has no slot to load it from, so it needs the value
+                        --  itself.  This is reached when the value could not
+                        --  be folded - a REAL or SET expression, or an
+                        --  integer one that overflowed or divided by zero.
                         raise O2c_BC.Wrong_Construct with "bytecode backend: '"
                           & Cur.Text (1 .. Cur.Len)
-                          & "' is not a plain literal constant, so its value "
-                          & "cannot be pushed";
+                          & "' is not a constant INTEGER expression, so its "
+                          & "value cannot be pushed";
                      end if;
                      O2c_BC.Push_Int (Syms (Id).Const_Val);
                      R.Typ := Syms (Id).Typ;
                      R.Text := Null_Unbounded_String;
                      R.Lit := True;
+                     R.Val := Syms (Id).Const_Val;
+                     R.Folds := Syms (Id).Const_Usable
+                       and then Syms (Id).Typ = T_Int;
                      --  Consume the name before returning.  The shared Next
                      --  further down belongs to the path that falls through,
                      --  so leaving early without this leaves the parser
@@ -3922,6 +3950,31 @@ package body O2c_Compiler is
       return False;
    end Int_Like;
 
+   --  Fold a binary operation on two INTEGER constants, as the expression
+   --  is parsed.  Anything that does not fold clears Folds, and a constant
+   --  declaration then refuses the name rather than reading a zero.
+   procedure Fold_Bin (R : in out Expr_Rec; X : Expr_Rec; Op : Character) is
+   begin
+      if not (R.Folds and then X.Folds) then
+         R.Folds := False;
+         return;
+      end if;
+      begin
+         case Op is
+            when '+' => R.Val := R.Val + X.Val;
+            when '-' => R.Val := R.Val - X.Val;
+            when '*' => R.Val := R.Val * X.Val;
+            when '/' => R.Val := R.Val / X.Val;
+            when 'm' => R.Val := R.Val rem X.Val;
+            when others => R.Folds := False;
+         end case;
+      exception
+         when others =>
+            --  Division by zero, or an overflow: not a constant.
+            R.Folds := False;
+      end;
+   end Fold_Bin;
+
    --  REAL compatibility (M18): mixing REAL with INTEGER is allowed
    --  only when the INTEGER side is a plain numeric literal.
    function Real_Like (A, B : Expr_Rec; Res : out EType) return Boolean is
@@ -3977,6 +4030,7 @@ package body O2c_Compiler is
                   R.Text := R.Text & " * " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
+                  Fold_Bin (R, X, '*');
                   if O2c_BC.Bytecode_Mode then
                      if Res = T_Long then
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
@@ -4023,6 +4077,7 @@ package body O2c_Compiler is
                   R.Text := R.Text & " * " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
+                  Fold_Bin (R, X, '*');
                else
                   raise O2c_Error with "'*' needs INTEGER/LONGINT, REAL or "
                     & "SET operands";
@@ -4041,6 +4096,7 @@ package body O2c_Compiler is
                R.Text := R.Text & " / " & X.Text;
                R.Typ := Res;
                R.Lit := False;
+               Fold_Bin (R, X, '/');
                if O2c_BC.Bytecode_Mode then
                   if Res = T_Long then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
@@ -4070,6 +4126,7 @@ package body O2c_Compiler is
                R.Text := R.Text & " rem " & X.Text;
                R.Typ := Res;
                R.Lit := False;
+               Fold_Bin (R, X, 'm');
                if O2c_BC.Bytecode_Mode then
                   if Res /= T_Int then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: "
@@ -4122,6 +4179,7 @@ package body O2c_Compiler is
                   R.Text := R.Text & " / " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
+                  Fold_Bin (R, X, '/');
                else
                   raise O2c_Error with "'/' needs REAL (or SET) operands";
                end if;
@@ -4169,6 +4227,7 @@ package body O2c_Compiler is
                   R.Text := R.Text & " + " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
+                  Fold_Bin (R, X, '+');
                   if O2c_BC.Bytecode_Mode then
                      if Res = T_Long then
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
@@ -4215,6 +4274,7 @@ package body O2c_Compiler is
                   R.Text := R.Text & " + " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
+                  Fold_Bin (R, X, '+');
                else
                   raise O2c_Error with "'+' needs INTEGER/LONGINT, REAL or "
                     & "SET operands";
@@ -4237,6 +4297,7 @@ package body O2c_Compiler is
                   R.Text := R.Text & " - " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
+                  Fold_Bin (R, X, '-');
                   if O2c_BC.Bytecode_Mode then
                      if Res = T_Long then
                         raise O2c_BC.Wrong_Construct with "bytecode backend: "
@@ -4283,6 +4344,7 @@ package body O2c_Compiler is
                   R.Text := R.Text & " - " & X.Text;
                   R.Typ := Res;
                   R.Lit := False;
+                  Fold_Bin (R, X, '-');
                else
                   raise O2c_Error with "'-' needs INTEGER/LONGINT, REAL or "
                     & "SET operands";
@@ -4599,8 +4661,14 @@ package body O2c_Compiler is
       --  Text that is not a plain literal leaves Const_Usable false, and using
       --  it in bytecode mode is refused where the constant is used rather than
       --  silently reading a zero.
-      if V.Lit and then (V.Typ = T_Int or else V.Typ = T_Char
-                         or else V.Typ = T_Bool)
+      if V.Folds then
+         --  A folded INTEGER expression - a literal, a computed one, or a
+         --  reference to another constant.  The value came through the
+         --  parse, so nothing is recovered from the text here.
+         Syms (N_Sym).Const_Val := V.Val;
+         Syms (N_Sym).Const_Usable := True;
+      elsif V.Lit and then (V.Typ = T_Int or else V.Typ = T_Char
+                            or else V.Typ = T_Bool)
       then
          begin
             Syms (N_Sym).Const_Val :=
