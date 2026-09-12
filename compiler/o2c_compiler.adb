@@ -7725,6 +7725,18 @@ package body O2c_Compiler is
                         Bc_Load (Arg);
                         O2c_BC.Join;
                      end;
+                  elsif Member = "Yield" then
+                     --  Give up the rest of the quantum.  Worth having
+                     --  because it costs nothing at a point the program knows
+                     --  is a good one, rather than wherever the budget runs
+                     --  out - and a yield that never returns buys nothing.
+                     Next;                     --  past Yield
+                     Expect (Lex.Tok_LParen,
+                             "'(' after Threads.Yield (list it explicitly)");
+                     Next;
+                     Expect (Lex.Tok_RParen, "')' after Threads.Yield");
+                     Next;
+                     O2c_BC.Thread_Yield;
                   elsif Member = "Init" or else Member = "Lock"
                     or else Member = "Unlock"
                   then
@@ -7761,7 +7773,8 @@ package body O2c_Compiler is
                      end;
                   else
                      raise O2c_Error with "Threads provides Start, Join, "
-                       & "Init, Lock and Unlock (found '" & Member & "')";
+                       & "Yield, Init, Lock and Unlock (found '" & Member
+                       & "')";
                   end if;
                end;
             elsif Cur.Kind = Lex.Tok_Dot then

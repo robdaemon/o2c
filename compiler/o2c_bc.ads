@@ -145,6 +145,10 @@ package O2c_BC is
    --  Wait for the thread whose handle is on top of the stack, consuming it.
    --  Parks the calling thread rather than spinning.
    procedure Join;
+   --  Give up the rest of this thread's quantum voluntarily.  The same
+   --  mechanism preemption uses, asked for instead of forced - which is why
+   --  it needs no state and no operand.
+   procedure Thread_Yield;
    --  Lock and unlock a mutex named by its globals slot.  A mutex is an
    --  INTEGER the program owns, so nothing here needs a handle or a table.
    procedure Mutex_Lock (Slot : Natural);
