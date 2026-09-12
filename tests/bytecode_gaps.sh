@@ -259,6 +259,34 @@ else
    bad "XYplane no longer compiles: $(tail -1 "$WORK/plane.log")"
 fi
 
+#  In.Open / String / Name.  The VM grows the Ada backend's tokenizer: read
+#  to end of input, join with spaces, then skip and take a token.  Input is
+#  piped in, so this is one of the few probes whose setup is not just a file.
+cat > "$WORK/in.ob2" <<'EOB'
+module InT;
+import In, Out;
+var s: array 64 of char;
+    n: array 64 of char;
+begin
+  In.Open;
+  In.String(s);
+  Out.String(s); Out.Ln;
+  In.Name(n);
+  Out.String(n); Out.Ln
+end InT.
+EOB
+if timeout 60 "$FRONT" "$WORK/in.ob2" "$WORK/in.obc" >"$WORK/in.log" 2>&1; then
+   got="$(echo "hello world" | timeout 60 "$ROOT"/vm/bin/vm_main "$WORK/in.obc" \
+            2>/dev/null | tr -d '\n\r')"
+   if [ "$got" = "helloworld" ]; then
+      note "  ok  In.String and In.Name tokenise piped input"
+   else
+      bad "In printed '$got', expected hello then world"
+   fi
+else
+   bad "In.Open/String/Name no longer compile: $(tail -1 "$WORK/in.log")"
+fi
+
 if [ "$fails" -eq 0 ]; then
    note "PASS (all listed gaps still as recorded)"
    exit 0

@@ -109,6 +109,13 @@ package body VM_Platform is
       end;
    end Arg_Get;
 
+   procedure Get_Line (S : out String; L : out Natural; E : out Boolean) is
+   begin
+      --  The same call the Ada backend's O2c_In_Load makes, so a program
+      --  reading input behaves identically on both backends.
+      Aegir_User.CLI.Get_Line (S, L, E);
+   end Get_Line;
+
    procedure Exit_With (Ok : Boolean) is
    begin
       if Ok then

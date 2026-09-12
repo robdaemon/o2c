@@ -1,6 +1,7 @@
 --  Host body of VM_Platform: no runtime bookkeeping, just an exit status.
 with Ada.Command_Line;
 with Ada.Directories;
+with Ada.Text_IO;
 with Ada.Environment_Variables;
 
 package body VM_Platform is
@@ -90,6 +91,27 @@ package body VM_Platform is
          return L;
       end;
    end Arg_Get;
+
+   procedure Get_Line (S : out String; L : out Natural; E : out Boolean) is
+      Line : String (1 .. S'Length);
+   begin
+      L := 0;
+      E := False;
+      if Ada.Text_IO.End_Of_File then
+         E := True;
+         return;
+      end if;
+      Ada.Text_IO.Get_Line (Line, L);
+      for I in 1 .. L loop
+         S (S'First + I - 1) := Line (I);
+      end loop;
+   exception
+      when others =>
+         --  An unreadable or exhausted stream is end of input, which is the
+         --  only failure the dialect can express.
+         L := 0;
+         E := True;
+   end Get_Line;
 
    procedure Exit_With (Ok : Boolean) is
    begin

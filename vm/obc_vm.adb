@@ -208,6 +208,16 @@ package body OBC_VM is
    Plane_W : Natural := 0;
    Plane_H : Natural := 0;
 
+   --  The input buffer, as the Ada backend models it: O2c_In_Load reads lines
+   --  until end of input and joins them with spaces, and Skip/Token walk that
+   --  with a position.  Held here rather than per call so a program can read
+   --  successive tokens from one stream.
+   In_Max : constant := 4096;
+   In_Buf : String (1 .. In_Max);
+   In_Len : Natural := 0;
+   In_Pos : Natural := 1;
+   In_Rdy : Boolean := False;
+
    --  One interpreter invocation's root-bearing state.  It lives in a
    --  record rather than as locals of Execute because interpretation can
    --  nest - a C callback calling back into Oberon runs a second Execute
@@ -406,6 +416,9 @@ package body OBC_VM is
       12 => (Sym => new String'("o2c_planedot"), Pops => 3),
       13 => (Sym => new String'("o2c_planeisdot"), Pops => 2),
       14 => (Sym => new String'("o2c_planekey"), Pops => 0),
+      15 => (Sym => new String'("o2c_inreset"), Pops => 0),
+      16 => (Sym => new String'("o2c_instring"), Pops => 1),
+      17 => (Sym => new String'("o2c_inname"), Pops => 1),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -429,6 +442,9 @@ package body OBC_VM is
       16 => 3,    --  o2c_planedot: x, y, mode
       17 => 2,    --  o2c_planeisdot: x, y
       18 => 0,    --  o2c_planekey: nothing
+      19 => 0,    --  o2c_inreset: nothing
+      20 => 1,    --  o2c_instring: the buffer address
+      21 => 1,    --  o2c_inname: the buffer address
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -1295,6 +1311,98 @@ package body OBC_VM is
                                (Live
                                 and then Plane
                                   (C (1) * Plane_W + C (0)) /= 0))));
+               end if;
+               return Ok;
+            end;
+         when Max_Natives + 14 .. Max_Natives + 16 =>
+            --  The input primitives: Reset (19), String (20) and Name (21).
+            --  Void; String and Name take the address of the caller's buffer.
+            --  The buffer is filled on first use and kept, exactly as
+            --  O2c_In_Load does, so successive reads walk one stream.
+            declare
+               procedure Load is
+                  S : String (1 .. 512);
+                  L : Natural;
+                  E : Boolean;
+               begin
+                  if In_Rdy then
+                     return;
+                  end if;
+                  In_Rdy := True;
+                  loop
+                     VM_Platform.Get_Line (S, L, E);
+                     exit when E;
+                     exit when In_Len + L + 1 > In_Max;
+                     for I in 1 .. L loop
+                        In_Len := In_Len + 1;
+                        In_Buf (In_Len) := S (I);
+                     end loop;
+                     In_Len := In_Len + 1;
+                     In_Buf (In_Len) := ' ';
+                  end loop;
+               end Load;
+               procedure Skip is
+               begin
+                  Load;
+                  while In_Pos <= In_Len and then In_Buf (In_Pos) = ' ' loop
+                     In_Pos := In_Pos + 1;
+                  end loop;
+               end Skip;
+               procedure Put_CStr (A : U64; S : String) is
+                  procedure Put_Byte (N : Natural; V : Byte) is
+                     B : Byte with Address =>
+                       System.Storage_Elements.To_Address
+                         (System.Storage_Elements.Integer_Address (A)
+                          + System.Storage_Elements.Integer_Address (N));
+                  begin
+                     B := V;
+                  end Put_Byte;
+               begin
+                  for I in S'Range loop
+                     Put_Byte (I - S'First, Byte (Character'Pos (S (I))));
+                  end loop;
+                  Put_Byte (S'Length, 0);
+               end Put_CStr;
+               F, T : Natural;
+               Ch   : Character;
+            begin
+               if Idx = Max_Natives + 14 then
+                  --  Reset: forget the stream and read afresh next time.
+                  In_Rdy := False;
+                  In_Len := 0;
+                  In_Pos := 1;
+               else
+                  Skip;
+                  F := In_Pos;
+                  T := In_Pos;
+                  while T <= In_Len and then In_Buf (T) /= ' ' loop
+                     T := T + 1;
+                  end loop;
+                  --  One pass, into a local, so the bytes written are
+                  --  contiguous and NUL-terminated like every other string.
+                  --  Name takes only an identifier's characters; String takes
+                  --  the whole token.
+                  declare
+                     Out_B : String (1 .. 256);
+                     K     : Natural := 0;
+                  begin
+                     for I in F .. T - 1 loop
+                        Ch := In_Buf (I);
+                        if Idx = Max_Natives + 16
+                          and then not (Ch in 'A' .. 'Z'
+                                        or else Ch in 'a' .. 'z'
+                                        or else Ch in '0' .. '9'
+                                        or else Ch = '_')
+                        then
+                           exit;
+                        end if;
+                        exit when K = Out_B'Last;
+                        K := K + 1;
+                        Out_B (K) := Ch;
+                     end loop;
+                     Put_CStr (Args (0), Out_B (1 .. K));
+                  end;
+                  In_Pos := T;
                end if;
                return Ok;
             end;

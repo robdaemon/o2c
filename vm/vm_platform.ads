@@ -58,4 +58,11 @@ package VM_Platform is
    --  image so it offsets, while the guest's arguments are the program's own.
    function Arg_Get (N : Natural; Buf : out String) return Integer;
 
+   --  One line of the program's input.  The guest reads it through
+   --  Aegir_User.CLI, which is the same call the Ada backend's generated
+   --  helper makes; the host reads its own stdin.  E is true at end of input,
+   --  and then L is 0.  This is why In needs the seam where XYplane did not:
+   --  input genuinely differs between the two.
+   procedure Get_Line (S : out String; L : out Natural; E : out Boolean);
+
 end VM_Platform;

@@ -7379,6 +7379,38 @@ package body O2c_Compiler is
                                     --  Native id 13: foreign entry 9.
                                     O2c_BC.Native_Call (13, 3);
                                  end;
+                              elsif Eq_No_Case (MNm, "In")
+                                and then (Eq_No_Case
+                                            (To_String (MName), "String")
+                                          or else Eq_No_Case
+                                            (To_String (MName), "Name"))
+                                and then N_A = 1
+                              then
+                                 --  In.String / In.Name (var buf): one out
+                                 --  slot, and the primitive decides which
+                                 --  characters land in it.
+                                 declare
+                                    ANm : constant String :=
+                                      To_String (Arg_R (1).Text);
+                                    AId : constant Natural := Find (ANm);
+                                 begin
+                                    if AId = 0
+                                      or else Syms (AId).UT = 0
+                                    then
+                                       raise O2c_BC.Wrong_Construct with
+                                         "bytecode backend: In."
+                                         & To_String (MName) & " needs a "
+                                         & "declared ARRAY OF CHAR variable";
+                                    end if;
+                                    O2c_BC.Load_Addr_G
+                                      (O2c_BC.Global_Array
+                                         (Ada_Id (ANm),
+                                          Total_Slots (Syms (AId).UT)));
+                                 end;
+                                 O2c_BC.Native_Call
+                                   ((if Eq_No_Case (To_String (MName),
+                                                    "String")
+                                     then 20 else 21), 1);
                               elsif Eq_No_Case (MNm, "XYplane")
                                 and then Eq_No_Case
                                   (To_String (MName), "Dot")
@@ -7412,6 +7444,12 @@ package body O2c_Compiler is
                                (To_String (MName), "Clear")
                            then
                               O2c_BC.Native_Call (15, 0);
+                           elsif Eq_No_Case (MNm, "In")
+                             and then Eq_No_Case
+                               (To_String (MName), "Open")
+                           then
+                              --  In.Open resets the input stream.
+                              O2c_BC.Native_Call (19, 0);
                            elsif Eq_No_Case (MNm, "XYplane")
                              and then Eq_No_Case
                                (To_String (MName), "Open")
