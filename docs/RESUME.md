@@ -783,6 +783,46 @@ cannot yet be verified by effect from a user module.  (2) The STATEMENT path
 treatment the factor path just got.
 
 
+### 3o. IN PROGRESS — the first cross-module call with an open-array formal
+
+Attempting the end-to-end check (`f := Files.Old(nm)` then `Files.Length(f)`)
+surfaced two things, both measured, neither landed yet.
+
+**1. `X_Ret_UT` is not `Import_Type` for this case.**  The factor path already
+resolves a pointer result with `R.Ptr_UT := X_Ret_UT (XI)`
+(`o2c_compiler.adb:3519`), and the assignment still fails:
+
+    o2c error: pointer type mismatch assigning f
+
+Replacing that with `Import_Type (Owner, Member)` - split out of the qualified
+`Xs (XI).Ret_Nm` - makes the assignment type-check.  So for a POINTER result
+whose target is a RECORD type of the exporting module, `X_Ret_UT` does not
+produce the id the assignment needs, and `Import_Type` does.  That part is
+understood and worth keeping.  (It does NOT fix the next problem.)
+
+**2. The image is then malformed at verification.**  With the assignment fixed,
+the program compiles (2400 bytes) and the VM rejects the image:
+
+    vm: internal error in phase 3: STORAGE_ERROR (stack overflow or erroneous
+    memory access)
+    vm: malformed code
+
+Prime suspect, and it fits the evidence: **`Files.Old`'s formal is an OPEN ARRAY**
+(`Old(name: array of char)`), which travels as TWO slots - the address and the
+length - while the factor call path pushes one value per actual.  That path was
+modelled on the FFI sites (`XYplane.IsDot (x, y)`), which take only scalars, so
+an open-array actual has never been exercised through it.  The statement path and
+the local call path both know about the length slot; the factor path does not yet.
+
+**Next step, in this order:** push an open-array actual as (address, length) on
+the factor path the way the local call path does, then re-run the end-to-end
+check.  Note `Files.New` has the same formal shape, so the same fix serves both,
+and `Files.Length(f)` - a pointer argument, one slot - is the control case that
+should pass immediately once the open-array actual is right.
+
+The tree is left at the verified commit; none of the above is committed.
+
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
