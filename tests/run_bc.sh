@@ -89,8 +89,15 @@ fi
 #  ---- Threads.Start, with a procedure value and with a name ---------------
 #  The point of the procedure type: Start takes a procedure *value*, so the
 #  thread body may be chosen at run time by assigning to the variable.
-for TN in threadstart threadname threadjoin threadmutex threadyield threadid \
-          threadstress callplain localprocv; do
+#  Every fixture that has a golden is compiled, run and compared.  Discovered
+#  rather than listed: a list is complete only until someone adds a fixture and
+#  forgets the list, and this one had already fallen behind - thirty-four
+#  fixtures with goldens were being compiled and never executed.  The golden is
+#  the contract, so a fixture's presence in the directory is what enrols it.
+#  Fixtures *without* a golden are compile-only or negative, and keep their own
+#  explicit checks below; sorted for a stable order and stable output.
+for SRC in $(ls "$ROOT"/tests/bc/*.out | sort); do
+   TN="$(basename "${SRC%.out}")"
    if ! timeout 120 "$FRONT" "$ROOT/tests/bc/$TN.ob2" "$WORK/$TN.obc" \
         >"$WORK/$TN.compile" 2>&1; then
       bad "$TN.ob2 did not compile: $(cat "$WORK/$TN.compile")"
