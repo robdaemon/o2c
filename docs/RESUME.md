@@ -1003,6 +1003,47 @@ and a trace of the target's identity at the call site is the cheapest way to
 settle it.
 
 
+### 3t. IN PROGRESS — what the cross-module call is NOT
+
+`3s` asked whether the call targets the right procedure.  It does.  Tracing both
+sides settles it:
+
+    DBG decl 'New'    id= 2         (Files, declaring side)
+    DBG decl 'Length' id= 3
+    DBG call 'Files.New'    id= 2 npar= 1
+    DBG call 'Files.Length' id= 3 npar= 1
+
+The ids match, and so do the arities: `New` needs 2 slots (its `array of char`
+formal is open) and the emitter records 2, `Length` needs 1 and the emitter
+records 1.  So the id, the target and the argument COUNTS are all right.
+
+**Two probes narrowed it further, and they disagree in an informative way.**
+
+    u3  f := Files.New(nm); n := Files.Length(f);     runs, returns GARBAGE
+    u4  n := Files.Length(Files.New(nm));             image is MALFORMED
+
+`u3` stores a call's result in a variable and reads it back later; `u4` never
+stores it - the inner call's result goes straight in as the next call's argument.
+`u4` being malformed means the fault is in the CALL RESULT as an operand, not in
+the assignment; and it is a verifier-visible stack/arity violation, which is a
+much better clue than a wrong number.
+
+**One oddity worth its own note**, found while looking for a depth invariant to
+test: `Depth` (`o2c_bc.adb:95`) is reset by `Reset` and never at a procedure
+boundary, so readings taken inside different procedures are not comparable, and
+the per-image `Max_Depth` written at `o2c_bc.adb:1038` accumulates across the
+whole compile rather than per frame.  That is not the cause of anything above,
+but it means the emitter's own depth accounting cannot be used as the check it
+looks like, and any debugging that assumes otherwise will mislead.
+
+**Next**: the call RESULT as an operand.  `u4` is the reproduction, and it is
+smaller than `u3`: no assignment, no variable, two calls.  What to compare is the
+code the qualified path emits around `Call_Proc` versus the unqualified path
+(`o2c_compiler.adb:9266-9288`), which emits nothing but the call because
+`Parse_Actual` has pushed everything - including, for an actual that is itself a
+CALL, the value that call already left on the stack.
+
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
