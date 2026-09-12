@@ -1088,6 +1088,53 @@ continued; the next one has to do the same or 3d switches to making the rest of
 the Files API FFI natives, as `Delete` and `Rename` already are.
 
 
+### 3v. HYPOTHESIS TESTED AND DEAD — and the switch the stopping rule triggers
+
+The bounded iteration on the formal descriptor (`3u`'s hypothesis) was run, and
+it is **disproved**.
+
+Measured first, which is what made the hypothesis look right:
+
+    u3 (cross-module): PA in typ=T_INT  ut=4 open=FALSE
+    e2 (LOCAL, works): PA in typ=T_STR  ut=3 open=FALSE
+
+`X_Formal` was flattening a user-typed formal to `Typ := T_Int`, while the
+identical LOCAL formal is described as `Typ = T_Str` with its user type - so a
+pointer actual took the INTEGER route.  The change (described as the local case
+describes it) was applied, and it does make the shapes match:
+
+    u3 after:         PA in typ=T_STR  ut=4 open=FALSE     <- same as e2 now
+
+and it changed NOTHING observable:
+
+    u3  before: "NOT zero"      after: "NOT zero"
+    u4  before: "NOT zero"      after: "NOT zero"
+
+So the descriptor is not the cause, and the change was REVERTED rather than kept
+on the strength of looking more correct - same standard as everywhere else: it
+alters nothing observable and no test covers it.
+
+**That is the trigger.**  `3u` states the rule: if a probe does not shrink the
+reproduction or eliminate a hypothesis, stop and switch to natives rather than
+chase.  The probe eliminated a hypothesis (worth keeping - nobody need tread it
+again) but did not shrink the reproduction, and the iteration the user authorised
+was explicitly "one more, bounded".  It is used up.
+
+**The course from here is therefore the one chosen in advance**: stop scoping
+`Files` and make the rest of its API (`Old`/`New`/`Read`/`Write`/`Close`/
+`Register`/`Set`) FFI natives, the way `Delete`/`Rename` and the four positioned
+primitives already are.  That removes the whole failure surface this section
+documents: no Oberon bodies compiled to bytecode, no imported formal descriptors,
+no cross-module value transport.  What it costs instead is VM-side file-handle
+state, which is ordinary, testable work of the kind the existing 25 natives
+already demonstrate.
+
+Everything the chase produced stays valid and landed: the body-frame balance, the
+`R.Typ` clobber, the argument double-push, `LEN` and `ARRAY OF CHAR` indexing are
+real bytecode gaps closed, with `lenopen` as a new fixture and 48 fixtures
+corroborated by both backends.
+
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference
