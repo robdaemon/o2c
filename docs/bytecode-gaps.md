@@ -291,6 +291,26 @@ backend exactly as now. What has to be replaced is the M19 import path's
 treatment of these calls, plus the ten FFI *statement* branches, which currently
 build Ada text and have no bytecode counterpart.
 
+**And the path is reachable after all - with the real public names.** Probing
+with the names the embedded sources actually export changes the picture:
+
+    Convert.ToInt (s, x, r)    compiles, but the image is MALFORMED:
+                               the VM refuses it with "cannot read image"
+    Convert.FromInt (x, s)     same
+    Files.FDel / Env.EnvGet    "is not exported" - those are the wrong names
+
+`Convert.ToInt` resolves through the M19 import path and the compiler emits an
+image the VM cannot load. A plain program through the same tool boots and prints
+normally, so the call is what breaks it. This is reachable TODAY, needs no
+change to `Begin_Mode`, and is a silent failure of exactly the kind this section
+exists to remove - the compiler reports success. My earlier names were guesses
+(`ConvToInt`); the embedded source's own are `ToInt`/`ToReal`/`FromInt`/
+`FromReal`, and the FFI branches match the *primitive* written in the body
+rather than the exported name.
+
+So the concrete first task is smaller than the fork below suggests: make
+`Convert.ToInt` either work or be refused. The fork still decides how.
+
 **This is a design choice, not a mechanical edit, and it should be made
 deliberately**: natives for the whole Oakwood surface (matching the comment, and
 what `labs` already does) versus compiling some builtins to bytecode. The
