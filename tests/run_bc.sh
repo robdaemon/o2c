@@ -57,8 +57,11 @@ then
    bad "unsupported.ob2 compiled, but the slice cannot express it"
 else
    #  Any clear refusal will do: what the contract asserts is that the
-   #  backend says so loudly, not the precise wording of the message.
-   if grep -aq 'bytecode backend:' "$WORK/unsup.log"; then
+   #  backend says so loudly, not the precise wording of the message.  It
+   #  used to insist on "bytecode backend:" because the construct under it
+   #  was ARRAY OF CHAR; that now works, and what replaced it is refused by
+   #  the type parser instead, which is just as loud.
+   if grep -aq 'o2c error:' "$WORK/unsup.log"; then
       note "negative: unsupported construct rejected ($(cat "$WORK/unsup.log"))"
    else
       bad "unsupported.ob2 failed without a clear diagnostic: $(cat "$WORK/unsup.log")"

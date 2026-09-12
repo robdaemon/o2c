@@ -154,6 +154,8 @@ package body OBC_VM is
    --  The calling thread's own id - the same handle a spawn hands back, so a
    --  program can name itself the way others name it.
    Op_Thread_Id     : constant := 16#EA#;
+   Op_Load_Idx_B    : constant := 16#EB#;
+   Op_Store_Idx_B   : constant := 16#EC#;
 
    --  Instructions a thread may run before the VM takes the machine back.
    --  This is what makes scheduling preemptive: a thread that never calls
@@ -948,6 +950,18 @@ package body OBC_VM is
                end if;
                Depth := Depth + 1;
                PC := PC + 5;
+            when Op_Load_Idx_B =>
+               if Depth < 2 then
+                  return Bad_Stack;
+               end if;
+               Depth := Depth - 1;
+               PC := PC + 1;
+            when Op_Store_Idx_B =>
+               if Depth < 3 then
+                  return Bad_Stack;
+               end if;
+               Depth := Depth - 2;
+               PC := PC + 1;
             when Op_Load_Idx_I =>
                if Depth < 2 then
                   return Bad_Stack;
@@ -1851,6 +1865,31 @@ package body OBC_VM is
                             (Globals (Natural (LE32 (Code, PC + 1)))
                                'Address)));
                PC := PC + 5;
+            when Op_Load_Idx_B =>
+               declare
+                  Idx : constant U64 := Pop;
+                  Bas : constant U64 := Pop;
+                  B   : Byte with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (Bas)
+                       + System.Storage_Elements.Integer_Address (Idx));
+               begin
+                  Push (U64 (B));
+               end;
+               PC := PC + 1;
+            when Op_Store_Idx_B =>
+               declare
+                  Val : constant U64 := Pop;
+                  Idx : constant U64 := Pop;
+                  Bas : constant U64 := Pop;
+                  B   : Byte with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (Bas)
+                       + System.Storage_Elements.Integer_Address (Idx));
+               begin
+                  B := Byte (Val and 16#FF#);
+               end;
+               PC := PC + 1;
             when Op_Load_Idx_I =>
                declare
                   Idx : constant U64 := Pop;

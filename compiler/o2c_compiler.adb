@@ -1028,6 +1028,9 @@ package body O2c_Compiler is
       N : Natural := 0;
    begin
       if UTypes (UT).Arr_Len > 0 then
+         if UTypes (UT).Elem = T_Char then
+            return (Natural (UTypes (UT).Arr_Len) + 1 + 7) / 8;
+         end if;
          --  An array of slot-scalars is its length: that is both its
          --  footprint and what a variable of it needs nominating.  A record
          --  has Arr_Len zero and falls through to the field walk.
@@ -1882,7 +1885,10 @@ package body O2c_Compiler is
                  & Natural'Image (Cur.Line) & ")";
             end if;
             Next;                --  past '['
-            if O2c_BC.Bytecode_Mode and then UTypes (UT).Elem = T_Int then
+            if O2c_BC.Bytecode_Mode
+              and then (UTypes (UT).Elem = T_Int
+                        or else UTypes (UT).Elem = T_Char)
+            then
                --  An array is a run of scalar slots: push the address of its
                --  first slot before the index is evaluated, so the stack
                --  reads [base, index] for the access the caller emits.  The
@@ -1917,6 +1923,36 @@ package body O2c_Compiler is
                      VK := V_Arr;
                   end if;
                elsif UTypes (UT).Elem = T_Char then
+                  if O2c_BC.Bytecode_Mode then
+                     --  A packed CHAR array is 0-based bytes, like every
+                     --  other array here, so an element is an ordinary
+                     --  indexed access and the caller emits it.  The Ada
+                     --  path below is 1-based because an Ada String is, and
+                     --  classifying this as a scalar there is correct; here
+                     --  it left the operands on the stack with no access at
+                     --  all, so Out.Char printed the index.
+                     D.Text := D.Text & " (" & To_String (Ix.Text) & ")";
+                     declare
+                        L_In : constant Natural := New_Bc_Label;
+                        L_Up : constant Natural := New_Bc_Label;
+                     begin
+                        O2c_BC.Dup_Top;
+                        O2c_BC.Push_Int (0);
+                        O2c_BC.Bin (O2c_BC.Ge);
+                        O2c_BC.Jump (O2c_BC.Jnz, L_In);
+                        O2c_BC.Trap (0);
+                        O2c_BC.Mark (L_In);
+                        O2c_BC.Dup_Top;
+                        O2c_BC.Push_Int (UTypes (UT).Arr_Len);
+                        O2c_BC.Bin (O2c_BC.Lt);
+                        O2c_BC.Jump (O2c_BC.Jnz, L_Up);
+                        O2c_BC.Trap (0);
+                        O2c_BC.Mark (L_Up);
+                     end;
+                     D.K := D_Index;
+                     D.Sc := T_Char;
+                     return D;
+                  end if;
                   --  char array (Ada String, 1-based)
                   D.Text := D.Text & " (" & To_String (Ix.Text) & " + 1)";
                   D.K := D_Scalar;
@@ -1963,7 +1999,15 @@ package body O2c_Compiler is
          D.UT := UT;
          return D;
       end if;
-      if VK = V_Arr and then UTypes (UT).Elem = T_Char then
+      if VK = V_Arr and then UTypes (UT).Elem = T_Char
+        and then D.K /= D_Index
+      then
+         --  The whole array as a string - but only when no index was
+         --  selected.  This used to override unconditionally, so s[2] was
+         --  classified as the whole string, the indexed path never ran, and
+         --  the base and index were left on the stack with no access op:
+         --  Out.Char then printed the *index*.  Unreachable until CHAR
+         --  arrays stopped being refused, which is why it went unnoticed.
          D.K := D_Str;
          return D;
       end if;
@@ -4635,7 +4679,8 @@ package body O2c_Compiler is
                declare
                   Ok_Arr : constant Boolean :=
                     UTypes (UT).Arr_Len > 0
-                    and then UTypes (UT).Elem = T_Int;
+                    and then (UTypes (UT).Elem = T_Int
+                              or else UTypes (UT).Elem = T_Char);
                   Ok_Ptr : constant Boolean := UTypes (UT).Is_Ptr;
                   --  A procedure value is one slot - a procedure id - so a
                   --  variable of that type is as ordinary as a pointer.
