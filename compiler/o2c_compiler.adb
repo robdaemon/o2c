@@ -107,6 +107,13 @@ package body O2c_Compiler is
       Open_Arr : Boolean := False; --  ARRAY OF parameter (M12); Typ = elem
       By_Ref   : Boolean := False; --  formal VAR parameter
       Exp    : Boolean := False;   --  export mark 'name*' (M19)
+      --  A CONST's value, when it is a plain integer literal.  The bytecode
+      --  backend has no module slot to load a constant from - a constant is
+      --  not storage - so it needs the number itself, and the symbol record
+      --  carried only Ada source text for it.  Const_Usable says whether that
+      --  text was a literal the VM can push.
+      Const_Val : Integer := 0;
+      Const_Usable : Boolean := False;
       Bc_Proc : Natural := 0;      --  bytecode procedure id (Begin_Proc)
       Foreign : Unbounded_String;  --  EXTERN: the C symbol this binds to
       Foreign_Native : Natural := 0;  --  the native id it resolves to
@@ -3767,7 +3774,29 @@ package body O2c_Compiler is
                end;
             else
                if O2c_BC.Bytecode_Mode then
-                  if Syms (Id).Kind /= S_Var then
+                  if Syms (Id).Kind = S_Const then
+                     --  A constant has no storage to load: its value is the
+                     --  value.  Only a plain literal can be pushed, so a
+                     --  computed constant is refused here rather than becoming
+                     --  a zero.
+                     if not Syms (Id).Const_Usable then
+                        raise O2c_BC.Wrong_Construct with "bytecode backend: '"
+                          & Cur.Text (1 .. Cur.Len)
+                          & "' is not a plain literal constant, so its value "
+                          & "cannot be pushed";
+                     end if;
+                     O2c_BC.Push_Int (Syms (Id).Const_Val);
+                     R.Typ := Syms (Id).Typ;
+                     R.Text := Null_Unbounded_String;
+                     R.Lit := True;
+                     --  Consume the name before returning.  The shared Next
+                     --  further down belongs to the path that falls through,
+                     --  so leaving early without this leaves the parser
+                     --  sitting on the identifier - which surfaces as
+                     --  "expected ..." errors far from the constant.
+                     Next;
+                     return R;
+                  elsif Syms (Id).Kind /= S_Var then
                      raise O2c_BC.Wrong_Construct with "bytecode backend: '"
                        & Cur.Text (1 .. Cur.Len)
                        & "' is not a module variable";
@@ -4468,6 +4497,22 @@ package body O2c_Compiler is
       Syms (N_Sym) := (Kind => S_Const, Typ => V.Typ,
                        Name => To_Unbounded_String (Name), Exp => Exp,
                        others => <>);
+      --  Recover the number, so a bytecode program can still name a constant.
+      --  Text that is not a plain literal leaves Const_Usable false, and using
+      --  it in bytecode mode is refused where the constant is used rather than
+      --  silently reading a zero.
+      if V.Lit and then (V.Typ = T_Int or else V.Typ = T_Char
+                         or else V.Typ = T_Bool)
+      then
+         begin
+            Syms (N_Sym).Const_Val :=
+              Integer'Value (To_String (V.Text));
+            Syms (N_Sym).Const_Usable := True;
+         exception
+            when others =>
+               Syms (N_Sym).Const_Usable := False;
+         end;
+      end if;
       if Exp and then Pkg_Mode then
          if not V.Lit and then V.Typ /= T_Str then
             raise O2c_Error with "exported constants must be plain "
