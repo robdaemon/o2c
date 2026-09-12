@@ -365,7 +365,11 @@ TERMINATE, which is why the fixtures are run under a timeout.
   three were silently wrong (A.1).
 
       INTEGER >=   works (no fixture - now relops.ob2)
-      BY           works (no fixture - now forstep.ob2)
+      BY           ascending worked; a DESCENDING step could not be written at
+                   all - validated by scanning the step's Ada IMAGE for digits,
+                   so `by -1` failed on the '(' of `-(1)`, and behind that the
+                   emitter's NUMERIC conversion of a negative step raised.
+                   Now forstep.ob2 + fordown.ob2.
       BOOLEAN or   Ada backend accepts, bytecode refuses   <- a real gap
       BOOLEAN &    same
       AND          reserved by the lexer, NEVER PARSED - a hole in the grammar

@@ -1,15 +1,19 @@
 # RESUME — starting point for the next session
 
 Written at the end of a long session on the bytecode backend's FFI surface,
-then corrected and extended by the two sessions that followed it - the unary
-operators, then construct coverage.
+then corrected and extended by the three sessions that followed it - the unary
+operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
-    HEAD            aad25dc (tests: construct coverage, from the lexer)
-    commits         297
-    fixtures        68 in tests/bc/
+    HEAD            find it with:  git log --oneline -1
+    commits         299
+    fixtures        69 in tests/bc/
     foreign natives 21 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
+
+The header names no commit hash on purpose: `HEAD` and `commits` describe the
+same commit, this file cannot name its own, and a stale hash is worse than a
+command. Verify with `git rev-list --count HEAD` and `ls tests/bc/*.ob2 | wc -l`.
 
 ## 1. Where things stand
 
@@ -160,21 +164,23 @@ What the seven were, and what became of them:
                       not a missing operator.  Known gap, pinned.
     TOK_ERROR         not a construct - exempt.
 
-Descending FOR is the one known gap coverage CANNOT see, and that is the point
-of the caveat at the end of this section: its tokens (`FOR`, `TO`, `BY`,
-`MINUS`) are all exercised by ascending loops, so the token check passes while
-the construct is wrong. It is pinned by a probe in `coverage.sh` instead. `for i
-:= 3 to 1` never runs its body, because `Asc` comes from whether the `BY` text
-starts with `-`, and the way to ask for a descent — `by -1` — is rejected with
-"FOR BY must be an integer constant": `-1` reaches the header as the text
-`-(1)`. The header's digit check even allows a leading `-`, so `by -1` was
-*meant* to work. **A value fixture cannot hold this**: asserting that `3 to 1`
-sums to 0 would be asserting wrongness as if it were correct, which is why it
-lives as a known-gap probe and not in tests/bc.
+Descending FOR was the one gap coverage could NOT see, and it is worth keeping
+as the demonstration of *why* the caveat at the end of this section matters:
+its tokens (`FOR`, `TO`, `BY`, `MINUS`) are all exercised by ascending loops,
+so the token check passed while the construct was broken. **It is fixed now**
+(3f) and held by `tests/bc/fordown.ob2` like any other construct — but the
+lesson it taught stands, and it has no live example any more:
+
+    a construct that is fully covered AND wrong is invisible to coverage.
+
+`for i := 3 to 1` summing to 0 was never the bug — that is correct Oberon-2,
+since a descent needs an explicit negative step, and it is what the first
+reading mistook for the gap. The bug was that `by -1` could not be written at
+all, so no descent was expressible, and only a *descent* can assert that.
 
 **The lesson: coverage says where to look, not what is there.** It found the
 constructs no test reached; it could not tell that three of them were wrong, and
-the one construct that is wrong while fully covered is invisible to it by
+a construct that is wrong while fully covered is invisible to it by
 construction. That is 3c's job.
 
 ### 3c. Differential: run the corpus through both backends
@@ -231,7 +237,45 @@ target; only executing it can.
 
 For the next silent-image hunt: coverage found this only because `loop`/`exit`
 had NO fixture. A construct that is exercised AND wrong is invisible to
-coverage — that is exactly the descending-FOR entry in 3b, and it is 3c's job.
+coverage — descending FOR was exactly that case (3f), and it is 3c's job to
+catch the next one.
+
+### 3f. DONE — descending `FOR` (`by -1`), and two reasons it was unreachable
+
+A descending loop could not be written at all, and the diagnosis in the previous
+version of 3b had the wrong culprit: it indicted `for i := 3 to 1`, which
+running its body zero times is *correct* Oberon-2 — a descent needs an explicit
+negative step. The bug was that the step could not be given one.
+
+**Two walls, one behind the other**, which is why it looked like a semantics
+question rather than a parse question:
+
+- `Parse_For` validated the step by scanning its Ada **image** for digits. Unary
+  minus wraps the literal as `-(1)`, so `by -1` failed on the `(` — and the scan
+  even allowed a leading `-` on purpose, so it was a bug in the check, not a
+  missing feature. It also refused `by SOME_CONST`, whose text is a name.
+- Behind it, `O2c_BC.For_Enter`/`For_Next` wrote the step with
+  `Put_U32 (U32 (Step) and 16#FFFF_FFFF#)`. That mask never runs: a NUMERIC
+  conversion of a negative `Integer` to `U32` raises `CONSTRAINT_ERROR` first.
+  So nothing could have encoded a descent even once the parse succeeded — the
+  failure surfaced as an exception inside the emitter, not as a diagnostic.
+
+Fixed by taking the step from the parsed expression's **value**
+(`B.Folds`/`B.Val`, which is what "integer constant" always meant) and encoding
+it as a two's-complement bit pattern through an unchecked conversion from
+`Interfaces.Integer_32` — the form the opcode's `i32 step` and the VM's decode
+already assume. A zero step is now refused loudly, since it can never advance
+the loop variable; a variable step is still refused, on the same rule as before.
+
+The VM needed no change: `Op_For_Enter` derives the direction from from-vs-to
+and steps by `abs (Step)`, so it supported descending all along.
+
+`tests/bc/fordown.ob2` holds it: `by -1`, `by -2`, a negative `by` from a
+`CONST`, a non-literal bound, ascending unchanged, the no-`BY` case (0
+iterations, documenting the semantics above), and an iteration count. Every
+descending case prints a wrong number rather than failing if the step arrives as
+positive or zero. `run_bc.sh` also asserts the two refusals, so the relaxation
+is shown not to be a free-for-all.
 
 ## 4. Method — what worked, and what did not
 

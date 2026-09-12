@@ -32,7 +32,7 @@ if ! ( cd "$ROOT" && make tools-host vm-host AEGIR_ROOT="$AEGIR_ROOT" >"$WORK/bu
 fi
 
 #  ---- positives: source -> image -> VM output vs golden -------------------
-for name in sum ifelsif vmgreet proc local repeat case for set real arr rec ptr newt list recmix strch recreal outchar ext nested impderef fnexpr openarr typetest withguard typeguard dispatch newloop deepcall gcloop gcscalar ffi unops loopexit relops forstep; do
+for name in sum ifelsif vmgreet proc local repeat case for set real arr rec ptr newt list recmix strch recreal outchar ext nested impderef fnexpr openarr typetest withguard typeguard dispatch newloop deepcall gcloop gcscalar ffi unops loopexit relops forstep fordown; do
    src="$ROOT/tests/bc/$name.ob2"
    gold="$ROOT/tests/bc/$name.out"
    if ! timeout 120 "$FRONT" "$src" "$WORK/$name.obc" >"$WORK/$name.compile" 2>&1; then
@@ -68,7 +68,28 @@ else
    fi
 fi
 
-#  ---- the collector's contract: a live set larger than the arena --------
+#  ---- the FOR step -------------------------------------------------------
+#  `by` must be a non-zero integer constant.  The zero case is not pedantry:
+#  a zero step never advances the loop variable, so the loop would not
+#  terminate.  The variable case is the rule that was there before - only the
+#  evidence moved from the step's SPELLING to its VALUE, so it is asserted
+#  here to show the relaxation was not a free-for-all.
+#  (Both used to be one check: the text of the step had to be digits, which
+#  also refused `by -1` and so made a descending loop unwritable.)
+for fcase in 'zero|by 0|must not be zero' \
+             'varstep|by s|must be an integer constant'; do
+   fl="${fcase%%|*}"; rest="${fcase#*|}"; fby="${rest%%|*}"; fmsg="${rest##*|}"
+   printf 'module FB;\nvar i, s: integer;\nbegin s := 2; for i := 1 to 9 %s do end end FB.\n' \
+      "$fby" > "$WORK/fb.ob2"
+   if timeout 120 "$FRONT" "$WORK/fb.ob2" "$WORK/fb.obc" >"$WORK/fb.log" 2>&1
+   then
+      bad "$fl: FOR $fby compiled, but it is not a usable step"
+   elif grep -aq "$fmsg" "$WORK/fb.log"; then
+      note "negative: FOR $fby refused ($fmsg)"
+   else
+      bad "$fl: FOR $fby failed for the wrong reason: $(cat "$WORK/fb.log")"
+   fi
+done
 #  The VM must report exhaustion rather than corrupt itself.  Before the
 #  collector was fixed it freed the live list and returned a wrong answer,
 #  which is indistinguishable from success without this check.

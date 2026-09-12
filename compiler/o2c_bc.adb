@@ -241,6 +241,18 @@ package body O2c_BC is
 
    function Real_Bits is new Ada.Unchecked_Conversion (Long_Float, U64);
 
+   --  An i32 step as its bit pattern, for the FOR opcodes.  Unchecked, and
+   --  from a 32-bit signed type, because a numeric conversion RAISES for a
+   --  negative step - which is the second half of why descending FOR could
+   --  not be encoded even once `by -1` parsed: `U32 (Step) and 16#FFFF_FFFF#`
+   --  masks the bit pattern only after a conversion that never gets there.
+   --  The opcode carries two's complement and the VM decodes it as such.
+   function I32_Bits is new Ada.Unchecked_Conversion (Interfaces.Integer_32,
+                                                      U32);
+
+   function Step_Bits (Step : Integer) return U32 is
+     (I32_Bits (Interfaces.Integer_32 (Step)));
+
    procedure Push_Real (Value : Long_Float) is
    begin
       Add_Word (Real_Bits (Value));
@@ -802,7 +814,7 @@ package body O2c_BC is
    begin
       Put_Byte (16#A4#);
       Put_U16 (U16 (Slot));
-      Put_U32 (U32 (Step) and 16#FFFF_FFFF#);
+      Put_U32 (Step_Bits (Step));
       Put_U16 (U16 (Limit_Slot));
       For_Fixup (Else_Label);
       N_Insns := N_Insns + 1;
@@ -814,7 +826,7 @@ package body O2c_BC is
    begin
       Put_Byte (16#A5#);
       Put_U16 (U16 (Slot));
-      Put_U32 (U32 (Step) and 16#FFFF_FFFF#);
+      Put_U32 (Step_Bits (Step));
       Put_U16 (U16 (Limit_Slot));
       For_Fixup (Body_Label);
       N_Insns := N_Insns + 1;

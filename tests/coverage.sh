@@ -154,32 +154,22 @@ else
    note "  ok  TOK_AND  the reserved word AND still does not parse"
 fi
 
-#  Descending FOR is a KNOWN GAP that coverage cannot see: its tokens
-#  (FOR, TO, BY, MINUS) are all exercised by ascending loops, so the token
-#  check passes while the construct is wrong.  It is pinned here because a
-#  value fixture cannot hold it - asserting `for i := 3 to 1` sums to 0
-#  would be asserting wrongness as if it were correct.
-cat > "$WORK/desc.ob2" <<'EOB'
-module DescG;
-import Out;
-var i, acc: integer;
-begin
-  acc := 0;
-  for i := 3 to 1 do acc := acc + i end;
-  Out.Int(acc, 0); Out.Ln
-end DescG.
-EOB
-if timeout 60 "$FRONT" "$WORK/desc.ob2" "$WORK/desc.obc" >"$WORK/desc.log" 2>&1; then
-   got="$(timeout 60 "$VM" "$WORK/desc.obc" 2>/dev/null | tr -d '\n\r')"
-   if [ "$got" = "0" ]; then
-      note "  ok  descending FOR still runs its body 0 times (3+2+1 would be 6)"
-   else
-      bad "descending FOR changed: printed '$got', not the recorded 0 - if it" \
-          "now descends, remove this entry and add a value fixture"
-   fi
-else
-   bad "descending FOR no longer compiles: $(tail -1 "$WORK/desc.log")"
-fi
+#  There WAS a fourth entry here: descending FOR, pinned as a probe because
+#  coverage cannot see it - its tokens (FOR, TO, BY, MINUS) are all exercised
+#  by ascending loops, so the token check passed while the construct was
+#  broken.  It has since been fixed (the BY header took the step's value
+#  instead of scanning its text for digits) and is now held by
+#  tests/bc/fordown.ob2, like any other working construct.
+#
+#  The entry is removed rather than rewritten because a value fixture is
+#  strictly better evidence now that it is possible: the probe could only
+#  assert that the body ran ZERO times, which is correct Oberon-2 for
+#  `for i := 3 to 1` and was the thing mistaken for the gap in the first
+#  place.  What was actually broken was `by -1`, and only a descent can
+#  assert that.
+#
+#  The limitation itself stands: a construct that is fully covered AND wrong
+#  is invisible here, and only the differential (3c) can see it.
 
 if [ "$fails" -eq 0 ]; then
    note "PASS (every token kind is exercised, exempt, or a recorded known gap)"

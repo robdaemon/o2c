@@ -6367,6 +6367,11 @@ package body O2c_Compiler is
       Idx    : Natural;
       Lo, Hi : Expr_Rec;
       By_Text : Unbounded_String;
+      --  The step's VALUE, which is what the FOR opcodes take.  The Ada text
+      --  keeps using By_Text: a negative step reaches it as `-(1)`, which is
+      --  valid Ada, but Integer'Value cannot read that - so the value is
+      --  carried here instead of being re-parsed from the text.
+      By_Val : Integer := 1;
       Asc    : Boolean;
       --  Bytecode: the loop variable is a frame slot (the opcodes address
       --  frames, not globals), followed by two synthesized slots for the
@@ -6408,28 +6413,35 @@ package body O2c_Compiler is
          Next;
          declare
             B : Expr_Rec := Parse_Expr;
-            T : constant String := To_String (B.Text);
-            All_Digits : Boolean := True;
          begin
-            if B.Typ /= T_Int then
+            --  The step is taken from the parsed constant's VALUE.  What used
+            --  to be here scanned the Ada IMAGE for digits, so `by -1` was
+            --  rejected: unary minus wraps the literal as `-(1)`, and the '('
+            --  failed the scan.  That made a DESCENDING LOOP UNWRITABLE -
+            --  Oberon-2 takes the direction from the step's sign, so `by -1`
+            --  is the only way to ask for one - and the digit check even
+            --  allowed a leading '-' on purpose, so this was a bug in the
+            --  check rather than a missing feature.
+            --
+            --  Folds is what makes it a CONSTANT: a literal, a CONST name, or
+            --  an expression over either.  A variable step has no value at
+            --  compile time and is refused - the same rule as before, only
+            --  the evidence for it changed from spelling to meaning.
+            if B.Typ /= T_Int or else not B.Folds then
                raise O2c_Error with "FOR BY must be an integer constant";
             end if;
-            for I in T'Range loop
-               if I /= T'First or else T (I) /= '-' then
-                  if T (I) not in '0' .. '9' then
-                     All_Digits := False;
-                  end if;
-               end if;
-            end loop;
-            if not All_Digits then
-               raise O2c_Error with "FOR BY must be an integer constant (M3)";
+            By_Val := B.Val;
+            if By_Val = 0 then
+               --  A zero step never advances the loop variable.
+               raise O2c_Error with "FOR BY must not be zero (line "
+                 & Natural'Image (Cur.Line) & ")";
             end if;
             By_Text := B.Text;
          end;
       end if;
       Expect (Lex.Tok_Do, "'DO'");
       Next;
-      Asc := To_String (By_Text) (1) /= '-';
+      Asc := By_Val > 0;
       if O2c_BC.Bytecode_Mode then
          Bc_Slot := O2c_BC.Local (Ada_Id (V_Name (1 .. V_Len)));
          declare
@@ -6449,15 +6461,13 @@ package body O2c_Compiler is
          Bc_For_N := Bc_For_N + 1;
          Bc_Top := New_Bc_Label;
          Bc_Else := New_Bc_Label;
-         --  BY's expression pushed a value on the operand stack; the step
-         --  comes from its text (the front end has checked it is an integer
-         --  constant), so the pushed value goes.
+         --  BY's expression pushed a value on the operand stack; the step is
+         --  a compile-time constant held in By_Val, so the pushed value goes.
          if Had_By then
             O2c_BC.Discard;
          end if;
          --  from and to are on the stack, to on top
-         O2c_BC.For_Enter (Bc_Slot, Integer'Value (To_String (By_Text)),
-                           Bc_Limit, Bc_Else);
+         O2c_BC.For_Enter (Bc_Slot, By_Val, Bc_Limit, Bc_Else);
          O2c_BC.Mark (Bc_Top);
       end if;
       Append_Body ("      " & V_Name (1 .. V_Len) & " := "
@@ -6481,8 +6491,7 @@ package body O2c_Compiler is
                    & V_Name (1 .. V_Len) & " + " & To_String (By_Text) & ";");
       Append_Body ("      end loop;");
       if O2c_BC.Bytecode_Mode then
-         O2c_BC.For_Next (Bc_Slot, Integer'Value (To_String (By_Text)),
-                          Bc_Limit, Bc_Top);
+         O2c_BC.For_Next (Bc_Slot, By_Val, Bc_Limit, Bc_Top);
          O2c_BC.Mark (Bc_Else);
          --  The loop variable lived in a frame slot; a module variable has
          --  to carry the final value back to its global.
