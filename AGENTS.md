@@ -71,6 +71,23 @@ are not. The coupling is real; it just needs writing down.
   symbols through `OBC_VM.Native_Id`; the emitter carries that dependency so
   the compiler does not grow a second path to the VM.
 - **Host-only targets** — `make vm-host`, `make tools-host` — need no Aegir.
+
+**Never describe the other repo in prose — use its API, or check it.** A
+comment in `vm/compat-aegir/` once asserted that the guest has no environment.
+It does (Aegir keeps variables as `ENV:<Name>` files, via `CLI.Get_Env`); the
+comment was false, nothing could check it, and a reader had to contradict it.
+Signature drift is already caught — an incompatible change fails the build —
+so the gap is *claims a build cannot see*, and the fix is to make the claim
+executable instead of writing it down. Prefer a call over a sentence.
+
+`vm/compat-aegir/aegir_interface.adb` is where that lives: it references every
+Aegir API o2c depends on, so drift fails a file whose only job is to fail.
+Deliberately **not** a version pin — both repos are under development, and a
+pinned revision is either stale on arrival or forces the two into lockstep.
+It is an interface check, evaluated against whatever Aegir is now. A unit
+nothing calls is never compiled (gprbuild builds only what a main can reach),
+so it is reached from `VM_Platform.Init` — an unreached probe passes while
+checking nothing, which is how its first version behaved.
   **`AEGIR_ROOT` is required** for anything touching the Aegir side:
   `make build AEGIR_ROOT=…`, and the guest tests.
 

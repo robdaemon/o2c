@@ -2,12 +2,17 @@
 --  trailer, cwd) and CLI.Exit_With closes the redirects, so the VM's
 --  output behaves like every other CLI program's.
 with Aegir_User.CLI;
+with Aegir_Interface;
 
 package body VM_Platform is
 
    procedure Init is
    begin
       Aegir_User.CLI.Init;
+      --  Reached, not merely present: gprbuild builds only the units a main
+      --  can reach, so a probe nothing calls is silently never compiled -
+      --  which is how the first version of it passed while doing nothing.
+      Aegir_Interface.Touch;
    end Init;
 
    function Resolve_Path (Path : String) return String is
