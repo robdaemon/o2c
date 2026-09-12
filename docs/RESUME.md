@@ -823,6 +823,53 @@ should pass immediately once the open-array actual is right.
 The tree is left at the verified commit; none of the above is committed.
 
 
+### 3p. DONE — both blockers were one mistake, and what is left is inside the callee
+
+The two findings in 3o turned out to be facets of the same error, and the
+diagnosis in 3o was right about the shape but wrong about where the fix goes.
+
+**1. `R.Typ` was being clobbered.**  `X_Ret_UT` ALREADY calls `Import_Type`
+(`o2c_compiler.adb:586`) and the factor path already sets
+`R.Typ := T_Ptr` with it (3518-3519).  The new call emission then set
+
+    R.Typ := (if Xs (XI).Ret then Xs (XI).Typ else T_Int);
+
+which OVERWROTE that with the export's scalar sentinel - and that is what
+produced `pointer type mismatch assigning f`.  My hand-rolled replacement looked
+like the fix only because it set `R.Typ := T_Ptr` again.  The fix is to set
+nothing: the type was already right.
+
+**2. The open-array actual was pushed twice.**  `Parse_Actual` pushes an OPEN
+formal's address AND its length itself (`o2c_compiler.adb:2294`, `2295`, `2308`),
+and in that branch only.  The factor path then pushed `Bc_Push_Arg` on top, one
+value too many.  Guarded now:
+
+    if not X_Formal (XI, K).Open then
+       Bc_Push_Arg (Arg_R (K));
+    end if;
+
+This is why the FFI arms never hit it: `XYplane.IsDot (x, y)` and `Dot (x, y,
+mode)` push their scalars by hand and have no open formal.
+
+**What is left, and it is a different bug.**  With both fixed the program
+compiles and the VM now reports a specific internal error instead of a vague one:
+
+    vm: internal error in phase 3: CONSTRAINT_ERROR (obc_vm.adb:2129 range check
+    failed)
+
+Line 2129 is `Top`'s `return Stack (SP - 1)` - an OPERAND-STACK UNDERFLOW during
+execution, so a balance inside the CALLEE.  The call itself works (`sum` passes,
+and the call site is reached); what is unbalanced is a construct in `Files`'
+bodies that no fixture has ever exercised - the candidates in `Old` are
+`new(f)`, `len(name)` on an open array, and `f^.name[i] := name[i]`, the nested
+array-field-index store.  Each is a small, separately testable construct, and
+that is where to look next: a fixture per construct, not a Files-shaped one.
+
+So the sequence for 3d is now: exercise those constructs directly, fix whichever
+is unbalanced, then the end-to-end check (`Files.Old` + `Files.Length`) should
+pass - `Files.Length` being the one-slot control case.
+
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

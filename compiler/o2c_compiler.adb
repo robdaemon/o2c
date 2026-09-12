@@ -3574,11 +3574,25 @@ package body O2c_Compiler is
                                        --  slots the local call path pushes and
                                        --  call the id the export carries.
                                        for K in 1 .. N_A loop
-                                          Bc_Push_Arg (Arg_R (K));
+                                          --  An OPEN formal is ALREADY pushed
+                                          --  by Parse_Actual - the address and
+                                          --  its length - so pushing it again
+                                          --  is one value too many and the
+                                          --  verifier rejects the whole image
+                                          --  as malformed.  Only scalar formals
+                                          --  are pushed here.
+                                          if not X_Formal (XI, K).Open then
+                                             Bc_Push_Arg (Arg_R (K));
+                                          end if;
                                        end loop;
                                        O2c_BC.Call_Proc (Xs (XI).Bc);
-                                       R.Typ := (if Xs (XI).Ret then Xs (XI).Typ
-                                                 else T_Int);
+                                       --  R.Typ and R.Ptr_UT are ALREADY set
+                                       --  from the export above: T_Ptr plus the
+                                       --  imported pointer type, when the result
+                                       --  is a module's exported POINTER type.
+                                       --  Overwriting R.Typ with the export's
+                                       --  scalar sentinel is what produced
+                                       --  "pointer type mismatch assigning f".
                                        R.Lit := False;
                                        R.Folds := False;
                                     elsif not (Eq_No_Case (FNm, "XYplane")
