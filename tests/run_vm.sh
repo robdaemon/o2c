@@ -284,6 +284,21 @@ fi
 #  ---- positive: hand-assembled Out.Char ------------------------------------
 #  Exercises native 4 independently of the emitter: two character codes go to
 #  the native, which prints the characters themselves.
+#  A finished thread must not hold a slot forever.  This starts and joins
+#  twenty threads against a table that holds sixteen: it passes only if each
+#  finished thread is released, so it fails the moment releasing regresses.
+if python3 "$ASM" "$ROOT/tests/vm/release.asm" "$WORK/release.obc" >/dev/null \
+   && timeout 60 "$VM" "$WORK/release.obc" >"$WORK/release.out" 2>"$WORK/release.err"
+then
+   if diff -u "$ROOT/tests/vm/release.out" "$WORK/release.out"; then
+      note "positive: release.asm (20 threads, 16 slots) reuses freed slots"
+   else
+      bad "release.asm output differs from tests/vm/release.out"
+   fi
+else
+   bad "release.asm failed: $(cat "$WORK/release.err")"
+fi
+
 #  JOIN waits for a thread.  main prints 1, spawns Worker, and must not print
 #  3 until Worker has printed 2 - so the order of the output is the test.  A
 #  join that did not park would print 1, then 3, then 2.

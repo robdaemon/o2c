@@ -1989,7 +1989,16 @@ package body OBC_VM is
                      end if;
                   end loop;
                   if Target = null then
-                     Note_At ("join on a thread that is not running", PC);
+                     --  Not live.  If the handle was ever issued then the
+                     --  thread has finished and been released - a finished
+                     --  thread hands nothing back, so there is nothing to
+                     --  wait for and nothing to collect.  Handles below the
+                     --  next one are issued; the rest never existed.
+                     if Handle < Next_Thread_Id then
+                        PC := PC + 1;
+                        return Ok;
+                     end if;
+                     Note_At ("join on a thread that was never started", PC);
                      return Bad_Target;
                   end if;
                   if Target.State /= Thread_Done then
@@ -2424,6 +2433,32 @@ package body OBC_VM is
          --  when the pass began.  Asking afterwards rather than tracking
          --  during is also what makes a voluntary YIELD and a spent quantum
          --  behave identically - both simply leave a context runnable.
+         --  Release threads that have finished.  Nothing is lost by it: a
+         --  thread's entry procedure takes no arguments and returns nothing,
+         --  so a finished thread holds nothing a joiner could still want.
+         --  Without this a program that starts more threads over its life
+         --  than the table holds would fail even though every one of them had
+         --  finished - which is a leak, not a ceiling, and the ceiling was
+         --  never argued for.  Done after the pass, not during it, so the
+         --  scan above is not disturbed by the table shifting underneath.
+         declare
+            Keep : Natural := 0;
+         begin
+            for I in 1 .. N_Contexts loop
+               if not (Live_Contexts (I) /= null
+                       and then Live_Contexts (I).Is_Thread
+                       and then Live_Contexts (I).State = Thread_Done)
+               then
+                  Keep := Keep + 1;
+                  Live_Contexts (Keep) := Live_Contexts (I);
+               end if;
+            end loop;
+            for I in Keep + 1 .. N_Contexts loop
+               Live_Contexts (I) := null;
+            end loop;
+            N_Contexts := Keep;
+         end;
+
          Busy := False;
          Blocked := False;
          for I in 1 .. N_Contexts loop
