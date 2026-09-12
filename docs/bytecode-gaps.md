@@ -70,6 +70,37 @@ So the base goes on the stack just before the index op, and the byte ops sit
 exactly where the integer ones do. **That rules out the operand order and the
 emission sites**: a byte op substituted 1:1 has the same stack discipline.
 
+**The cause, found by disassembling the CHAR case rather than the integer one.**
+`s[2] := c` emits only the operands - `LOAD_G 0`, `LOAD_CONST 2` - and *no index
+op at all*. So the index is left on the stack, and `Out.Char` prints it. That
+matches the symptom exactly, and it explains why the ops looked innocent: they
+are never emitted.
+
+The site is `Parse_Rec_Ptr_Chain`:
+
+```ada
+if VK = V_Arr and then UTypes (UT).Elem = T_Char then
+   D.K := D_Str;
+   return D;
+end if;
+```
+
+A CHAR array designator short-circuits to `D_Str` - "the whole array as a
+string" - **unconditionally**, overriding any index the selector loop has just
+parsed. `s[2]` is therefore classified as the whole string rather than as an
+indexed element, and the path that runs emits the base and the index and no op.
+Pre-existing: the branch has always been there, and CHAR arrays being refused
+is what kept it unreachable.
+
+The fix is at that branch - return `D_Str` only when no index was selected -
+and it is the *first* thing to do, before any of the opcode work, because the
+index op was never the problem.
+
+Earlier hypotheses that measurement disproved, recorded so they are not retried:
+the operand order, the emission sites, "a CHAR literal assignment stores a pool
+offset" (CHAR assignment is correct: `c := "a"` prints `a`, `ord (c)` is 97),
+and "the base address or the footprint". None survived a probe.
+
 What is left, and where to look next: the **base address** and the
 **footprint**. `Total_Slots` was changed to return `(N+2)/8` slots for a packed
 CHAR array, and `Global_Array` is handed that number — but `Load_Addr_G` yields
