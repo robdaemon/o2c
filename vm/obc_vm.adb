@@ -158,6 +158,11 @@ package body OBC_VM is
    Op_Store_Idx_B   : constant := 16#EC#;
    --  Copy a pool string into a packed CHAR array, NUL-terminating.
    Op_Copy_Str      : constant := 16#ED#;
+   --  Three-way compare of two packed CHAR arrays: pops both addresses,
+   --  pushes -1, 0 or 1.  One op rather than six, because Eq/Ne/Lt/Le/Gt/Ge
+   --  against zero then give every relational - and the space past 0xED but
+   --  before the reserved 0xF0 escape is one slot wide.
+   Op_Str_Cmp       : constant := 16#EE#;
 
    --  Instructions a thread may run before the VM takes the machine back.
    --  This is what makes scheduling preemptive: a thread that never calls
@@ -957,6 +962,13 @@ package body OBC_VM is
                   return Bad_Stack;
                end if;
                Depth := Depth - 2;
+               PC := PC + 1;
+            when Op_Str_Cmp =>
+               --  Two addresses in, one result out.
+               if Depth < 2 then
+                  return Bad_Stack;
+               end if;
+               Depth := Depth - 1;
                PC := PC + 1;
             when Op_Load_Idx_B =>
                if Depth < 2 then
@@ -1877,6 +1889,46 @@ package body OBC_VM is
                             (Globals (Natural (LE32 (Code, PC + 1)))
                                'Address)));
                PC := PC + 5;
+            when Op_Str_Cmp =>
+               declare
+                  R2 : constant U64 := Pop;
+                  R1 : constant U64 := Pop;
+                  function At1 (N : Natural) return Byte is
+                     B : Byte with Address =>
+                       System.Storage_Elements.To_Address
+                         (System.Storage_Elements.Integer_Address (R1)
+                          + System.Storage_Elements.Integer_Address (N));
+                  begin
+                     return B;
+                  end At1;
+                  function At2 (N : Natural) return Byte is
+                     B : Byte with Address =>
+                       System.Storage_Elements.To_Address
+                         (System.Storage_Elements.Integer_Address (R2)
+                          + System.Storage_Elements.Integer_Address (N));
+                  begin
+                     return B;
+                  end At2;
+                  K   : Natural := 0;
+                  A   : Byte;
+                  Bx  : Byte;
+                  Res : I64 := 0;
+               begin
+                  loop
+                     A  := At1 (K);
+                     Bx := At2 (K);
+                     if A /= Bx then
+                        Res := (if A < Bx then -1 else 1);
+                        exit;
+                     end if;
+                     exit when A = 0;
+                     K := K + 1;
+                  end loop;
+                  --  Signed, so the compiler's Lt/Gt compare the sign
+                  --  correctly: -1 survives the round trip through U64.
+                  Push (U64 (Res));
+               end;
+               PC := PC + 1;
             when Op_Copy_Str =>
                declare
                   Src : constant Natural := Natural (Pop);

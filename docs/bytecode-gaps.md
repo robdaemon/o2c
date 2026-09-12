@@ -210,6 +210,23 @@ range is reserved.  The natural instruction is a three-way compare that pops
 two addresses and pushes -1, 0 or 1, from which `Eq`/`Ne`/`Lt`/`Le`/`Gt`/`Ge`
 against zero give all six operators - one op rather than six.
 
+**Built to that design, and it reaches a second problem.**  `Op_Str_Cmp`
+(0xEE), its interpreter and verify clause, the enum entry and the emission in
+the string case of the relational block all work - the dump shows `ee` between
+the two operands and the `Eq` against zero after it.  But it still fails:
+**the operands are not on the stack when it runs.**
+
+In `f := s = t` the two `COPY_STR`s for the assignments consume the addresses
+the factor pushed, and nothing re-pushes them for the comparison - so a CHAR
+array designator pushes an address in `Out.String`'s context (where that code
+works) and nothing in a comparison context.  The `D_Str` early return in the
+chain is where the difference lives.
+
+That is the next thing to find, and it is one question: **does the factor push
+an address for a bare CHAR-array name, and if so on which paths?**  Dump
+`s := "hi"; f := s = t` and watch the depth either side of the `ee`.  The
+compare op itself is written and correct.
+
 ### 5. Inline (anonymous) array types
 
 `var v: array 4 of integer` fails with "a type name expected". An array type
