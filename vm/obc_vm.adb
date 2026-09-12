@@ -965,10 +965,14 @@ package body OBC_VM is
                Depth := Depth - 1;
                PC := PC + 1;
             when Op_Store_Idx_B =>
+               --  Three: the value, the index and the base - the same shape
+               --  as Store_Idx_I.  This said two, which is why the verifier
+               --  and the emitter disagreed: the verifier walked a loop body
+               --  once with a depth one too high, and rejected the loop.
                if Depth < 3 then
                   return Bad_Stack;
                end if;
-               Depth := Depth - 2;
+               Depth := Depth - 3;
                PC := PC + 1;
             when Op_Load_Idx_I =>
                if Depth < 2 then

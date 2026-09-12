@@ -36,6 +36,7 @@ OPS = {
     "SET_SYMDIFF": (0x40, 0), "SET_EQ": (0x41, 0), "SET_NE": (0x42, 0),
     "SET_IN": (0x43, 0), "SET_SINGLE": (0x44, 0),
     "LOAD_ADDR_G": (0x16, 4), "LOAD_FLD_I": (0x23, 2), "LOAD_FLD_R": (0x24, 2), "STORE_FLD_R": (0x27, 2), "LOAD_FLD_P": (0x25, 2), "STORE_FLD_P": (0x28, 2), "LOAD_CONST_P": (0x2C, 4), "ALLOC_NEW": (0x2A, 4), "STORE_FLD_I": (0x26, 2), "LOAD_IDX_I": (0x1D, 0), "STORE_IDX_I": (0x20, 0),
+    "LOAD_IDX_B": (0xEB, 0), "STORE_IDX_B": (0xEC, 0), "COPY_STR": (0xED, 0),
     "GUARD": (0xE0, 4), "TYPE_TEST": (0xE1, 4), "DISPATCH": (0xE2, 3),
     "YIELD": (0xE4, 0), "CALL_INDIRECT": (0xE5, 0),
     "DESC_OF": (0xE3, 0),

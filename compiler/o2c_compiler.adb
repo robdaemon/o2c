@@ -7933,6 +7933,7 @@ package body O2c_Compiler is
                   M : Unbounded_String;
                   CArg : Boolean := False;
                   Had_Width : Boolean := False;
+                  Str_Looped : Boolean := False;
                begin
                   if Head (1 .. H_Len) /= "Out" then
                      raise O2c_Error with "M3 calls only module Out (found '"
@@ -7983,6 +7984,71 @@ package body O2c_Compiler is
                            else
                               M := A.Text;
                               CArg := A.CStr;
+                              if O2c_BC.Bytecode_Mode
+                                and then Find (To_String (A.Text)) > 0
+                              then
+                                 declare
+                                    ASym : constant Natural :=
+                                      Find (To_String (A.Text));
+                                 begin
+                                    if Syms (ASym).UT > 0
+                                      and then UTypes (Syms (ASym).UT).Elem
+                                        = T_Char
+                                    then
+                                       declare
+                                          AU    : constant Natural :=
+                                            Syms (ASym).UT;
+                                          N     : constant Integer :=
+                                            UTypes (AU).Arr_Len;
+                                          I_Sl  : constant Natural :=
+                                            O2c_BC.Local ("o2c_str_i");
+                                          V_Sl  : constant Natural :=
+                                            O2c_BC.Local ("o2c_str_v");
+                                          L_Top : constant Natural :=
+                                            New_Bc_Label;
+                                          L_End : constant Natural :=
+                                            New_Bc_Label;
+                                          L_Bdy : constant Natural :=
+                                            New_Bc_Label;
+                                       begin
+                                          O2c_BC.Push_Int (0);
+                                          O2c_BC.Store_Local (I_Sl);
+                                          O2c_BC.Mark (L_Top);
+                                          O2c_BC.Load_Local (I_Sl);
+                                          O2c_BC.Push_Int (N);
+                                          O2c_BC.Bin (O2c_BC.Lt);
+                                          O2c_BC.Jump (O2c_BC.Jnz, L_Bdy);
+                                          O2c_BC.Jump (O2c_BC.Jmp, L_End);
+                                          O2c_BC.Mark (L_Bdy);
+                                          O2c_BC.Load_Addr_G
+                                            (O2c_BC.Global_Array
+                                               (Ada_Id (To_String (A.Text)),
+                                                Total_Slots (AU)));
+                                          O2c_BC.Load_Local (I_Sl);
+                                          O2c_BC.Bin (O2c_BC.Load_Idx_B);
+                                          O2c_BC.Store_Local (V_Sl);
+                                          O2c_BC.Load_Local (V_Sl);
+                                          O2c_BC.Push_Int (0);
+                                          O2c_BC.Bin (O2c_BC.Eq);
+                                          O2c_BC.Jump (O2c_BC.Jnz, L_End);
+                                          O2c_BC.Load_Local (V_Sl);
+                                          O2c_BC.Native_Call (4, 1);
+                                          O2c_BC.Load_Local (I_Sl);
+                                          O2c_BC.Push_Int (1);
+                                          O2c_BC.Bin (O2c_BC.Add);
+                                          O2c_BC.Store_Local (I_Sl);
+                                          O2c_BC.Jump (O2c_BC.Jmp, L_Top);
+                                          O2c_BC.Mark (L_End);
+                                          --  The member dispatch below runs
+                                          --  separately from this block and
+                                          --  would emit the pool-string
+                                          --  native too, on a stack this
+                                          --  loop has already emptied.
+                                          Str_Looped := True;
+                                       end;
+                                    end if;
+                                 end;
+                              end if;
                            end if;
                         end;
                      elsif Member = "Char" then
@@ -8058,7 +8124,9 @@ package body O2c_Compiler is
                            end if;
                            O2c_BC.Native_Call (0, 2);
                         elsif Member = "String" then
-                           O2c_BC.Native_Call (1, 1);
+                           if not Str_Looped then
+                              O2c_BC.Native_Call (1, 1);
+                           end if;
                         elsif Member = "Real" or else Member = "LongReal"
                         then
                            --  REAL and LONGREAL share a slot and the printing
