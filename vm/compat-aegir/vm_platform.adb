@@ -4,8 +4,15 @@
 with Aegir_User.CLI;
 with Aegir_User.Files;
 with Aegir_Interface;
+with Interfaces;
 
 package body VM_Platform is
+
+   --  The file server reports sizes, offsets and statuses as Unsigned_64, and
+   --  these functions compare them.  The operators are not directly visible
+   --  without this, and the three HOST suites never compile this file - only
+   --  run_m1 does, which is how the omission was caught.
+   use type Interfaces.Unsigned_64;
 
    procedure Init is
    begin
@@ -76,6 +83,76 @@ package body VM_Platform is
    begin
       null;
    end Rename_File;
+
+   --  Positioned file I/O.  Every one of these is the file server's own call,
+   --  with its status mapped onto the dialect's convention (0 = success) and
+   --  Stat onto its sentinel (-1 = no such file).  The Ada backend's emitted
+   --  helpers do exactly this, and these mirror them so that both backends'
+   --  Files behave the same in the guest.  Getting the AEGIR body of the seam
+   --  wrong is the failure the three host suites cannot see: only run_m1
+   --  builds this file.
+
+   function Stat_File (Path : String) return Long_Integer is
+      Sz : Aegir_User.Files.U64;
+   begin
+      Aegir_User.CLI.Init;
+      if Aegir_User.Files.Stat (Path, Sz) /= Aegir_User.Files.Status_Ok then
+         return -1;
+      end if;
+      return Long_Integer (Sz);
+   end Stat_File;
+
+   function Read_File (Path : String; Offset : Long_Integer;
+                       Buf : out String) return Integer is
+      Ct : Aegir_User.Files.U64;
+      St : Aegir_User.Files.U64;
+      Lim : constant Aegir_User.Files.U64 :=
+        Aegir_User.Files.U64 (Buf'Length);
+   begin
+      if Offset < 0 then
+         return 1;
+      end if;
+      Aegir_User.CLI.Init;
+      St := Aegir_User.Files.Read (Path, Aegir_User.Files.U64 (Offset),
+                                   Buf'Address, Lim, Ct);
+      if St /= Aegir_User.Files.Status_Ok then
+         return Integer (St);
+      end if;
+      return 0;
+   end Read_File;
+
+   function Write_File (Path : String; Offset : Long_Integer;
+                        Buf : String) return Integer is
+      Ct : Aegir_User.Files.U64;
+      St : Aegir_User.Files.U64;
+      Lim : constant Aegir_User.Files.U64 :=
+        Aegir_User.Files.U64 (Buf'Length);
+   begin
+      if Offset < 0 then
+         return 1;
+      end if;
+      Aegir_User.CLI.Init;
+      St := Aegir_User.Files.Write (Path, Aegir_User.Files.U64 (Offset),
+                                    Buf'Address, Lim, Ct);
+      if St /= Aegir_User.Files.Status_Ok then
+         return Integer (St);
+      end if;
+      if Ct = 0 then
+         return 1;
+      end if;
+      return 0;
+   end Write_File;
+
+   function Close_File (Path : String) return Integer is
+      St : Aegir_User.Files.U64;
+   begin
+      Aegir_User.CLI.Init;
+      St := Aegir_User.Files.Close (Path);
+      if St /= Aegir_User.Files.Status_Ok then
+         return Integer (St);
+      end if;
+      return 0;
+   end Close_File;
 
    function Get_Env (Name : String) return String is
    begin

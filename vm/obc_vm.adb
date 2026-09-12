@@ -487,6 +487,14 @@ package body OBC_VM is
       19 => (Sym => new String'("o2c_inint"), Pops => 1),
       20 => (Sym => new String'("o2c_inlong"), Pops => 1),
       21 => (Sym => new String'("o2c_inreal"), Pops => 1),
+      --  The positioned file primitives, the four the Files module is built on.
+      --  Appended after the input group, never renumbered: FStat takes the
+      --  name, FRead and FWrite the name plus an offset and the caller's
+      --  buffer, FClose the name.
+      22 => (Sym => new String'("o2c_fstat"), Pops => 1),
+      23 => (Sym => new String'("o2c_fread"), Pops => 3),
+      24 => (Sym => new String'("o2c_fwrite"), Pops => 3),
+      25 => (Sym => new String'("o2c_fclose"), Pops => 1),
       others => (Sym => null, Pops => 0));
 
    Native_Count : constant := Max_Natives + Max_Foreign;
@@ -517,6 +525,10 @@ package body OBC_VM is
       23 => 1,    --  o2c_inint: the out slot
       24 => 1,    --  o2c_inlong: the out slot
       25 => 1,    --  o2c_inreal: the out slot
+      26 => 1,    --  o2c_fstat: the name address
+      27 => 3,    --  o2c_fread: name, offset, buffer address
+      28 => 3,    --  o2c_fwrite: name, offset, buffer address
+      29 => 1,    --  o2c_fclose: the name address
       others => 0);
 
    --  Which natives produce a result.  Most write and return nothing; a
@@ -529,6 +541,13 @@ package body OBC_VM is
       --  into the shadow and report nothing.
       17 => True,
       18 => True,   --  o2c_planekey returns a CHAR
+      --  The four positioned file primitives ALL return a value, unlike
+      --  Delete and Rename: Stat a size (with -1 for "no such file"), the
+      --  other three the status the module stores in a Rider's `res`.
+      26 => True,
+      27 => True,
+      28 => True,
+      29 => True,
       others => False);
 
    --  Arguments handed to a native, leftmost first.  The table above gives
@@ -1476,6 +1495,98 @@ package body OBC_VM is
                   end if;
                   Park_I (Args (0), V);
                end if;
+               return Ok;
+            end;
+         when Max_Natives + 21 .. Max_Natives + 24 =>
+            --  o2c_fstat (26), o2c_fread (27), o2c_fwrite (28), o2c_fclose (29):
+            --  the positioned file primitives the Files module is built on.
+            --  All four RETURN a value - unlike Delete/Rename, which report
+            --  nothing - so they set Result and the interpreter pushes it:
+            --  Stat a size (with -1 for "no such file"), the other three the
+            --  status the module stores in a Rider's `res`.
+            --
+            --  Arguments are a NAME ADDRESS (NUL-terminated, as every string
+            --  here is) and, for read and write, an OFFSET and a BUFFER
+            --  ADDRESS.  The seam deals in Strings and statuses, so the bytes
+            --  are marshalled here: nothing below this line knows what an
+            --  address is, which is what lets the host and the guest share
+            --  one signature while their storage differs completely.
+            declare
+               function Byte_At (A : U64; N : Natural) return Byte is
+                  B : Byte with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A)
+                       + System.Storage_Elements.Integer_Address (N));
+               begin
+                  return B;
+               end Byte_At;
+
+               procedure Put_Byte_At (A : U64; B : Byte) is
+                  T : Byte with Address =>
+                    System.Storage_Elements.To_Address
+                      (System.Storage_Elements.Integer_Address (A));
+               begin
+                  T := B;
+               end Put_Byte_At;
+
+               function Name_At (A : U64) return String is
+                  Buf : String (1 .. 64);
+                  N   : Natural := 0;
+               begin
+                  loop
+                     exit when N = Buf'Last;
+                     declare
+                        B : constant Byte := Byte_At (A, N);
+                     begin
+                        exit when B = 0;
+                        N := N + 1;
+                        Buf (N) := Character'Val (Natural (B));
+                     end;
+                  end loop;
+                  return Buf (1 .. N);
+               end Name_At;
+            begin
+               case Idx is
+                  when Max_Natives + 21 =>
+                     Result := (Pushes => True,
+                                Value  =>
+                                  To_U64 (I64
+                                    (VM_Platform.Stat_File
+                                       (Name_At (Args (0))))));
+                  when Max_Natives + 22 =>
+                     declare
+                        Nm  : constant String := Name_At (Args (0));
+                        One : String (1 .. 1);
+                        St  : Integer;
+                     begin
+                        One (1) := ASCII.NUL;
+                        St := VM_Platform.Read_File
+                          (Nm, Long_Integer (To_I64 (Args (1))), One);
+                        --  The seam filled One from the file; put it where the
+                        --  caller's buffer is.  Files' rider holds a 1-char
+                        --  array here, which is why one byte is the unit.
+                        Put_Byte_At (Args (2), Byte (Character'Pos (One (1))));
+                        Result := (Pushes => True, Value => To_U64 (I64 (St)));
+                     end;
+                  when Max_Natives + 23 =>
+                     declare
+                        Nm  : constant String := Name_At (Args (0));
+                        One : String (1 .. 1);
+                        St  : Integer;
+                     begin
+                        One (1) := Character'Val
+                          (Natural (Byte_At (Args (2), 0)));
+                        St := VM_Platform.Write_File
+                          (Nm, Long_Integer (To_I64 (Args (1))), One);
+                        Result := (Pushes => True, Value => To_U64 (I64 (St)));
+                     end;
+                  when others =>
+                     Result := (Pushes => True,
+                                Value  =>
+                                  To_U64 (I64
+                                    (VM_Platform.Close_File
+                                       (Name_At (Args (0))))));
+               end case;
                return Ok;
             end;
          when Max_Natives + 14 .. Max_Natives + 16 =>

@@ -43,6 +43,39 @@ package VM_Platform is
    --  no status to report, so a procedure.
    procedure Rename_File (From, To : String);
 
+   --  ---- positioned file I/O ---------------------------------------------
+   --  The four the bytecode backend's Files module needs, and the reason the
+   --  seam grew past Delete/Rename: those two are one-shot, but reading and
+   --  writing are POSITIONED, and where the bytes live differs completely
+   --  between the two platforms - a real file on the host, a file-server call
+   --  in the guest.
+   --
+   --  All four deal in Strings and statuses, never in addresses: the VM
+   --  marshals the caller's buffer, so nothing here knows what a heap address
+   --  is.  0 means success and any other value is a status the caller stores;
+   --  Stat is the exception, with a SENTINEL, because that is the shape the
+   --  Files module is written against (`while ... (FStat (path) < 0) do` waits
+   --  for a file to appear).
+
+   function Stat_File (Path : String) return Long_Integer;
+
+   --  Read up to Buf'Length bytes from Offset.  At or past the end is success
+   --  with less read, not an error - which is what the guest's own helper does
+   --  and what the module's own end-of-file logic expects.
+   function Read_File (Path : String; Offset : Long_Integer;
+                       Buf : out String) return Integer;
+
+   --  Write Buf at Offset.  A file that does not exist is created, because
+   --  writing one is what creating it means here - the dialect has no separate
+   --  create - and an offset past the end extends the file.
+   function Write_File (Path : String; Offset : Long_Integer;
+                        Buf : String) return Integer;
+
+   --  Close.  Kept as a seam function rather than a no-op because the GUEST
+   --  must release a file-server handle; the host opens by name on every call
+   --  and has nothing to release, which its body says.
+   function Close_File (Path : String) return Integer;
+
    --  Environment variables.  This is the case the seam was built for: the
    --  host has a real environment, the guest keeps variables as ENV:<Name>
    --  files and reaches them through CLI.  The shared VM asks; only the

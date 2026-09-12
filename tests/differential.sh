@@ -158,6 +158,15 @@ list	ADA_BROKEN	emits Ada that will not compile: reference to the current instan
 newloop	ADA_BROKEN	emits Ada that will not compile: reference to the current instance of a type
 nested	ADA_BROKEN	emits Ada that will not compile: a component used before the record ends
 realarr	ADA_BROKEN	emits Ada that will not compile: expected type Boolean
+#  filesintr is the one fixture that is deliberately bytecode-only.  Its module
+#  is NAMED Files, because that is what makes the file intrinsics reachable at
+#  all - and the Ada path then emits calls to O2c_FDel/O2c_FStat/... whose BODIES
+#  are emitted only into the builtin Files module, never into a user module that
+#  merely carries the name.  So the Ada output references helpers it does not
+#  define.  The fixture's subject is the four natives, which the VM side verifies
+#  by effect (the byte read back is the byte written); there is nothing here for
+#  the Ada side to corroborate except this limitation.
+filesintr	ADA_BROKEN	emits Ada that will not compile: a user module named Files gets the intrinsics without the helpers the builtin's own body carries
 withguard	GOLDEN_SUSPECT	the Ada side does not implement WITH's skip; the VM and the golden DO, and Oberon's WITH skips, so the Ada side is the odd one out
 EOB
 

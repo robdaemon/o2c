@@ -3074,12 +3074,12 @@ package body O2c_Compiler is
                --  the argument's ADDRESS, in practice.  FRead and FWrite take
                --  three arguments and FClose one, and all three need natives
                --  that do not exist yet; the refusal is what keeps the module
-               --  honest until they do.
-               if O2c_BC.Bytecode_Mode then
-                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                    & "Files." & Cur.Text (1 .. Cur.Len)
-                    & " has no bytecode emission yet";
-               end if;
+               --  Honest until the natives existed: this branch produces Ada
+               --  text and no opcode, so a bytecode program compiled and then
+               --  used whatever was on the stack - the argument's ADDRESS, in
+               --  practice.  Ids 27/28/29 are those natives now, so the
+               --  bytecode half is emitted below, once the arguments are on
+               --  the stack.
                declare
                   Nm   : constant String := Cur.Text (1 .. Cur.Len);
                   Two  : constant Boolean :=
@@ -3115,6 +3115,19 @@ package body O2c_Compiler is
                   end if;
                   Expect (Lex.Tok_RParen, "')'");
                   Next;
+                  if O2c_BC.Bytecode_Mode then
+                     --  The arguments are on the stack in this order: the
+                     --  name's address, then - when there are two - the
+                     --  offset's value and the buffer's address.  That is the
+                     --  order ids 27 and 28 read them, and `Two` decides the
+                     --  arity as well as the id: FRead (27), FWrite (28),
+                     --  FClose (29).
+                     O2c_BC.Native_Call
+                       ((if Two
+                         then (if Eq_No_Case (Nm, "FREAD") then 27 else 28)
+                         else 29),
+                        (if Two then 3 else 1));
+                  end if;
                   R.Text := To_Unbounded_String (Ada_Nm & " ("
                                                  & To_String (A1.Text));
                   if Two then
@@ -3285,17 +3298,11 @@ package body O2c_Compiler is
             then
                --  M40 FFI: file size probe (builtin Files module only)
                --
-               --  REFUSED in bytecode mode, and that is not a formality: the
-               --  branch below sets R.Typ and R.Text and emits NO opcode, so a
-               --  bytecode program compiled, ran, and used whatever was on the
-               --  stack - which is the ADDRESS the argument had just pushed. A
-               --  silent wrong image, and the reason the whole Files module is
-               --  refused until FStat has a native to call (it is one of the
-               --  four the 3d plan has to add).
-               if O2c_BC.Bytecode_Mode then
-                  raise O2c_BC.Wrong_Construct with "bytecode backend: "
-                    & "Files.FStat has no bytecode emission yet";
-               end if;
+               --  Id 26 (o2c_fstat) is the native; the bytecode half is emitted
+               --  below, once the name's address is on the stack.  Before it
+               --  existed this branch set R.Typ and R.Text and emitted NO
+               --  opcode, so a bytecode program compiled and then used whatever
+               --  was on the stack - the argument's ADDRESS, in practice.
                Next;              --  past FStat
                Expect (Lex.Tok_LParen, "'(' after FStat");
                Next;
@@ -3307,6 +3314,12 @@ package body O2c_Compiler is
                   end if;
                   Expect (Lex.Tok_RParen, "')'");
                   Next;
+                  if O2c_BC.Bytecode_Mode then
+                     --  Id 26 (o2c_fstat): the name's address is on the stack,
+                     --  and the native returns the size - or -1 for "no such
+                     --  file", which is why the result type below is LONGINT.
+                     O2c_BC.Native_Call (26, 1);
+                  end if;
                   R.Text := To_Unbounded_String
                     ("O2c_FStat (" & To_String (A.Text) & ")");
                end;

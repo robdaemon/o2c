@@ -6,9 +6,9 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         305
-    fixtures        75 in tests/bc/
-    foreign natives 21 in vm/obc_vm.adb
+    commits         306
+    fixtures        76 in tests/bc/
+    foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
 The header names no commit hash on purpose: `HEAD` and `commits` describe the
@@ -601,6 +601,50 @@ natives still missing (ids 26–29: `o2c_fstat`, `o2c_fread`, `o2c_fwrite`,
 `o2c_fclose`, each needing a `VM_Platform` seam function in the spec **and both
 bodies**, host and Aegir). After those, the module compiles, and step 3 (the
 `Begin_Mode` ordering) is what makes it callable.
+
+### 3l. DONE — the four natives, and the Aegir trap sprung for real
+
+`o2c_fstat` (26), `o2c_fread` (27), `o2c_fwrite` (28) and `o2c_fclose` (29),
+appended after the input group with their arities and their "returns a value"
+flags, plus four `VM_Platform` functions in the spec and — the part that
+matters — **both** bodies.
+
+**The trap was sprung, and only `run_m1` caught it.** Three host suites passed
+with the Aegir body missing a `use type Interfaces.Unsigned_64;`, so the guest
+build failed on operators that were not directly visible:
+
+    vm_platform.adb:92:43: error: operator for type "Interfaces.Unsigned_64"
+    is not directly visible
+
+That is exactly what the trap list predicts — the three host suites cannot see
+this file — and it is worth recording that the prediction held.
+
+**The natives are verified BY EFFECT**, not by compiling. The intrinsics are
+gated on the module being `Files`, so `tests/bc/filesintr.ob2` IS a module named
+`Files`, which is what makes them reachable at all:
+
+    absent      FStat on a path that was just deleted reports -1
+    write=0     FWrite puts a byte at offset 0
+    size=1      ... and Stat then reports ONE byte, read from the filesystem
+    read=0Q     FRead replaces a buffer holding something else, and what it
+                reads is the byte that was written
+    close=0
+
+`read=0Q` is what makes it a real test: the buffer held `z` first, so a read
+that did nothing would print `z`. The file is deleted first, so "absent" is a
+fact rather than an assumption, and deleted again at the end, so the fixture is
+hermetic and idempotent.
+
+**That fixture is deliberately bytecode-only.** A user module named `Files` gets
+the intrinsics but not the emitted `O2c_F*` helper BODIES, which live only in the
+builtin module — so its Ada output references helpers it does not define. The
+differential flags it, and it is recorded with that reason rather than hidden:
+the fixture's subject is the four natives, and the VM side verifies them.
+
+**State of the path:** the whole `Files` module compiles to bytecode with real
+native calls, and the four primitives are verified by effect. What is left of 3d
+is **step 3** — the `Begin_Mode` ordering — which is what lets a *user* program
+call `Files.Old`/`Read`/`Close` rather than only the module compiling.
 
 ## 4. Method — what worked, and what did not
 
