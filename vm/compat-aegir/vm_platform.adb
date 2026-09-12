@@ -27,9 +27,29 @@ package body VM_Platform is
      (30000);
    --  50 min: longer than any boot
 
-   --  No environment in the guest: the override is a host-test facility.
+   --  The guest has an environment too: Aegir keeps variables as ENV:<Name>
+   --  files, and M51's Env builtin reads and writes them through this very
+   --  call.  So O2C_QUANTUM works here the same way it does on the host, and
+   --  the guest test can be driven at a different quantum - which matters,
+   --  because the guest is the only place the VM runs on the real target.
    function Quantum_Override return Natural is
-     (0);
+      Raw : constant String := Aegir_User.CLI.Get_Env ("O2C_QUANTUM");
+      N   : Natural := 0;
+   begin
+      --  Digits only, as on the host: a malformed value is ignored rather
+      --  than guessed at, because a harness silently running at a quantum it
+      --  did not ask for is worse than one that visibly did not take effect.
+      if Raw'Length = 0 then
+         return 0;
+      end if;
+      for C of Raw loop
+         if C not in '0' .. '9' then
+            return 0;
+         end if;
+      end loop;
+      N := Natural'Value (Raw);
+      return N;
+   end Quantum_Override;
 
    procedure Exit_With (Ok : Boolean) is
    begin
