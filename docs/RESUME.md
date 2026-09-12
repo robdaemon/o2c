@@ -1044,6 +1044,50 @@ code the qualified path emits around `Call_Proc` versus the unqualified path
 CALL, the value that call already left on the stack.
 
 
+### 3u. DONE — the duplicate push, and where the chase stops
+
+`e2` was the probe that settled the shape of the problem: `u4`'s code (one call's
+result used as the next call's argument) with LOCAL callees prints
+`local nested: zero`, so nesting is fine, results-as-operands are fine, and the
+difference is the qualified path's own emission - which is mine, and about
+thirty lines of it.
+
+The one structural difference was that it pushed `Bc_Push_Arg` for every actual
+**in addition to** what `Parse_Actual` had already pushed.  The local call path
+(`o2c_compiler.adb:9266-9288`) emits its `Call_Proc` with no argument code at all
+precisely because `Parse_Actual` pushes - the value, or for an OPEN formal the
+address and its length.
+
+**Removing it is a real fix, measured on two cases rather than one:**
+
+    u4  before: "vm: malformed code"      after: runs
+    u3  before: garbage                   after: garbage
+
+A rejected image became a running one.  (The earlier attempt at this same removal
+was measured on `u3` alone, which is exactly how a real fix gets reverted as a
+non-fix - and it was.  Measuring both is what makes it one.)
+
+**What is left is a different class**, and it is where I stop chasing:
+
+    u4 / u3 / useold2 all RUN now, and all return the WRONG VALUE
+
+Since the call now pushes exactly what the local path pushes, the remaining
+difference between a local and a qualified call is the FORMAL DESCRIPTOR.
+`X_Formal` (`o2c_compiler.adb:562-575`) rewrites an imported formal whose exported
+type is a user type into `F.Typ := T_Int` with `F.UT := Import_Type (...)`, so
+`Parse_Actual` is handed a formal that looks scalar-with-a-user-type.  A pointer
+pushed through that route - truncated to an integer width, or pushed as an
+address rather than as a value - would give a callee that dereferences something
+valid-looking and returns a plausible wrong number, with no trap.  That is the
+next hypothesis, and `u3` is its reproduction.
+
+**The stopping rule this section exists to state**: if a probe does not shrink the
+reproduction or eliminate a hypothesis, stop and switch to natives rather than
+chase.  This iteration shrank it (a rejected image became a running one), so it
+continued; the next one has to do the same or 3d switches to making the rest of
+the Files API FFI natives, as `Delete` and `Rename` already are.
+
+
 ## 4. Method — what worked, and what did not
 
 **Measure; do not infer.** Every wrong turn this session came from an inference

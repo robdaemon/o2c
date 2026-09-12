@@ -3601,18 +3601,17 @@ package body O2c_Compiler is
                                        --  so this is an ordinary call: push the
                                        --  slots the local call path pushes and
                                        --  call the id the export carries.
-                                       for K in 1 .. N_A loop
-                                          --  An OPEN formal is ALREADY pushed
-                                          --  by Parse_Actual - the address and
-                                          --  its length - so pushing it again
-                                          --  is one value too many and the
-                                          --  verifier rejects the whole image
-                                          --  as malformed.  Only scalar formals
-                                          --  are pushed here.
-                                          if not X_Formal (XI, K).Open then
-                                             Bc_Push_Arg (Arg_R (K));
-                                          end if;
-                                       end loop;
+                                       --  NOTHING is pushed here.  Parse_Actual
+                                       --  already pushed every actual - its
+                                       --  value, or for an OPEN formal its
+                                       --  address and length - which is why the
+                                       --  local call path emits its Call_Proc
+                                       --  with no argument code of its own.
+                                       --  Pushing again gave the callee a
+                                       --  duplicate of each argument: u3 came
+                                       --  back garbage, u4's image was rejected
+                                       --  as malformed, while the identical
+                                       --  shape with LOCAL callees (e2) worked.
                                        O2c_BC.Call_Proc (Xs (XI).Bc);
                                        --  R.Typ and R.Ptr_UT are ALREADY set
                                        --  from the export above: T_Ptr plus the
