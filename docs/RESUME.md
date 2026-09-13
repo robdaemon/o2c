@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         337
+    commits         338
     fixtures        80 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -1718,6 +1718,61 @@ milestone, not a next-step.
 
 Metric unchanged: `hello.ob2` refuses at `Geom.Sqr`.
 
+
+### 3aj. AUDIT — BLOCK: three widened acceptances, two of them high
+
+An independent review of `git diff 37ebb6e..HEAD -- compiler/ vm/` (the
+bytecode-mode and type-coverage work) returns **block**, and the findings are the
+class the suites cannot see: new acceptances that can emit a WRONG VALUE where the
+old code refused.
+
+BLOCKING
+
+1. o2c_compiler.adb:1105 (high).  `Fields_Allowed` now accepts a record field that
+   is `ARRAY OF <user type>` (1315-1321), but `Total_Slots`' FIELD-array arm still
+   sizes such a field as `N + Arr_Len` instead of
+   `Arr_Len * Total_Slots (Elem_UT)` - the standalone-array arm (1081-1084) does it
+   right.  So
+       TYPE T = RECORD x, y: INTEGER END;
+            P = RECORD a: ARRAY 2 OF T; b: INTEGER END
+   gets Total_Slots(P) = 3 instead of 5, and `b` is placed inside `a`'s second row:
+   silent aliasing and an undersized run where the old code refused.  This is 3ac's
+   fix applied to one arm and not its sibling - the same asymmetry as the `AU > 0`
+   case in 3ah, in my own work.
+
+2. o2c_compiler.adb:2093 (high).  The row-stride block added in 3ac re-derives the
+   base with NONE of the handling its sibling (2057-2071) was fixed for: no
+   `Nested`, no `Is_Ptr` test.  For `p^.field[i]` with a field that is an array of
+   records, `Base_On_Stack` is False and `Nested > 0`, so it calls `Global_Array`
+   with `Total_Slots (pointer) = 0` (the "needs a non-zero length" refusal the
+   2048-2056 comment says was fixed), and where the address IS already on the stack
+   it adds the global base ON TOP of the offset address - wrong address plus a
+   stray stack value.
+
+3. o2c_compiler.adb:5091 (medium).  The const capture keys on `Typ = T_Str and
+   Length (Text) > 0`, but `T_Str` is produced by non-literal paths too (3564,
+   4138, 4184, 4868).  The use site (4255-4261) strips quotes only when both ends
+   are `"`, otherwise it pushes the raw Ada text; an embedded doubled quote is
+   never un-doubled.  The fixture uses the constant only with `Out.String`, so
+   nothing covers it.  Review's own caveat: it could not positively trigger this -
+   a `CONST t = s` chain appears to refuse because `R.Text` stays empty in bytecode
+   mode - so the fix is to capture only on a genuine literal and refuse otherwise.
+
+NON-BLOCKING: the removed char-index block is correctly folded into the array arm,
+so nothing newly dead; `Ok_Arr` is properly guarded and a pointer element cannot
+reach the stride-0 path; the `Depth > 8` guard is unreachable for arrays but
+recursive array types cannot be declared, so no unbounded recursion was added.
+
+REQUIRED, in the audit's words: recurse in the FIELD-array arm of `Total_Slots`;
+give the row-stride block the same base derivation as its sibling; capture
+`Const_Text` only for a genuine literal and refuse when a `T_Str` constant has none;
+and add the fixtures the suites cannot see - an array-of-multi-slot-record field,
+`p^.arrOfRecord[i]`, and a non-literal string constant.
+
+So the stretch's tree is green by its tests and NOT trustworthy: three of the seven
+changes widened what is accepted, and only the first fixture of each shape exists.
+Nothing here is reverted yet; the two high findings are the next work, with their
+fixtures, before any milestone.
 
 ## 4. Method — what worked, and what did not
 
