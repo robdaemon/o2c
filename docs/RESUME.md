@@ -1580,6 +1580,21 @@ Two things this attempt settled, both worth keeping:
 Reverted: a wrong answer is worse than a refusal, which is the whole point of this
 backend.  Item 3 stays refused.
 
+Fixture, kept here until it can pass (a registered fixture that cannot compile
+breaks `run_bc`, which is why it did not stay in `tests/bc/`):
+
+    module Strconst;
+    import Out;
+    const Greeting = "hello from Oberon-2";
+    const Twice = "again";
+    begin
+      Out.String(Greeting); Out.Ln;
+      Out.String(Twice); Out.Char(" "); Out.String(Greeting); Out.Ln
+    end Strconst.
+
+    golden:  hello from Oberon-2
+             again hello from Oberon-2
+
 
 ## 4. Method — what worked, and what did not
 
