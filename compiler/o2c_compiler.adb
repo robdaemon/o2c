@@ -122,6 +122,7 @@ package body O2c_Compiler is
       --  text was a literal the VM can push.
       Const_Val : Integer := 0;
       Const_Usable : Boolean := False;
+      Const_Text : Unbounded_String;
       Bc_Proc : Natural := 0;      --  bytecode procedure id (Begin_Proc)
       Foreign : Unbounded_String;  --  EXTERN: the C symbol this binds to
       Foreign_Native : Natural := 0;  --  the native id it resolves to
@@ -4245,7 +4246,35 @@ package body O2c_Compiler is
                end;
             else
                if O2c_BC.Bytecode_Mode then
-                  if Syms (Id).Kind = S_Const then
+                  if Syms (Id).Kind = S_Const
+                    and then Length (Syms (Id).Const_Text) > 0
+                  then
+                     declare
+                        T : constant String := To_String (Syms (Id).Const_Text);
+                     begin
+                        if T'Length >= 2 and then T (T'First) = '"'
+                          and then T (T'Last) = '"'
+                        then
+                           O2c_BC.Push_Str (T (T'First + 1 .. T'Last - 1));
+                        else
+                           O2c_BC.Push_Str (T);
+                        end if;
+                     end;
+                     R.Typ := T_Str;
+                     R.CStr := False;
+                     R.Lit := False;
+                     R.Folds := False;
+                     --  Do the shared tail's two jobs here - consume the
+                     --  identifier with Next, and return - because NOT doing
+                     --  them let control fall through to that tail's Bc_Load,
+                     --  which minted a zero global and pushed 0 ON TOP of the
+                     --  string offset.  Native 1 pops one operand, took the 0,
+                     --  and printed "0".  Emitted sequence without this:
+                     --  [LOAD_CONST <offset>, LOAD_G <slot>, CALL_NATIVE 1,1]
+                     --  against the literal's [LOAD_CONST <offset>, CALL 1,1].
+                     Next;
+                     return R;
+                  elsif Syms (Id).Kind = S_Const then
                      --  A constant has no storage to load: its value is the
                      --  value.  Only a plain literal can be pushed, so a
                      --  computed constant is refused here rather than becoming
@@ -5059,6 +5088,9 @@ package body O2c_Compiler is
       --  Text that is not a plain literal leaves Const_Usable false, and using
       --  it in bytecode mode is refused where the constant is used rather than
       --  silently reading a zero.
+      if V.Typ = T_Str and then Length (V.Text) > 0 then
+         Syms (N_Sym).Const_Text := V.Text;
+      end if;
       if V.Folds then
          --  A folded INTEGER expression - a literal, a computed one, or a
          --  reference to another constant.  The value came through the

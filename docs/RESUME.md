@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         335
-    fixtures        79 in tests/bc/
+    commits         336
+    fixtures        80 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -1629,6 +1629,52 @@ narrow enough to hand over:
     for each of those two arguments and report the difference.
 
 The fixture and its golden stay in 3af until a fix passes them.
+
+
+### 3ah. DONE — item 3: string constants
+
+A named string constant now works: `Out.String (Greeting)` prints its text.
+Fixture `tests/bc/strconst.ob2` with a hand-computed golden, corroborated by both
+backends (51 fixtures corroborated, up from 50).
+
+**The fix is three parts**, and one of them is the whole bug:
+
+1. `Const_Text : Unbounded_String` on the symbol record - a constant is not
+   storage, so a string one travels as its text, exactly as a literal does;
+2. the capture at the declaration, guarded on `V.Typ = T_Str` and NOT on
+   `V.Lit`, which is measured FALSE for a string constant - the guard that could
+   not be true;
+3. the push at the use site, mirroring a LITERAL's shape: `Push_Str`, `CStr =
+   False` (a literal is `cstr=FALSE`; `CStr` means "a whole ARRAY OF CHAR
+   VARIABLE"), and - the decisive part - **the shared tail's two jobs, `Next`
+   and `return`, done inside the branch**.
+
+**Why that last part is the bug**, from the read-only pass: without it, control
+fell through to the shared identifier tail's `Bc_Load`, which minted a ZERO global
+and pushed `0` on top of the pool offset.  Native 1 pops one operand, took the 0,
+and printed it:
+
+    literal:  [LOAD_CONST <offset>, CALL_NATIVE 1,1]
+    constant: [LOAD_CONST <offset>, LOAD_G <slot>, CALL_NATIVE 1,1]   <- extra
+
+Two smaller real bugs fell out on the way: `Out.String` computed
+`UTypes (AU).Arr_Len` with `AU = 0` for anything with no user type of its own -
+its own `AU > 0` test two lines below already assumed that guard - and an early
+`return R` in the factor path is NOT equivalent to falling through, because the
+tail consumes the identifier with `Next`; skipping that produced
+`expected ')' ... found ident`.
+
+**Method note.** Three edits produced no observable change and the traces proved
+they were in the compiler - so the emission was elsewhere and guessing had failed.
+Handing the read-only question to the `explore` subagent named it in one pass, for
+the second time (item 1 was the first).  That is now the established move for a
+stall in this front end, and it is cheaper than a fourth guess.
+
+**Metric**: `hello.ob2` now refuses at `Geom.Sqr is not yet supported` - the type
+block and the constant are behind us, and the next item is a USER LIBRARY
+procedure call, which is a different class from everything in 3w-3ah.  Its size is
+not yet measured, and per the sizing rule it should be measured before it is
+worked.
 
 
 ## 4. Method — what worked, and what did not
