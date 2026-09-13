@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         330
+    commits         331
     fixtures        79 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -1504,6 +1504,43 @@ push.  That is item 3.
 
 All seven suites green, 50 fixtures corroborated by both backends (up from 49),
 zero warnings.
+
+
+### 3ae. ITEM 3 MEASURED — a string constant resolves, but the print path crashes
+
+`Greeting` is a string constant:
+
+    const Greeting = "hello from Oberon-2";     (hello.ob2:39)
+    Out.String (Greeting);                      (hello.ob2:178)
+
+The refusal is for any `S_Const` that did not fold to an integer, and the backend
+does have a pool (`O2c_BC.Push_Str`) - used for string LITERALS - but `Sym` had no
+field for a constant's text, so there was nothing to push.
+
+**Three measurements, and the first one was a mistake worth recording.**
+
+    CONST Greeting lit=FALSE folds=FALSE typ=T_STR text='"hello from Oberon-2"'
+
+A string constant arrives as `typ=T_STR` with its text QUOTED, and **`V.Lit` is
+FALSE** for a string - so the first capture, guarded on `V.Lit`, silently never
+fired and the refusal stayed.  That is the "guard that cannot be true" mistake,
+and the trace is what exposed it (the refusal alone looked like the fix doing
+nothing).
+
+**With the guard corrected the const resolves**: the progress metric moved off
+`Greeting` entirely.  But the EMISSION crashes:
+
+    raised CONSTRAINT_ERROR : o2c_compiler.adb:9066 index check failed
+
+so `Out.String` on a constant takes a path that indexes something a
+pool-pushed value does not satisfy.  `R.CStr := True` - the marker that serves a
+whole-array-of-char variable - is evidently not what that path needs for a
+constant, and a string LITERAL is the control case that says so: literals work,
+and they set whatever is missing.  Reading 9066 against the literal path is the
+next step, and it is one comparison, not a hunt.
+
+**Reverted**, because a compiler that raises is worse than one that refuses, and
+the item stays refused meanwhile.
 
 
 ## 4. Method — what worked, and what did not
