@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         340
-    fixtures        80 in tests/bc/
+    commits         341
+    fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -1885,6 +1885,57 @@ two cases reaches the branch with a base, and which needs one built.
 
 `recarr` and `ptrarr` fixtures remain in 3ak as sources.  Both findings stay OPEN,
 and `nestedarr` must pass with them.
+
+### 3am. AUDIT FIX 2 (high) — the pointer-field base, FIXED and corroborated
+
+The instrumented run that 3al asked for gave the incoming state for both shapes,
+and that is what settled it:
+
+    standalone array (nestedarr):  base_ptr=FALSE base_slots=8  nothing on the stack
+    pointer field    (recarr):     base_ptr=TRUE  base_slots=0  -> Global_Array
+
+For the pointer field the base is a POINTER, so `Global_Array` was being handed
+`Total_Slots (pointer) = 0` - the refusal "an array needs a non-zero length" WAS
+the bug, exactly as the audit predicted.  The branch now derives the base the way
+the scalar sibling does: the whole run at the walked slot when the base is not a
+pointer and nothing is on the stack, `Nested` when there is an offset, and
+otherwise the address the chain already has.
+
+Landed with `tests/bc/recarr.ob2` (the pointer half), corroborated by BOTH
+backends - 52 fixtures now, up from 51 - and every regression guard still passes:
+`nestedarr`, `longfield`, `strconst`, `lenopen`, `filesintr`.
+
+Two things about the way this one landed:
+
+- the differential refused the fixture at first with `"p" conflicts with
+  declaration at line 20` - Ada being case-insensitive, so `type P` collides with
+  `var p`, which is the documented Ada-side limit that recmix/recreal are recorded
+  for.  Rather than record another limit, the fixture was RENAMED (`PRec`, `ptr`),
+  so it now corroborates instead of documenting a limitation;
+- three attempts failed before this one, and what made the third work was a
+  measurement rather than a patch: the incoming state of the branch for both
+  shapes.  My two earlier attempts were approximations of the audit's required
+  shape, and both were wrong in ways only that state could show.
+
+### STILL OPEN - audit finding 1 (high): a record field that is an array of records
+
+By value, the same shape still mis-sizes:
+
+    type T = record x, y: integer end;
+    type A2T = array 2 of T;                  (* two slots per element *)
+    type PRec = record a: A2T; b: integer end;
+    var r: PRec;
+    (* r.a[0].x := 1; r.a[0].y := 2; r.a[1].x := 3; r.a[1].y := 4; r.b := 5 *)
+
+    observed:  1 5 3 4 5        expected:  1 2 3 4 5
+
+`b` reads back as `a[0].y`'s value, so `b`'s offset IS `a[0].y`'s: `Total_Slots
+(A2T)` is still 2, not `2 * Total_Slots (T)` = 4.  The field-arm edit that makes
+it recurse is in the tree, so the next question is measured, not guessed: is that
+arm even reached for an array field, or does the offset come from elsewhere?
+
+Its source is kept here and NOT in tests/bc/, because it fails and a failing
+fixture breaks run_bc.
 
 ## 4. Method — what worked, and what did not
 

@@ -1103,7 +1103,8 @@ package body O2c_Compiler is
                   N := N + 1;
                elsif UTypes (U).F (F).UT /= 0 then
                   if UTypes (UTypes (U).F (F).UT).Arr_Len > 0 then
-                     N := N + Natural (UTypes (UTypes (U).F (F).UT).Arr_Len);
+                     --  Recurse, exactly as the standalone arm above does.
+                     N := N + Total_Slots (UTypes (U).F (F).UT, Depth + 1);
                   elsif not UTypes (UTypes (U).F (F).UT).Is_Ptr then
                      N := N + Total_Slots (UTypes (U).F (F).UT, Depth + 1);
                   else
@@ -2090,9 +2091,22 @@ package body O2c_Compiler is
                      --  what made two rows alias.
                      O2c_BC.Push_Int (Total_Slots (UTypes (UT).Elem_UT) * 8);
                      O2c_BC.Bin (O2c_BC.Mul);
-                     if not D.Base_On_Stack then
+                     --  Derive the base exactly as the scalar sibling does.
+                     --  Measured for both shapes: a standalone array arrives
+                     --  with base_ptr=FALSE, base_slots=8, nothing on the stack
+                     --  -> the whole run; a POINTER field arrives with
+                     --  base_ptr=TRUE and Total_Slots=0 -> no Global_Array at
+                     --  all (that refusal WAS the bug), and its address is what
+                     --  the chain already has.
+                     if not UTypes (Base_UT).Is_Ptr and then not D.Base_On_Stack
+                     then
                         O2c_BC.Load_Addr_G
-                          (O2c_BC.Global_Array (Base_Name, Total_Slots (Base_UT)));
+                          (O2c_BC.Global_Array
+                             (Base_Name, Total_Slots (Base_UT))
+                           + Nested / 8);
+                     elsif Nested > 0 then
+                        O2c_BC.Push_Int (Nested);
+                        O2c_BC.Bin (O2c_BC.Add);
                      end if;
                      O2c_BC.Bin (O2c_BC.Add);
                      D.Base_On_Stack := True;
