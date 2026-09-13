@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         341
+    commits         342
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -1936,6 +1936,68 @@ arm even reached for an array field, or does the offset come from elsewhere?
 
 Its source is kept here and NOT in tests/bc/, because it fails and a failing
 fixture breaks run_bc.
+
+### 3an. PLAN — the IR refactor (M53's missing layer)
+
+Decision: build the IR.  M53 records the architecture as STACK bytecode with a
+THREE-ADDRESS IR underneath; the measurements below are that layer's absence.
+
+    compiler/o2c_compiler.adb   12,263 lines   (parser + Ada backend + bytecode)
+    O2c_BC.Bytecode_Mode           122 sites
+    O2c_BC.* emitter calls         498         (from inside the parser)
+    Append_Body                     87
+    bytecode refusal strings        51         (hand-maintained, not derived)
+    Parse_Factor                 1,753 lines, 105 emitter calls in it
+
+So emission is inline in the recursive-descent parser, the two backends
+interleave per construct, and there is no intermediate form.  What that costs,
+measured this session: the silent-no-emission class is *inevitable* (nothing
+forces a second code path to exist and "no case" is indistinguishable from "no
+code"), and the calling convention is duplicated across sibling branches with
+ad-hoc state (`D.Base_On_Stack`, `Nested`) - which is why one base-derivation fix
+took three attempts.
+
+**Target shape.**  A three-address IR (quads) with typed values, built by the
+front end and consumed by the backend.  A LOWERING pass goes quads -> stack
+ops, and that pass is where the calling convention lives - in ONE place, which
+is the whole point.  The walker is TOTAL over node kinds, so an unhandled
+construct is a compile error in the compiler rather than a silent image.
+
+**Migration, stage by stage, each independently landable.**  The 51 fixtures
+corroborated by BOTH backends are the regression net for every step, and the Ada
+path keeps working throughout (the differential is the arbiter).
+
+    M1  the seam: compiler/o2c_ir.ads/.adb - IR types, builders, a walker
+        interface.  NO parser changes, so no fixture can move.  Lands alone.
+    M2  one construct end to end: a scalar assignment to a local.  The parse
+        builds IR for it and the bytecode for it is emitted FROM the IR; every
+        other construct still goes through the inline path.  Proves the seam.
+    M3  designators and subscripts - migrated first on purpose, because that is
+        where the duplicated base derivation and the calling convention live.
+    M4  calls, including the cross-module case that 3d is parked on: the
+        convention moves into the lowering pass and stops being per-branch.
+    M5  statements, then expressions, then the type/layout layer.
+    M6  optionally, the Ada backend emits from the IR too - or is retired, which
+        M53 already anticipates.
+
+**Risks, named.**
+
+- Two paths exist during migration.  Mitigated by one construct per commit and
+  by the fixture net; the risk is real and it is the price of landing per stage
+  instead of in one big step.
+- A three-address IR needs the lowering pass to do real work (temporaries,
+  evaluation order, stack discipline).  That is NEW work, not a reshuffle - and
+  it is also the only place that can fix the class of bug that cost 3x.
+- The Ada path must not move.  The differential arbitrates every step.
+
+**Preconditions before M1.**  Close the two open silent-wrong findings, because
+refactoring around a path that answers wrongly risks keeping it:
+
+    1. the array-of-record FIELD size (Total_Slots (A2T) = 2, must be 4) - 3am;
+    2. the const capture keyed on T_Str rather than a genuine literal - 3am/3aj.
+
+Both are small, both are layout/front-end rather than IR, and both are the class
+that must not be carried into the new pipeline.
 
 ## 4. Method — what worked, and what did not
 
