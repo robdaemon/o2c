@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         338
+    commits         339
     fixtures        80 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -1773,6 +1773,79 @@ So the stretch's tree is green by its tests and NOT trustworthy: three of the se
 changes widened what is accepted, and only the first fixture of each shape exists.
 Nothing here is reverted yet; the two high findings are the next work, with their
 fixtures, before any milestone.
+
+### 3ak. AUDIT FIXES — attempted, reverted, and the two results identify the shape
+
+Attempted all three of the audit's findings and reverted, because one of them
+regressed a landed fixture.
+
+1. `Total_Slots`' field-array arm -> recurse (`N := N + Total_Slots (field, Depth+1)`)
+   instead of adding `Arr_Len`.  Compiles; `recarr` prints NOTHING.
+   A measurement gap of mine: I discarded the VM's stderr, so "nothing" may be a
+   trap.  The next attempt captures both streams - never conclude from a truncated
+   failure.
+
+2. The row-stride block derives its base as the scalar sibling does
+   (`not Is_Ptr and then not Base_On_Stack -> Load_Addr_G (Global_Array (...) +
+   Nested/8)`, else `Nested`).  **`ptrarr` passes** - the intent is right - but
+   `nestedarr`, a landed fixture, then MISMATCHES.
+
+3. Capture `Const_Text` only for a genuinely quoted literal (else the constant
+   takes the loud refusal).  Untested: nothing exercises it yet.
+
+**What the two results say together** is the useful part.  #2 works where the base
+is a POINTER (`ptrarr`, where the sibling block does not run) and breaks where it
+is a standalone array (`nestedarr`, where it evidently DOES).  So the sibling block
+and mine are both satisfied at once, and the base is pushed twice.  The audit read
+the control flow as "the sibling does not run for a user-typed element"; the
+`nestedarr` regression says otherwise, at least for a standalone array.
+
+So the fix is not a mirror, it is a SHARING: put the base derivation in the
+sibling's own block - where it is already correct and already runs - and leave only
+the row SCALING (`Push_Int (row bytes); Mul; Add; Base_On_Stack := True`) in the
+user-element branch.  That is one edit instead of a duplicate, and it cannot
+double-push by construction.
+
+Fixtures for the next attempt (kept here; NOT in tests/bc/, because a registered
+fixture that cannot compile - or that fails like `recarr` did - breaks run_bc, and
+the differential globs tests/bc/*.out, so a stray golden breaks that too):
+
+    module Recarr;                       (* record field that is an array of records *)
+    import Out;
+    type T = record x, y: integer end;
+    type A2T = array 2 of T;             (* the type must be NAMED: an inline
+                                            `a: array 2 of T` field is refused
+                                            with "a field type expected" *)
+    type P = record a: A2T; b: integer end;
+    var r: P;
+    begin
+       r.a[0].x := 1; r.a[0].y := 2;
+       r.a[1].x := 3; r.a[1].y := 4;
+       r.b := 5;
+       Out.Int(r.a[0].x, 1); Out.Char(" ");
+       Out.Int(r.a[0].y, 1); Out.Char(" ");
+       Out.Int(r.a[1].x, 1); Out.Char(" ");
+       Out.Int(r.a[1].y, 1); Out.Char(" ");
+       Out.Int(r.b, 1); Out.Ln
+    end Recarr.                          (* golden: 1 2 3 4 5 *)
+
+    module Ptrarr;                       (* the same, through a pointer *)
+    import Out;
+    type T = record x, y: integer end;
+    type A2T = array 2 of T;
+    type P = record a: A2T; b: integer end;
+    type PP = pointer to P;
+    var p: PP;
+    begin
+       new(p);
+       p^.a[0].x := 6; p^.a[1].y := 7; p^.b := 8;
+       Out.Int(p^.a[0].x, 1); Out.Char(" ");
+       Out.Int(p^.a[1].y, 1); Out.Char(" ");
+       Out.Int(p^.b, 1); Out.Ln
+    end Ptrarr.                          (* golden: 6 7 8 *)
+
+Both findings stay OPEN until those two fixtures pass, and `nestedarr` must still
+pass with them.
 
 ## 4. Method — what worked, and what did not
 
