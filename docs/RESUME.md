@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         342
+    commits         343
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -1998,6 +1998,42 @@ refactoring around a path that answers wrongly risks keeping it:
 
 Both are small, both are layout/front-end rather than IR, and both are the class
 that must not be carried into the new pipeline.
+
+### 3ao. PRECONDITIONS CLOSED — and the root cause was a THIRD copy of one rule
+
+The two silent-wrong findings that gate the IR plan are closed, and the first one's
+cause is the disease the plan exists to cure.
+
+**Audit finding 1 (high) - the array-of-record field size.**  Root cause measured:
+`Field_Offset` placed a field as `(N + F - 1) * 8`, i.e. **one slot per FIELD**,
+ignoring `Total_Slots` entirely.  So in
+
+    PRec = record a: A2T; b: integer end      (A2T = array 2 of a two-slot record)
+
+`b` was placed at byte 8 - inside a[0], on top of a[0].y - which is exactly the
+observed `1 5 3 4 5`.  That is a THIRD copy of the layout arithmetic, alongside
+Total_Slots' array arm and its field arm; the field-arm edit of 3am changed nothing
+because the offset never came from there.
+
+Fixed by extracting `Field_Slots` - the ONE place the rule lives - and having BOTH
+`Total_Slots` and `Field_Offset` call it, so they cannot disagree again.  Verified:
+the reproduction prints `1 2 3 4 5`, and `tests/bc/recarr.ob2` now covers the
+by-value half as well as the pointer half (golden `1 2 3 4 5` then `6 7 8`),
+corroborated by both backends.
+
+**Audit finding 3 (medium) - the const capture.**  Now requires a genuinely quoted
+literal; a `T_Str` produced by any other path leaves `Const_Text` empty, so the
+constant takes the loud refusal instead of pushing non-literal text as pool data.
+`tests/bc/strconst.ob2` still passes, so the legitimate case is unaffected.
+
+**Why this is the plan's pattern in miniature.**  Finding 1 was not a missing
+feature or a slip: it was one rule written three times, and the fix was to write it
+once where both callers must use it.  That is exactly what M3 of 3an does for the
+base derivation, and what the lowering pass does for the calling convention.  A
+small proof that the direction pays.
+
+The IR plan's preconditions are therefore met and **M1 (the seam) is unblocked**.
+All seven suites green, 52 fixtures corroborated by both backends, zero warnings.
 
 ## 4. Method — what worked, and what did not
 

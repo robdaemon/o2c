@@ -1066,6 +1066,16 @@ package body O2c_Compiler is
 
    --  Scalar slots a record occupies, its parent's fields first: an
    --  extension's layout begins with its ancestors'.
+   --  Slots occupied by field J of record U - the ONE place this arithmetic
+   --  lives.  Total_Slots (which sizes a record) and Field_Offset (which places
+   --  a field) must agree, and they did not: the offset function counted one
+   --  slot per FIELD, so in
+   --      PRec = record a: A2T; b: integer end   (A2T = array 2 of a 2-slot record)
+   --  `b` was placed at byte 8 - inside a[0] - instead of byte 32, and writing it
+   --  clobbered a[0].y.  Declared here, defined after Total_Slots.
+   function Field_Slots (U : Natural; J : Natural; Depth : Natural)
+                         return Natural;
+
    function Total_Slots (UT : Natural; Depth : Natural := 0) return Natural is
       N : Natural := 0;
    begin
@@ -1095,30 +1105,28 @@ package body O2c_Compiler is
       begin
          while U /= 0 loop
             for F in 1 .. UTypes (U).N_F loop
-               if UTypes (U).F (F).UT = U then
-                  --  Oberon's implicit pointer: a field naming the record it
-                  --  sits in is one word, not the record again.  Recursing
-                  --  here is what the depth bound below exists to catch, and
-                  --  it caught exactly this - a list failed to lay out.
-                  N := N + 1;
-               elsif UTypes (U).F (F).UT /= 0 then
-                  if UTypes (UTypes (U).F (F).UT).Arr_Len > 0 then
-                     --  Recurse, exactly as the standalone arm above does.
-                     N := N + Total_Slots (UTypes (U).F (F).UT, Depth + 1);
-                  elsif not UTypes (UTypes (U).F (F).UT).Is_Ptr then
-                     N := N + Total_Slots (UTypes (U).F (F).UT, Depth + 1);
-                  else
-                     N := N + 1;   --  a pointer is one word
-                  end if;
-               else
-                  N := N + 1;      --  a scalar is one word
-               end if;
+               --  One rule, shared with Field_Offset.  The implicit-pointer
+               --  and depth-bound handling lives inside Field_Slots.
+               N := N + Field_Slots (U, F, Depth);
             end loop;
             U := UTypes (U).Parent;
          end loop;
       end;
       return N;
    end Total_Slots;
+
+   function Field_Slots (U : Natural; J : Natural; Depth : Natural)
+                         return Natural is
+      FU : constant Natural := UTypes (U).F (J).UT;
+   begin
+      if FU = 0 or else FU = U or else UTypes (FU).Is_Ptr then
+         --  a scalar, a field naming its own record (Oberon's implicit
+         --  pointer), or a pointer: one word each
+         return 1;
+      end if;
+      --  an array of any element, or a nested record: its own size
+      return Total_Slots (FU, Depth + 1);
+   end Field_Slots;
 
    --  Byte offset of field F of record FO, seen through a variable declared
    --  as Base_UT.  Every ancestor's fields between the two come first, which
@@ -1270,7 +1278,11 @@ package body O2c_Compiler is
                       else Base_UT);
    begin
       while U /= 0 and then U /= FO loop
-         N := N + UTypes (U).N_F;
+         --  Whole ancestor records come first - by their SLOTS, not their
+         --  field count: one field is not one slot.
+         for J in 1 .. UTypes (U).N_F loop
+            N := N + Field_Slots (U, J, 0);
+         end loop;
          U := UTypes (U).Parent;
       end loop;
       if U = 0 then
@@ -1280,7 +1292,11 @@ package body O2c_Compiler is
            "bytecode backend: a field's owning record is not on the "
            & "variable's type chain";
       end if;
-      return (N + F - 1) * 8;
+      --  ... and the fields of FO before F.
+      for J in 1 .. F - 1 loop
+         N := N + Field_Slots (FO, J, 0);
+      end loop;
+      return N * 8;
    end Field_Offset;
 
    --  True when every field of the record, and of each of its ancestors, is
@@ -5102,7 +5118,17 @@ package body O2c_Compiler is
       --  Text that is not a plain literal leaves Const_Usable false, and using
       --  it in bytecode mode is refused where the constant is used rather than
       --  silently reading a zero.
-      if V.Typ = T_Str and then Length (V.Text) > 0 then
+      if V.Typ = T_Str
+        and then Length (V.Text) >= 2
+        and then To_String (V.Text) (To_String (V.Text)'First) = '"'
+        and then To_String (V.Text) (To_String (V.Text)'Last) = '"'
+      then
+         --  Only a genuine string LITERAL is captured.  T_Str is also produced
+         --  by non-literal paths (a string-valued call or parameter), and
+         --  pushing one of those as pool text would be a silently wrong value;
+         --  leaving Const_Text empty sends the constant to the loud refusal
+         --  instead.  (Audit finding 3; reported as medium and unconfirmed, but
+         --  the guard costs nothing and closes it.)
          Syms (N_Sym).Const_Text := V.Text;
       end if;
       if V.Folds then
