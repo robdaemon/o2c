@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         339
+    commits         340
     fixtures        80 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -1846,6 +1846,45 @@ the differential globs tests/bc/*.out, so a stray golden breaks that too):
 
 Both findings stay OPEN until those two fixtures pass, and `nestedarr` must still
 pass with them.
+
+### 3al. AUDIT FIXES, attempt 3 — two mechanisms pinned by measurement
+
+Attempted again and reverted again, but this round produced MEASUREMENTS that pin
+the mechanism, which the first two rounds did not.
+
+**Measured 1: removing the base derivation from the user-element branch breaks a
+landed fixture.**  With only the scaling left (`Push_Int (row bytes); Mul; Add`),
+`nestedarr` fails with `vm: operand-stack depth violation`.  So the SCALAR SIBLING
+BLOCK DOES NOT PUSH THE BASE for a user-typed element, and the branch must derive
+it itself.  That contradicts 3ak's inference (drawn from `nestedarr` regressing
+there) and settles the question in the opposite direction.
+
+**Measured 2: the pointer-field case never reached the branch at all.**  In the
+unfixed tree, `p^.a[0].x` refuses with
+
+    bytecode error: an array needs a non-zero length
+
+which is `Global_Array` being handed a POINTER's `Total_Slots` - zero.  That is
+exactly what the audit predicted for its finding 2, now observed rather than
+argued.
+
+**So the fix is neither of the two attempted shapes**: derive the base in this
+branch - as 3ac did, since nothing else will - but derive it the way the sibling
+does, with the `Is_Ptr` and `Nested` handling, instead of calling `Global_Array`
+on whatever the base type happens to be.  That is the audit's required change
+verbatim; what failed was my two approximations of it, and the reason is visible
+now: 3ak's version applied the sibling's `+ Nested/8` term to a case where the
+sibling had already contributed nothing, and this round removed the derivation
+outright on the strength of an inference the depth violation disproves.
+
+**The next step is an instrumented run, not another patch**: print
+`D.Base_On_Stack`, `Nested`, whether the base is on the stack at the scaling, and
+the base type's `Is_Ptr`/`Total_Slots`, for BOTH `nestedarr`'s `m[i][j]` and
+`recarr`'s `p^.a[i]`.  One print answers what three patches have not: which of the
+two cases reaches the branch with a base, and which needs one built.
+
+`recarr` and `ptrarr` fixtures remain in 3ak as sources.  Both findings stay OPEN,
+and `nestedarr` must pass with them.
 
 ## 4. Method — what worked, and what did not
 
