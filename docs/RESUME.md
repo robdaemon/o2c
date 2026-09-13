@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         332
+    commits         333
     fixtures        79 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -1541,6 +1541,44 @@ next step, and it is one comparison, not a hunt.
 
 **Reverted**, because a compiler that raises is worse than one that refuses, and
 the item stays refused meanwhile.
+
+
+### 3af. ITEM 3 — the refusal is gone, the VALUE is wrong; reverted
+
+With the string-constant path in place the refusal disappears and the progress
+metric advances again:
+
+    hello.ob2:  'Greeting' ... -> 'Geom.Sqr is not yet supported'
+
+but the fixture, which is what actually decides, prints the WRONG value:
+
+    expected:  hello from Oberon-2
+               again hello from Oberon-2
+    measured:  0
+               0 0
+
+`0` is `Push_Int (Const_Val)` - the integer path, i.e. `Const_Text` was empty, so
+the guard `Length (Const_Text) = 0` was true and the pool push never ran.  So the
+capture at the declaration still does not fire, even though the 3ae trace showed
+`text='"hello from Oberon-2"'` at that very point and the capture is inserted after
+the symbol aggregate, not before it.  That is the remaining question and it is a
+one-print answer: report `Length (Syms (N_Sym).Const_Text)` immediately after the
+capture, and `Is_Open` / `AU` / `N` / `CArg` inside the `Out.String` handler.
+
+Two things this attempt settled, both worth keeping:
+
+- the `Out.String` handler indexed `UTypes (AU)` with `AU = 0` for anything that
+  has no user type - an open array, and now a string constant pushed as a pool
+  string.  Its own `AU > 0` test two lines below already assumed a guard that was
+  missing from the `N` computation, and that asymmetry is what raised
+  `CONSTRAINT_ERROR ... index check failed` the moment a constant was accepted;
+- an early `return R` in the factor path is NOT equivalent to falling through: the
+  shared tail consumes the identifier with `Next` and sets `R.Text`, and skipping
+  it produced `expected ')' ... found ident 'Greeting'`.  The push has to be
+  suppressed (a guard on the integer push), not short-circuited.
+
+Reverted: a wrong answer is worse than a refusal, which is the whole point of this
+backend.  Item 3 stays refused.
 
 
 ## 4. Method — what worked, and what did not
