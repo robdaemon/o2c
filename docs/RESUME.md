@@ -6,8 +6,8 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         311
-    fixtures        78 in tests/bc/
+    commits         330
+    fixtures        79 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
 
@@ -1468,6 +1468,42 @@ Both rules from this item are now repo-wide, in `AGENTS.md` under
 (`record f: File; pos: longint; eof: boolean; res: integer; cur: A1 end`) - so the
 next question is how a record lays out when its description came from another
 module.
+
+
+### 3ad. DONE — item 2: a record with a LONGINT field, by value
+
+The checklist called item 2 "an imported record (`Files.Rider`)".  The CAUSE is
+more general and was measured, not guessed: `Fields_Allowed`'s list of whole-slot
+scalars omitted `T_Long`, so ANY record with a `longint` field was refused -
+imported or local - and `Files.Rider` (`f: File; pos: longint; eof: boolean;
+res: integer; cur: A1`) was simply the first one the program met.
+
+The measurement that settled it, and the reason it is worth recording:
+
+    hello.ob2     CHK rec=Files.Rider fld='pos' typ=T_LONG scalar=FALSE   <- refused
+    e3 (old probe) no CHK line at all, and it PASSED
+
+`e3` declared only a POINTER to such a record.  The field rule runs only for a
+variable whose type IS the record, so the old probe never exercised it - the same
+blind spot as the `array of char` probes and the offset-0 probes, caught this time
+because both cases were measured rather than one (the rule AGENTS.md now carries).
+
+**Fixed** in all three slot lists - a record field, a fixed array's element, and a
+standalone array variable's element - since a LONGINT is one whole slot in every
+one of those positions.  **Fixture**: `tests/bc/longfield.ob2`, which declares the
+record BY VALUE precisely so the rule runs, and cannot pass against a pointer-only
+shape.
+
+**Metric**: `hello.ob2` now refuses at
+
+    'Greeting' is not a constant INTEGER expression, so its value cannot be pushed
+
+- i.e. the whole TYPE BLOCK of a 530-line, 18-import program is now accepted, and
+the next blocker is a different class: a `CONST` whose value the backend cannot
+push.  That is item 3.
+
+All seven suites green, 50 fixtures corroborated by both backends (up from 49),
+zero warnings.
 
 
 ## 4. Method — what worked, and what did not

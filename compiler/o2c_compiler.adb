@@ -1297,7 +1297,13 @@ package body O2c_Compiler is
               or else UTypes (U).F (J).Typ = T_Bool
               or else UTypes (U).F (J).Typ = T_Set
               or else UTypes (U).F (J).Typ = T_Real
-              or else UTypes (U).F (J).Typ = T_LReal;
+              or else UTypes (U).F (J).Typ = T_LReal
+              --  LONGINT is one whole slot too.  Omitting it here is what
+              --  refused Files.Rider (`pos: longint`), and with it every
+              --  variable whose type IS that record - while a POINTER to such a
+              --  record passed, because the rule only runs for the record
+              --  itself.  Measured: 'pos' typ=T_LONG scalar=FALSE.
+              or else UTypes (U).F (J).Typ = T_Long;
             if not Slot_Scalar then
                return False;
             end if;
@@ -1317,6 +1323,8 @@ package body O2c_Compiler is
                     or else UTypes (UTypes (U).F (J).UT).Elem = T_Bool
                     or else UTypes (UTypes (U).F (J).UT).Elem = T_Set
                     or else UTypes (UTypes (U).F (J).UT).Elem = T_Real
+                           or else UTypes (UTypes (U).F (J).UT).Elem
+                             = T_Long
                            or else UTypes (UTypes (U).F (J).UT).Elem
                              = T_LReal)
             then
@@ -5283,7 +5291,8 @@ package body O2c_Compiler is
                               or else UTypes (UT).Elem = T_Int
                               or else UTypes (UT).Elem = T_Char
                               or else UTypes (UT).Elem = T_Bool
-                              or else UTypes (UT).Elem = T_Real);
+                              or else UTypes (UT).Elem = T_Real
+                              or else UTypes (UT).Elem = T_Long);
                   Ok_Ptr : constant Boolean := UTypes (UT).Is_Ptr;
                   --  A procedure value is one slot - a procedure id - so a
                   --  variable of that type is as ordinary as a pointer.
