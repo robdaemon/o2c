@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         331
+    commits         332
     fixtures        79 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean

@@ -133,6 +133,19 @@ source cannot.
   designator to stop dropping a subscript. A wrong size belongs in the plan on
   the day it is found, not after the chase.
 
+- **An edit that silently does nothing looks exactly like a fix that did not
+  work.** Four times in one stretch, "the behaviour did not change" turned out to
+  mean *the edit never happened*: a `str.replace` that matched nothing (a stale
+  line number; an anchor with the wrong indentation), a capture guarded on a
+  condition that could not be true (`V.Lit` is false for a string constant, so
+  the guard never fired, and the refusal that stayed looked like the fix failing),
+  and a tool built before the change. Before concluding anything from what
+  something *does*, confirm the artefact contains your change: print it, trace
+  it, or `strings` the binary. The existing "confirm the tool contains your
+  change" check applies to source and document edits too - the failure mode is
+  identical, and a refusal that "stayed the same" is not evidence when the edit
+  may not have landed.
+
 ## Repository conventions
 
 - Builds are serial; never `make -jN`.
