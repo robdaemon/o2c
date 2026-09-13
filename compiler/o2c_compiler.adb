@@ -2,6 +2,7 @@ with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with O2c_Lexer;
 with O2c_BC;
+with O2c_Ir;
 with Interfaces;
 
 package body O2c_Compiler is
@@ -12053,6 +12054,12 @@ procedure Compile_Module (Source : String; Is_Lib : Boolean;
               & " of Boolean;" & ASCII.LF
               & "   type O2c_Set is mod 2**32;" & ASCII.LF
               & "end O2c_Types;" & ASCII.LF));
+      --  The IR is initialized once per compilation.  M1 is the seam only:
+      --  nothing builds quads yet, and this call exists so the package is
+      --  REACHED - gprbuild compiles only what a main can reach, and an
+      --  unreached unit passes while checking nothing (AGENTS.md).
+      O2c_Ir.Init;
+
       --  M38: compile the builtin Oakwood modules first so that user
       --  modules and the main can import them.
       --

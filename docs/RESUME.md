@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         343
+    commits         344
     fixtures        81 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -2034,6 +2034,53 @@ small proof that the direction pays.
 
 The IR plan's preconditions are therefore met and **M1 (the seam) is unblocked**.
 All seven suites green, 52 fixtures corroborated by both backends, zero warnings.
+
+### 3ap. M1a DONE - the IR seam lands, and nothing moves
+
+`compiler/o2c_ir.ads/.adb` exist: the three-address IR over typed values, with a
+closed `Op` set, builders, and the iteration interface a backend will walk.
+
+    type Op is (Op_Nop, Op_Copy, Op_Add..Op_Ge, Op_Not/And/Or,
+                Op_Load, Op_Store, Op_Addr_Local, Op_Addr_Global,
+                Op_Label, Op_Jump, Op_Jump_False,
+                Op_Arg, Op_Call, Op_Return, Op_Halt);
+
+The set is CLOSED on purpose: every consumer cases over it, so an op with no
+lowering is a build error in the consumer instead of a silently empty image -
+which is the structural fix this whole plan exists for.  `Op_Arg` quads keep
+calls three-address rather than needing an argument list in the quad.
+
+The tables are HEAP-allocated and sized by `Init`: the compiler itself runs in
+the guest, whose user stack is 256 KiB, so nothing large is declared statically.
+Overflow is reported, never truncated, and the initial capacity is deliberately
+modest (4_096 values / 16_384 quads / 1_024 labels) because M1 has no consumer
+yet - sized for M2, to be revisited with a written justification when one
+arrives, per the project's capacity rule.
+
+**Reachability.**  `Init` is called once from `Compile_Multi`.  That is not
+decoration: gprbuild compiles only what a main can reach, so an unreached unit
+passes while checking nothing (AGENTS.md), and the call is behaviour-neutral.
+
+**Verification.**  All seven suites green with 52 fixtures corroborated by both
+backends - UNCHANGED, which is the point: M1a adds no behaviour and no fixture
+may move.  Zero warnings.
+
+**Two Ada rules that cost two builds here, both worth carrying forward**, since
+the IR will declare more subprograms:
+
+- a body that completes a declaration must repeat the spec's default
+  expression, and it must match TEXTUALLY.  `Max_Values : Natural := 4_096` in
+  the spec against `:= Default_Values` in the body is a mismatch even though the
+  constant is that literal - which is why the body now uses the literal too;
+- a forward declaration with a default plus a body with the same default is
+  fine (that is how `Total_Slots`/`Field_Slots` were made mutually recursive),
+  so the rule is about the pair being identical, not about where the default is
+  written.
+
+**M1b, next**: a host self-test that builds a small quad stream and checks the
+dump, so the builders are VERIFIED rather than merely compiled - M1a's evidence
+is that nothing changed, which is the right evidence for a seam and not enough
+for a builder.
 
 ## 4. Method — what worked, and what did not
 
