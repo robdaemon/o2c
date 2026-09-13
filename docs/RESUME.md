@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         333
+    commits         335
     fixtures        79 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -1594,6 +1594,41 @@ breaks `run_bc`, which is why it did not stay in `tests/bc/`):
 
     golden:  hello from Oberon-2
              again hello from Oberon-2
+
+
+### 3ag. ITEM 3 — three fixes, no change; handed to the subagent
+
+The string-constant path now fires on both sides, proven by traces:
+
+    CAPTURED 'Greeting' len= 21 text='"hello from Oberon-2"'
+    USECONST 'Greeting' len= 21        (x3, once per use)
+
+and `Out.String` still prints `0` - while the CONTROL case,
+`Out.String ("a literal")`, prints its text.  Three further edits changed nothing:
+
+- `R.CStr := False` (mirroring the literal, measured as typ=T_STR lit=FALSE
+  cstr=FALSE against my cstr=TRUE) - no change;
+- excluding `S_Const` from the `Find (A.Text) > 0` block in the `Out.String`
+  handler, since a constant is not a variable and the literal never enters that
+  block at all - no change;
+- the `UTypes (AU)` guard for `AU = 0`.
+
+The traces firing is what rules out the "edit silently did nothing" explanation:
+these edits ARE in the compiler, and the behaviour is unchanged anyway.  Which
+means the emission that produces `0` is somewhere else entirely, and I have been
+guessing at code paths in an 11k-line front end for three turns - the identical
+situation to item 1, which ended only when the question was handed to a read-only
+pass.
+
+So: reverted (a wrong answer must not land), and the question is now precise and
+narrow enough to hand over:
+
+    For `Out.String (<string CONST>)` in bytecode mode, where is the `0`
+    emitted?  The argument's text IS interned with O2c_BC.Push_Str at the use
+    site, and `Out.String ("literal")` works.  Find the code that emits the call
+    for each of those two arguments and report the difference.
+
+The fixture and its golden stay in 3af until a fix passes them.
 
 
 ## 4. Method — what worked, and what did not
