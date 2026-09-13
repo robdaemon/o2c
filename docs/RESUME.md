@@ -6,7 +6,7 @@ operators, construct coverage, and descending FOR.
 Read this first; the details live in `docs/bytecode-gaps.md`.
 
     HEAD            find it with:  git log --oneline -1
-    commits         336
+    commits         337
     fixtures        80 in tests/bc/
     foreign natives 25 in vm/obc_vm.adb
     state           all suites green, zero warnings, tree clean
@@ -1675,6 +1675,48 @@ block and the constant are behind us, and the next item is a USER LIBRARY
 procedure call, which is a different class from everything in 3w-3ah.  Its size is
 not yet measured, and per the sizing rule it should be measured before it is
 worked.
+
+
+### 3ai. ITEM 4 SIZED — it is 3d, and it is milestone work
+
+Measured before working it (the sizing rule), and the answer changes the plan.
+
+**Why `Geom.Sqr` refuses**: the factor path's default refusal, i.e. its export
+carries no bytecode id.  User libraries are compiled in ADA mode by
+`Compile_Multi` - they are compiled *before* `Begin_Mode`, exactly as the builtins
+were before 3m - so none of their procedures has an id.
+
+**Libraries are NOT blocked by type coverage**: in library shape, `geom.ob2`
+compiles to bytecode (856 bytes).  Two earlier attempts at this measurement were
+harness artifacts of mine, both worth recording because they are the same two
+mistakes already in AGENTS.md:
+
+- compiling a library AS A MAIN MODULE gives M20 export errors
+  (`exported VARIABLE 'origin': its RECORD type must be exported`), which is an
+  artifact of the shape, not a property of the source;
+- `sed 's/\*//g'` to strip export marks also strips MULTIPLICATION operators, so
+  `x * x` became `x  x` and the compile died as `'k' is not a declared
+  procedure`.  Stripping `*` only when it follows an identifier char, and
+  checking `grep -n "x \* x"` afterwards, gives a harness that is actually the
+  one intended.
+
+**So item 4 is 3d.**  It needs:
+
+    (a) user libraries compiled in bytecode mode - a Compile_Multi ordering
+        change, the same SHAPE as the builtin scoping of 3m, whose compilation
+        half is already landed (End_Body, 3m);
+    (b) the cross-module VALUE TRANSPORT defect that 3d is parked on - measured
+        there as: identical LOCAL shapes work (e1/e2/e3), cross-module returns a
+        wrong value (u3) or a malformed image (u4).
+
+That is milestone-sized, not a checklist item, and it is the same defect that
+already defeated one attempt.  Recording it here rather than starting it: the
+work is worth doing with the tools now available (the export-id threading landed
+in 3l, the `explore` subagent has since named two sites in one pass each, and u3
+and u4 are small reproductions), but it is a decision about where to spend a
+milestone, not a next-step.
+
+Metric unchanged: `hello.ob2` refuses at `Geom.Sqr`.
 
 
 ## 4. Method — what worked, and what did not
